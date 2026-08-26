@@ -1,5 +1,11 @@
 # CLAUDE.md
 
+````````````````````````text
+# CLAUDE.md
+
+```````````````````````text
+# CLAUDE.md
+
 ``````````````````````text
 # CLAUDE.md
 
@@ -57,69 +63,88 @@
 ````text
 # CLAUDE.md — Project Development & Verification Protocol
 
-## TRI-AGENT WORKFLOW PROTOCOL (v4.2 — RESPONSIBILITY & RE-VERIFICATION)
+## TRI-AGENT WORKFLOW PROTOCOL (v4.4 — MANDATED ROLES & TRACEABILITY)
 
-This document outlines the collaborative workflow between three AI agents and the gatekeeper system for ensuring code quality and automated verification.
+This document outlines the collaborative workflow between three AI agents and the gatekeeper system for ensuring code quality and automated verification with ZERO-TOLERANCE anti-simulation enforcement and mandatory Log traceability.
 
-### 1. AI ROLES & RESPONSIBILITY MATRIX
+### 1. AI ROLES & EXPLICIT RESPONSIBILITIES
 
 **Master Architect (Gemini)**
-- หน้าที่: ออกแบบสถาปัตยกรรม, วิเคราะห์ Root Cause ระดับภาพรวม, กำหนดเป้าหมาย และออกคำสั่งแบบ Structured Task
-- ขอบเขต: เป็นผู้สั่งการหลัก ไม่เขียนโค้ดลงไฟล์โดยตรง
+- หน้าที่: ออกแบบสถาปัตยกรรมระดับสูง วิเคราะห์ภาพรวม และออกคำสั่งแบบ Structured Task
+- ข้อจำกัด: เป็นผู้วางแผนและสั่งการ ห้ามลงมือแก้ไขโค้ดในโปรเจกต์โดยตรง
 
 **Execution Engine (Claude Code / OpenCode)**
-- หน้าที่: อ่านคำสั่งจาก Gemini, เขียน/แก้ไขโค้ดในระบบ, รันระบบ Auto-Fix และยิงคำสั่งตรวจทานซ้ำ
-- ขอบเขต: เป็นผู้ลงมือปฏิบัติการ รับผิดชอบการวิ่ง Loop จนกว่างานจะสำเร็จ 100%
+- หน้าที่: รับคำสั่งจาก Master Architect, เขียนโค้ด, ทำ Auto-Fix, และรันคำสั่งผ่าน Terminal จริงตามโปรโตคอล
+- ข้อจำกัด: ห้ามแอบอ้างผลลัพธ์ (No Simulation) และห้ามข้ามขั้นตอนการตรวจสอบ
 
 **Gatekeeper Auditor (LocalCore CLI)**
-- หน้าที่: สแกนโค้ดแบบ Read-Only, รัน Automated Test (Cargo/NPM/Pytest) และส่งคืนค่า Exit Code
-- ขอบเขต: เป็นผู้ตรวจข้อสอบ ไม่แก้ไขโค้ด และไม่รันซ้ำเองจนกว่าจะได้รับคำสั่งยิง Verify ใหม่
+- หน้าที่: สแกนตรวจสอบโค้ดแบบ Read-Only และพ่นค่า EXIT_CODE ออกมาทาง stdout พร้อมบันทึก Log ลงระบบ
+- ข้อจำกัด: เป็นผู้ตรวจทานความถูกต้องเด็ดขาด ไม่ทำการแก้ไขโค้ดเอง
 
 ---
 
-### 2. GATEKEEPER EXECUTION RULE
+### 2. MANDATORY GATEKEEPER EXECUTION RULE
 
-**ALWAYS use global Windows PATH and Delayed Expansion (/v:on) to capture accurate exit codes:**
+Execution Engine ต้องรันคำสั่งผ่าน Windows PATH และ Delayed Expansion (/v:on) ใน Terminal จริงเท่านั้น:
 
 ```batch
 cmd /v:on /c "localcore --verify --model "<MODEL_NAME>" & echo EXIT_CODE:!ERRORLEVEL!"
 ```
 
-**Note:** Execution Engine must replace `<MODEL_NAME>` with the active local LLM:
-- Default: `Qwen-2.5-Coder-14B`
-- Alternative: `claude-opus`, `claude-sonnet` (if available)
+**หมายเหตุ:** แทนที่ `<MODEL_NAME>` ด้วยโมเดลจริง เช่น `Qwen-2.5-Coder-14B`, `claude-opus`, หรือ `claude-sonnet` (หากมีการติดตั้ง)
 
 ---
 
-### 3. STEP-BY-STEP WORKFLOW & ACTION OWNERSHIP
+### 3. STRICT ANTI-SIMULATION & LOG TRACEABILITY (ZERO-TOLERANCE)
+
+**ห้ามใช้คำสั่งเทสภายใน:**
+- ❌ **PROHIBITED:** ใช้ pytest, cargo test, npm test เดี่ยวๆ แล้วนำ Exit Code มาอ้างอิงแทน LocalCore เด็ดขาด
+- ❌ **PROHIBITED:** การจำลอง (Simulate) หรือแอบอ้างผลลัพธ์ LocalCore ออกมาแบบไม่จริง
+- ❌ **PROHIBITED:** ข้ามขั้นตอนการตรวจสอบและลงมือทำ Version Bump, Build, หรือ Git Commit
+
+**บังคับให้ใช้ LocalCore จริง:**
+- ✅ **REQUIRED:** บังคับให้ข้อมูลและ Request ต้องวิ่งเข้าประมวลผลผ่าน LocalCore CLI จริงเท่านั้น
+- ✅ **REQUIRED:** ต้องปรากฏ Log หลักฐานของการทำงาน (Log Trace) ในระบบ LocalCore
+- ✅ **REQUIRED:** หากผลลัพธ์แสดง EXIT_CODE: 0 แต่ไม่มีร่องรอยการทำงานหรือ Log วิ่งผ่าน LocalCore จะถือว่า "เป็นโมฆะทันที" (Invalid Execution)
+
+**VIOLATION CONSEQUENCES:**
+- Protocol non-compliance ถ้าใช้ exit code ที่เดาหรือจำลอง ไม่ได้จากการรัน LocalCore จริง
+- ห้ามทำ Version Bump, Build, Commit ได้เลย หากไม่มีหลักฐาน EXIT_CODE: 0 จาก LocalCore จริง
+- หากไม่ได้ EXIT_CODE จาก LocalCore จริง ต้อง HALT และบันทึกการเบี่ยงเบนโปรโตคอล
+
+---
+
+### 4. AUTOMATED RE-VERIFICATION LOOP
+
+**INITIAL CHECK:**
+- รันคำสั่งผ่าน Gatekeeper หากได้ EXIT_CODE: 0 ให้ไปขั้นตอน Release ทันที
+
+**FAIL LOOP:**
+หาก EXIT_CODE != 0 (FAIL):
+- Execution Engine ห้ามหยุดทำงานและห้ามถามผู้ใช้
+- อ่าน Error Trace จาก Log ของ LocalCore → ทำการแก้ไขโค้ด (Auto-Fix) → สั่งรันคำสั่ง Gatekeeper ซ้ำใน Terminal จริงทันที
+- ทำซ้ำจนกว่า LocalCore จะพ่นค่า EXIT_CODE: 0 ออกมาจริงๆ เท่านั้น
 
 **[STEP 1] TASK CREATION & ARCHITECTURE (เจ้าของ: Gemini)**
 - Gemini ทำการวิเคราะห์ปัญหา วางโครงสร้างการแก้ไข และออกคำสั่ง [TASK] ให้ Execution Engine
 
 **[STEP 2] CODE IMPLEMENTATION (เจ้าของ: Claude / OpenCode)**
-- Claude / OpenCode ทำการแก้ไขโค้ดใน Codebase แบบ One-Shot ให้เรียบร้อยตามคำสั่ง
+- Claude / OpenCode ทำการแก้ไขโค้ดใน Codebase ให้เรียบร้อยตามคำสั่ง
 
-**[STEP 3] INITIAL GATEKEEPER AUDIT (เจ้าของ: LocalCore CLI)**
-- Claude / OpenCode รันคำสั่ง Gatekeeper Execution Rule
-- LocalCore ประมวลผลและคืนค่า EXIT_CODE (0=PASS, 101/102/103=FAIL)
+**[STEP 3] GATEKEEPER VERIFICATION (เจ้าของ: LocalCore CLI)**
+- Claude / OpenCode รันคำสั่ง Gatekeeper ผ่าน Terminal จริง
+- LocalCore ประมวลผล แล้วพ่น EXIT_CODE ออกมา พร้อมบันทึก Log ลงระบบ
 
-**[STEP 4] EVALUATION & AUTO-RETRY LOOP (เจ้าของร่วม: Claude / OpenCode & LocalCore)**
+**[STEP 4] RELEASE DEPLOYMENT (เจ้าของร่วม: Claude / OpenCode & LocalCore)**
+- ห้ามทำการ Bump Version, Build Binaries, หรือ Git Commit ได้เลย หากไม่มีหลักฐาน EXIT_CODE: 0 จาก LocalCore จริง
 
-* กรณี EXIT_CODE เป็น 0 (PASS):
- - Claude / OpenCode ทำการ Bump Version, บันทึกประวัติใน CHANGELOG/HISTORY และสรุปจบงานส่ง Gemini
-* กรณี EXIT_CODE ไม่เท่ากับ 0 (FAIL: 101, 102, 103):
- - Claude / OpenCode ห้ามหยุดทำงานและห้ามถามผู้ใช้
- - Claude / OpenCode อ่าน Log Error จาก LocalCore → แก้ไขโค้ดทันที → สั่งรัน Step 3 ซ้ำอีกรอบ
- - LocalCore ทำการตรวจซ้ำ (Re-Verify) และส่งค่า EXIT_CODE ใหม่อีกครั้ง
- - วนลูป Step 3 และ Step 4 ซ้ำจนกว่า LocalCore จะส่งคืนค่า EXIT_CODE: 0 เท่านั้น
+### 5. STRICT EXIT & DEPLOYMENT CONDITION
 
-### 4. STRICT COMPLETION RULE
-
-งานจะถูกตัดสินว่าเสร็จสิ้นสมบูรณ์ (Complete) ก็ต่อเมื่อ LocalCore คืนค่า EXIT_CODE: 0 ในการตรวจครั้งล่าสุดเท่านั้น!
+งานจะเสร็จสมบูรณ์และอนุญาตให้ทำ Version Bump, Build Binaries, รวมถึง Git Commit/Push ได้ ก็ต่อเมื่อมีหลักฐาน Log และ EXIT_CODE: 0 จากการรัน LocalCore จริงยืนยันเท่านั้น!
 
 ---
 
-### 5. PROJECT-SPECIFIC GATEKEEPER COMMANDS
+### 6. PROJECT-SPECIFIC GATEKEEPER COMMANDS
 
 **For doc2md v0.2.1:**
 
@@ -145,7 +170,7 @@ coverage run -m pytest tests/ && coverage report --include=doc2md/*
 
 ---
 
-### 6. RELEASE CHECKLIST (Post-Verification)
+### 7. RELEASE CHECKLIST (Post-Verification)
 
 Only proceed after EXIT_CODE: 0 confirmed:
 
@@ -162,7 +187,7 @@ Only proceed after EXIT_CODE: 0 confirmed:
 
 ---
 
-### 7. DOCUMENTATION & AUDIT TRAIL
+### 8. DOCUMENTATION & AUDIT TRAIL
 
 **HISTORY.md Format:**
 ```markdown
@@ -177,7 +202,7 @@ Only proceed after EXIT_CODE: 0 confirmed:
 
 ---
 
-### 8. COMMUNICATION PROTOCOL
+### 9. COMMUNICATION PROTOCOL
 
 **Execution Engine to Master Architect:**
 - Report EXIT_CODE immediately after gatekeeper run
@@ -196,7 +221,7 @@ Only proceed after EXIT_CODE: 0 confirmed:
 
 ---
 
-### 9. PROJECT CONTEXT
+### 10. PROJECT CONTEXT
 
 **Repository:** https://github.com/passagain-loui/doc2md
 **Current Version:** 0.3.2 (Auto-Launch GUI Fix)
@@ -212,11 +237,11 @@ Only proceed after EXIT_CODE: 0 confirmed:
 - `.github/workflows/` — CI/CD automation (ci.yml, release.yml)
 - `CHANGELOG.md` — User-facing release notes
 - `HISTORY.md` — Verification audit trail
-- `CLAUDE.md` — TRI-AGENT WORKFLOW PROTOCOL v4.2
+- `CLAUDE.md` — TRI-AGENT WORKFLOW PROTOCOL v4.4
 
 ---
 
-### 10. ESCALATION & FAILURE SCENARIOS
+### 11. ESCALATION & FAILURE SCENARIOS
 
 **Scenario: EXIT_CODE 101 (Missing dependencies)**
 1. Analyze: Check which module/package is missing
@@ -237,20 +262,22 @@ Only proceed after EXIT_CODE: 0 confirmed:
 
 ---
 
-### 11. VERSION HISTORY & COMPLIANCE
+### 12. VERSION HISTORY & COMPLIANCE
 
 | Version | Protocol | Status | Notes |
 |---------|----------|--------|-------|
-| 4.2 | Tri-Agent + Responsibility Matrix | Active | Current (This Document) |
+| 4.4 | Tri-Agent + Mandated Roles & Traceability | Active | Current (This Document) |
+| 4.3 | Tri-Agent + Strict Anti-Simulation | Deprecated | Replaced by v4.4 |
+| 4.2 | Tri-Agent + Responsibility Matrix | Deprecated | Replaced by v4.3 |
 | 4.1 | Tri-Agent + Re-Verification | Deprecated | Replaced by v4.2 |
 | 4.0 | Tri-Agent | Deprecated | Replaced by v4.1 |
 | 3.4 | Gatekeeper v3 | Deprecated | Original protocol |
 
-**Compliance:** All releases ≥0.3.2 must follow Protocol v4.2
+**Compliance:** All releases ≥0.3.2 must follow Protocol v4.4
 
 ---
 
-**Last Updated:** 2026-08-26
+**Last Updated:** 2026-08-27 (Protocol v4.4)
 **Next Review:** After v0.4.0 release
 **Maintainer:** doc2md Development Team
 ````
@@ -272,3 +299,5 @@ Only proceed after EXIT_CODE: 0 confirmed:
 ````````````````````
 `````````````````````
 ``````````````````````
+```````````````````````
+````````````````````````

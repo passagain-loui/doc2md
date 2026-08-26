@@ -1,5 +1,11 @@
 # CHANGELOG.md
 
+``````````````````````````text
+# CHANGELOG.md
+
+`````````````````````````text
+# CHANGELOG.md
+
 ````````````````````````text
 # CHANGELOG.md
 
@@ -66,17 +72,19 @@
 All notable changes to `doc2md` are documented here.
 Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
 
-## [0.3.10] - 2026-08-26
+## [0.3.10] - 2026-08-27
 
 ### Added
 
 - **FFmpeg Binary Bundling:** PyInstaller now attempts to bundle `ffmpeg.exe` and `ffprobe.exe` binaries if available on system PATH. Inno Setup installer includes bundled binaries for out-of-the-box audio conversion.
+- **Version Embedding in GUI:** Application title now displays the current version (e.g., "doc2md Converter v0.3.10"), providing clear version visibility to users.
 - **Enhanced Standalone Build:** Audio processing now works without requiring separate FFmpeg installation on target systems (if bundled during build).
 
 ### Enhanced
 
 - Build scripts now gracefully handle FFmpeg availability with informative logging.
 - Improved documentation for optional dependencies and bundled binaries.
+- Version tracking: `__version__` from `doc2md/__init__.py` now displayed in GUI title bar.
 
 ## [0.3.9] - 2026-08-26
 
@@ -268,3 +276,5 @@ Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
 ``````````````````````
 ```````````````````````
 ````````````````````````
+`````````````````````````
+``````````````````````````

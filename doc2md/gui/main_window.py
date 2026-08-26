@@ -13,6 +13,7 @@ try:
 except ImportError:
     raise ImportError("customtkinter is required for GUI. Install via: pip install 'doc2md[gui]'")
 
+from doc2md import __version__
 from doc2md.core.converter import Converter
 from doc2md.core.exporter import export_markdown
 
@@ -31,7 +32,7 @@ class MainWindow:
 
     def __init__(self, root: ctk.CTk):
         self.root = root
-        self.root.title("doc2md Converter")
+        self.root.title(f"doc2md Converter v{__version__}")
         self.root.geometry("900x700")
         self.root.minsize(700, 500)
 
