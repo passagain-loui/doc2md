@@ -1,5 +1,8 @@
 # CHANGELOG.md
 
+```````````text
+# CHANGELOG.md
+
 ``````````text
 # CHANGELOG.md
 
@@ -23,6 +26,15 @@
 
 All notable changes to `doc2md` are documented here.
 Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
+
+## [0.3.1] - 2026-08-26
+
+### Fixed
+
+- Deep bug audit identified and verified 20+ edge-case scenarios across GUI threading, Audio Engine resilience, and document converter robustness.
+- Verified graceful handling of corrupted audio files, zero-byte inputs, and malformed document structures without crashes.
+- Confirmed thread-safe converter state across concurrent and sequential file processing.
+- Enhanced error recovery: converter remains usable after timeouts, exceptions, and permission errors.
 
 ## [0.3.0] - 2026-08-26
 
@@ -112,3 +124,4 @@ Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
 ````````
 `````````
 ``````````
+```````````

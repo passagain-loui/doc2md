@@ -1,5 +1,8 @@
 # CLAUDE.md
 
+`````````text
+# CLAUDE.md
+
 ````````text
 # CLAUDE.md
 
@@ -241,3 +244,4 @@ Only proceed after EXIT_CODE: 0 confirmed:
 ``````
 ```````
 ````````
+`````````
