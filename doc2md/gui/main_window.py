@@ -1,4 +1,4 @@
-"""Main GUI window with CustomTkinter dark theme and drag-and-drop support."""
+"""Main GUI window with CustomTkinter pastel theme and native (windnd) drag-and-drop support."""
 
 from __future__ import annotations
 
@@ -19,14 +19,18 @@ from doc2md.core.exporter import export_markdown
 
 logger = logging.getLogger(__name__)
 
-# macOS Modern dark theme colors
-CTK_BG = "#0a0e27"  # Deep charcoal background
-CTK_CARD = "#1a1f3a"  # Modern card slate
-CTK_ACCENT_BLUE = "#3b82f6"  # Vibrant primary blue
-CTK_ACCENT_CYAN = "#06b6d4"  # Cyan accent
-CTK_TEXT = "#f0f4f8"  # Clean light text
-CTK_BORDER = "#2d3748"  # Subtle border color
-CTK_SECONDARY_TEXT = "#a0aec0"  # Secondary text color
+# Pastel UI theme colors
+CTK_BG = "#faf7f5"  # Warm off-white background
+CTK_CARD = "#ffffff"  # Clean white card
+CTK_ACCENT_BLUE = "#a5b4fc"  # Soft pastel indigo
+CTK_ACCENT_CYAN = "#7dd3c0"  # Soft pastel mint/teal
+CTK_ACCENT_PINK = "#f9a8d4"  # Soft pastel pink
+CTK_TEXT = "#4a4458"  # Soft dark plum text
+CTK_BORDER = "#e5dfe8"  # Subtle pastel border
+CTK_SECONDARY_TEXT = "#9992a3"  # Muted secondary text
+CTK_TEAL_TEXT = "#0f766e"  # Darker teal for readable text on light bg
+CTK_SUCCESS = "#4d9375"  # Pastel-safe success green
+CTK_ERROR = "#e07a9e"  # Pastel-safe error/pink-red
 
 
 class MainWindow:
@@ -38,8 +42,8 @@ class MainWindow:
         self.root.geometry("900x700")
         self.root.minsize(700, 500)
 
-        # Configure dark theme
-        ctk.set_appearance_mode("dark")
+        # Configure pastel light theme
+        ctk.set_appearance_mode("light")
         ctk.set_default_color_theme("blue")
 
         self.converter = Converter(timeout=300)
@@ -50,7 +54,7 @@ class MainWindow:
         self._setup_dnd()
 
     def _setup_ui(self):
-        """Initialize UI components with macOS Modern dark theme."""
+        """Initialize UI components with soft pastel light theme."""
         # Root container
         root_frame = ctk.CTkFrame(self.root, fg_color=CTK_BG)
         root_frame.pack(fill="both", expand=True)
@@ -74,8 +78,8 @@ class MainWindow:
             header_frame,
             text=f"v{__version__}",
             font=("Helvetica", 10, "bold"),
-            text_color="#94a3b8",
-            fg_color=CTK_CARD,
+            text_color=CTK_TEAL_TEXT,
+            fg_color=CTK_ACCENT_CYAN,
             padx=8,
             pady=4,
             corner_radius=12,
@@ -108,7 +112,7 @@ class MainWindow:
             drop_card,
             text="📁 Click or Drag & Drop Files Here\n(PDF, DOCX, Images, Audio, Video)",
             font=("Arial", 13),
-            text_color=CTK_ACCENT_CYAN,
+            text_color=CTK_TEAL_TEXT,
             wraplength=350,
         )
         self.drop_label.pack(fill="both", expand=True, padx=30, pady=30)
@@ -174,7 +178,7 @@ class MainWindow:
             variable=self.model_var,
             fg_color=CTK_ACCENT_BLUE,
             button_color=CTK_ACCENT_BLUE,
-            text_color="white",
+            text_color=CTK_TEXT,
             width=120,
         )
         model_combo.grid(row=4, column=1, sticky="e", padx=12, pady=(10, 3))
@@ -189,7 +193,7 @@ class MainWindow:
         analytics_label.pack(anchor="w", padx=12, pady=(8, 5))
 
         self.analytics_text = ctk.CTkLabel(
-            analytics_card, text="No conversion yet", font=("Arial", 10), text_color="#9CA3AF"
+            analytics_card, text="No conversion yet", font=("Arial", 10), text_color=CTK_SECONDARY_TEXT
         )
         self.analytics_text.pack(anchor="w", padx=12, pady=(0, 8))
 
@@ -215,12 +219,12 @@ class MainWindow:
 
         # Percentage text embedded on the progress bar
         self.progress_overlay = ctk.CTkLabel(
-            progress_container, text="0%", font=("Helvetica", 11, "bold"), text_color="white"
+            progress_container, text="0%", font=("Helvetica", 11, "bold"), text_color=CTK_TEXT
         )
         self.progress_overlay.place(relx=0.5, rely=0.5, anchor="center")
 
         self.status_label = ctk.CTkLabel(
-            progress_card, text="Ready", text_color=CTK_ACCENT_CYAN, font=("Arial", 10)
+            progress_card, text="Ready", text_color=CTK_TEAL_TEXT, font=("Arial", 10)
         )
         self.status_label.grid(row=1, column=0, sticky="w", padx=12, pady=(0, 8))
 
@@ -229,14 +233,15 @@ class MainWindow:
         button_frame.pack(fill="x", padx=10, pady=(0, 10))
         button_frame.grid_columnconfigure(0, weight=1)
 
+        btn_kwargs = dict(font=("Arial", 11, "bold"), corner_radius=10, text_color=CTK_TEXT)
+
         browse_btn = ctk.CTkButton(
             button_frame,
             text="📂 Browse Files",
             command=self.browse_files,
             fg_color=CTK_ACCENT_BLUE,
-            hover_color="#2563EB",
-            text_color="white",
-            font=("Arial", 11, "bold"),
+            hover_color="#8b9bf5",
+            **btn_kwargs,
         )
         browse_btn.pack(side="left", padx=3)
 
@@ -245,9 +250,8 @@ class MainWindow:
             text="📋 Copy Result",
             command=self.copy_result,
             fg_color=CTK_ACCENT_BLUE,
-            hover_color="#2563EB",
-            text_color="white",
-            font=("Arial", 11, "bold"),
+            hover_color="#8b9bf5",
+            **btn_kwargs,
         )
         copy_btn.pack(side="left", padx=3)
 
@@ -256,9 +260,8 @@ class MainWindow:
             text="💾 Save As...",
             command=self.save_result,
             fg_color=CTK_ACCENT_CYAN,
-            hover_color="#0891B2",
-            text_color="black",
-            font=("Arial", 11, "bold"),
+            hover_color="#5fb8a4",
+            **btn_kwargs,
         )
         save_btn.pack(side="left", padx=3)
 
@@ -267,9 +270,8 @@ class MainWindow:
             text="🗂️ Open Folder",
             command=self.open_folder,
             fg_color=CTK_ACCENT_BLUE,
-            hover_color="#2563EB",
-            text_color="white",
-            font=("Arial", 11, "bold"),
+            hover_color="#8b9bf5",
+            **btn_kwargs,
         )
         folder_btn.pack(side="left", padx=3)
 
@@ -277,25 +279,36 @@ class MainWindow:
             button_frame,
             text="❌ Exit",
             command=self.root.quit,
-            fg_color="#DC2626",
-            hover_color="#B91C1C",
-            text_color="white",
-            font=("Arial", 11, "bold"),
+            fg_color=CTK_ACCENT_PINK,
+            hover_color="#f472b6",
+            **btn_kwargs,
         )
         exit_btn.pack(side="right", padx=3)
 
     def _setup_dnd(self):
-        """Setup drag-and-drop support with fallback."""
+        """Setup native Windows drag-and-drop support (windnd) with fallback."""
         try:
-            import tkinterdnd2
+            import windnd
 
-            self.drop_card.drop_target_register(tkinterdnd2.DND_FILES)
-            self.drop_card.dnd_bind("<<Drop>>", self.drop_files)
-            logger.info("Drag-and-drop enabled")
+            windnd.hook_dropfiles(self.root, func=self._on_windnd_drop)
+            logger.info("Native drag-and-drop enabled (windnd)")
             self.drop_label.configure(text="📁 Drag & Drop Files Here\n(PDF, DOCX, Images, Audio, Video)")
         except Exception as exc:
             logger.warning(f"Drag-and-drop disabled: {exc}")
             self.drop_label.configure(text="📁 Click 'Browse Files' to select documents")
+
+    def _on_windnd_drop(self, filenames):
+        """Handle files dropped via windnd's native Windows drop hook."""
+        try:
+            decoded = [
+                f.decode("utf-8", errors="ignore") if isinstance(f, bytes) else f
+                for f in filenames
+            ]
+            if decoded:
+                self.convert_files(decoded)
+        except Exception as exc:
+            logger.error(f"Error processing dropped files: {exc}")
+            messagebox.showerror("Error", f"Error processing dropped files: {exc}")
 
     def browse_files(self):
         """Open file browser to select files."""
@@ -311,18 +324,6 @@ class MainWindow:
         )
         if files:
             self.convert_files(list(files))
-
-    def drop_files(self, event):
-        """Handle file drop event."""
-        try:
-            if hasattr(event, "data"):
-                # Parse dropped files
-                files = event.data.replace("{", "").replace("}", "").split()
-                if files:
-                    self.convert_files(files)
-        except Exception as exc:
-            logger.error(f"Error processing dropped files: {exc}")
-            messagebox.showerror("Error", f"Error processing dropped files: {exc}")
 
     def convert_files(self, files: list[str]):
         """Convert files in background thread."""
@@ -342,7 +343,7 @@ class MainWindow:
         """Background worker for file conversion."""
         try:
             total = len(files)
-            self.status_label.configure(text=f"Converting {total} file(s)...", text_color=CTK_ACCENT_CYAN)
+            self.status_label.configure(text=f"Converting {total} file(s)...", text_color=CTK_TEAL_TEXT)
             self.root.update()
 
             results = []
@@ -375,7 +376,7 @@ class MainWindow:
                 status_msg = f"✅ Success: {len(results)} file(s) converted"
                 if errors:
                     status_msg += f" ({len(errors)} failed)"
-                self.status_label.configure(text=status_msg, text_color="#10B981")
+                self.status_label.configure(text=status_msg, text_color=CTK_SUCCESS)
                 self.analytics_text.configure(text=f"Files: {len(results)} | Ready to export")
 
                 # Show errors if any
@@ -385,7 +386,7 @@ class MainWindow:
                         error_summary += f"\n... and {len(errors) - 5} more errors"
                     messagebox.showwarning("Partial Conversion", f"Some files failed to convert:\n\n{error_summary}")
             else:
-                self.status_label.configure(text="❌ No files converted", text_color="#DC2626")
+                self.status_label.configure(text="❌ No files converted", text_color=CTK_ERROR)
                 if errors:
                     error_summary = "\n".join(errors[:5])
                     if len(errors) > 5:
@@ -396,7 +397,7 @@ class MainWindow:
 
         except Exception as exc:
             logger.exception(f"Conversion error: {exc}")
-            self.status_label.configure(text=f"❌ Error: {exc}", text_color="#DC2626")
+            self.status_label.configure(text=f"❌ Error: {exc}", text_color=CTK_ERROR)
             messagebox.showerror("Conversion Error", f"An unexpected error occurred:\n\n{type(exc).__name__}: {str(exc)}")
         finally:
             self.is_converting = False

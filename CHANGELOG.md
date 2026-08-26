@@ -1,5 +1,8 @@
 # CHANGELOG.md
 
+`````````````````````````````text
+# CHANGELOG.md
+
 ````````````````````````````text
 # CHANGELOG.md
 
@@ -77,6 +80,22 @@
 
 All notable changes to `doc2md` are documented here.
 Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
+
+## [0.3.13] - 2026-08-27
+
+### Changed
+
+- **Native Drag-and-Drop (windnd):** Replaced `tkinterdnd2` with `windnd`, a lightweight Windows-native drop hook (`windnd.hook_dropfiles`), guaranteeing drag-and-drop works on compiled `.exe` builds regardless of UAC/Tcl-package limitations that previously affected `tkinterdnd2` in frozen bundles.
+- **Pastel UI Redesign:** Overhauled the CustomTkinter color palette to a soft, modern pastel aesthetic — warm off-white background (`#faf7f5`), white cards, pastel indigo/mint/pink accents, and dark-plum text for readability.
+
+### Fixed
+
+- **Audio Dependency Bundling:** `build_exe.py` now forces `--hidden-import` for `ffmpeg` (ffmpeg-python) and `faster_whisper`, eliminating the "missing ffmpeg-python module" error in standalone `.exe` builds.
+- **Runtime PATH Injection:** `doc2md_exe_entry.py` now injects `sys._MEIPASS` (the PyInstaller bundle directory) into `os.environ["PATH"]` at process startup, before any audio module import, ensuring bundled `ffmpeg.exe`/`ffprobe.exe` resolve correctly regardless of which code path triggers the import first.
+
+### Removed
+
+- `tkinterdnd2` dependency and all related Tcl/Tk data-file bundling in `build_exe.py`.
 
 ## [0.3.12] - 2026-08-27
 
@@ -314,3 +333,4 @@ Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
 ``````````````````````````
 ```````````````````````````
 ````````````````````````````
+`````````````````````````````

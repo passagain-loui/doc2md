@@ -1,6 +1,14 @@
 import multiprocessing
+import os
 import sys
 import traceback
+
+# Inject bundled binary directory (ffmpeg.exe, ffprobe.exe) into PATH before
+# any module (ffmpeg-python, faster-whisper) is imported, so subprocess/dll
+# lookups resolve to the PyInstaller bundle instead of failing on a bare exe.
+if getattr(sys, "frozen", False):
+    _bundle_dir = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
+    os.environ["PATH"] = _bundle_dir + os.pathsep + os.environ.get("PATH", "")
 
 from doc2md.cli.main import app
 

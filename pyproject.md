@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "doc2md"
-version = "0.3.10"
+version = "0.3.13"
 description = "Universal Document to Markdown converter with Audio Engine (8+ hrs), Drag-and-Drop GUI, Multi-Format Export & Progress Tracking."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -49,11 +49,11 @@ audio = [
 ]
 gui = [
     "customtkinter>=5.0",
-    "tkinterdnd2>=0.3.0; platform_system == 'Windows'",
+    "windnd>=1.0.7; platform_system == 'Windows'",
     "python-docx>=1.1",
 ]
 exe = ["pyinstaller>=6.10"]
-dev = ["pytest>=8.0", "pytest-timeout>=2.3", "pytest-cov>=5.0", "customtkinter>=5.0", "python-docx>=1.1"]
+dev = ["pytest>=8.0", "pytest-timeout>=2.3", "pytest-cov>=5.0", "customtkinter>=5.0", "python-docx>=1.1", "windnd>=1.0.7; platform_system == 'Windows'"]
 
 [project.scripts]
 doc2md = "doc2md.cli.main:app"

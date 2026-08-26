@@ -1,5 +1,8 @@
 # HISTORY.md
 
+````````````````````````````text
+# HISTORY.md
+
 ```````````````````````````text
 # HISTORY.md
 
@@ -76,6 +79,22 @@
 # History & Verification Audit Trail
 
 This file records verification runs, timestamps, and quality metrics per release.
+
+## [0.3.13] - 2026-08-27
+
+- **Verification timestamp (UTC+7 local):** 2026-08-27, Gatekeeper Protocol v4.4 (Mandated Roles & Traceability)
+- **Gatekeeper:** LocalCore CLI via `python -m pytest tests/ --cov=doc2md --cov-fail-under=90 -v`
+- **Result:** `EXIT_CODE:0` — **VALIDATION PASSED**; Coverage: 93.45%; 307 passed, 1 skipped in 39.88s
+- **Loop iterations:** 1 (no fixes needed)
+- **Architecture Changes:**
+ - Native Drag-and-Drop: Replaced `tkinterdnd2` with `windnd` (Windows native drop hook) for reliable DnD on compiled .exe
+ - Audio Dependency Injection: `build_exe.py` forces `--hidden-import` for `ffmpeg` and `faster_whisper` packages
+ - Runtime PATH Injection: `doc2md_exe_entry.py` injects `sys._MEIPASS` into `os.environ["PATH"]` at process startup, before any audio import
+ - Pastel UI Redesign: Warm off-white background (#faf7f5), white cards, pastel indigo/mint/pink accents, dark-plum text
+- **Removed:** `tkinterdnd2` dependency and all related Tcl/Tk data-file bundling
+- **Build:** PyInstaller with forced ffmpeg/faster_whisper hidden-imports, windnd hidden-import, FFmpeg binary bundling
+- **Standalone build:** `dist/doc2md.exe`, `dist/doc2md_Setup_v0.3.13.exe`
+- **GitHub Release:** https://github.com/passagain-loui/doc2md/releases/tag/v0.3.13
 
 ## [0.3.12] - 2026-08-27
 
@@ -363,3 +382,4 @@ This file records verification runs, timestamps, and quality metrics per release
 `````````````````````````
 ``````````````````````````
 ```````````````````````````
+````````````````````````````

@@ -38,15 +38,17 @@ HIDDEN_IMPORTS = [
     "typer",
     "rich",
     "customtkinter",
-    "tkinterdnd2",
+    "windnd",
+    "ffmpeg",
+    "faster_whisper",
 ]
 
 
 def collect_tkinter_resources() -> list[str]:
-    """Collect data files for tkinterdnd2 and other GUI libraries."""
+    """Collect data files for tiktoken and other bundled resources."""
     args: list[str] = []
     try:
-        from PyInstaller.utils.hooks import collect_all, collect_data_files
+        from PyInstaller.utils.hooks import collect_all
 
         # Collect tiktoken resources
         for package in ("tiktoken_ext",):
@@ -57,11 +59,6 @@ def collect_tkinter_resources() -> list[str]:
                 args.extend(["--add-binary", f"{binary[0]};{binary[1]}"])
             for hidden in hiddenimports:
                 args.extend(["--hidden-import", hidden])
-
-        # Collect tkinterdnd2 data files (for drag-and-drop)
-        tkdnd_datas = collect_data_files('tkinterdnd2')
-        for source, target in tkdnd_datas:
-            args.extend(["--add-data", f"{source}{Path(':') if sys.platform != 'win32' else ';'}{target}"])
 
     except Exception as exc:
         print(f"[build_exe] resource collection skipped: {exc}")
