@@ -1,4 +1,4 @@
-"""Main GUI window with CustomTkinter pastel theme and native (windnd) drag-and-drop support."""
+"""Main GUI window with CustomTkinter Modern Clean theme and native (windnd) drag-and-drop support."""
 
 from __future__ import annotations
 
@@ -19,18 +19,24 @@ from doc2md.core.exporter import export_markdown
 
 logger = logging.getLogger(__name__)
 
-# Pastel UI theme colors
-CTK_BG = "#faf7f5"  # Warm off-white background
-CTK_CARD = "#ffffff"  # Clean white card
-CTK_ACCENT_BLUE = "#a5b4fc"  # Soft pastel indigo
-CTK_ACCENT_CYAN = "#7dd3c0"  # Soft pastel mint/teal
-CTK_ACCENT_PINK = "#f9a8d4"  # Soft pastel pink
-CTK_TEXT = "#4a4458"  # Soft dark plum text
-CTK_BORDER = "#e5dfe8"  # Subtle pastel border
-CTK_SECONDARY_TEXT = "#9992a3"  # Muted secondary text
-CTK_TEAL_TEXT = "#0f766e"  # Darker teal for readable text on light bg
-CTK_SUCCESS = "#4d9375"  # Pastel-safe success green
-CTK_ERROR = "#e07a9e"  # Pastel-safe error/pink-red
+# Modern Clean UI theme colors (Tailwind-inspired: slate + blue)
+CTK_BG = "#f8fafc"  # slate-50 page background
+CTK_CARD = "#ffffff"  # Crisp white card
+CTK_ACCENT_BLUE = "#2563eb"  # blue-600 primary action
+CTK_ACCENT_BLUE_HOVER = "#1d4ed8"  # blue-700 hover
+CTK_ACCENT_CYAN = "#0d9488"  # teal-600 secondary action
+CTK_ACCENT_CYAN_HOVER = "#0f766e"  # teal-700 hover
+CTK_ACCENT_PINK = "#ef4444"  # red-500 destructive action
+CTK_ACCENT_PINK_HOVER = "#dc2626"  # red-600 hover
+CTK_TEXT = "#1e293b"  # slate-800 crisp primary text
+CTK_BORDER = "#e2e8f0"  # slate-200 subtle border
+CTK_SECONDARY_TEXT = "#64748b"  # slate-500 muted secondary text
+CTK_TEAL_TEXT = "#0f766e"  # teal-700 readable accent text
+CTK_SUCCESS = "#059669"  # emerald-600 success
+CTK_ERROR = "#dc2626"  # red-600 error
+
+# Shared font family for crisp, consistently-aligned icon+text rendering
+UI_FONT = "Segoe UI"
 
 
 class MainWindow:
@@ -42,7 +48,7 @@ class MainWindow:
         self.root.geometry("900x700")
         self.root.minsize(700, 500)
 
-        # Configure pastel light theme
+        # Configure Modern Clean light theme
         ctk.set_appearance_mode("light")
         ctk.set_default_color_theme("blue")
 
@@ -54,7 +60,7 @@ class MainWindow:
         self._setup_dnd()
 
     def _setup_ui(self):
-        """Initialize UI components with soft pastel light theme."""
+        """Initialize UI components with a Modern Clean (Tailwind-inspired) theme."""
         # Root container
         root_frame = ctk.CTkFrame(self.root, fg_color=CTK_BG)
         root_frame.pack(fill="both", expand=True)
@@ -68,8 +74,10 @@ class MainWindow:
         title_label = ctk.CTkLabel(
             header_frame,
             text="📄 doc2md",
-            font=("Helvetica", 24, "bold"),
+            font=(UI_FONT, 24, "bold"),
             text_color=CTK_TEXT,
+            anchor="w",
+            justify="left",
         )
         title_label.grid(row=0, column=0, sticky="w")
 
@@ -77,12 +85,13 @@ class MainWindow:
         version_badge = ctk.CTkLabel(
             header_frame,
             text=f"v{__version__}",
-            font=("Helvetica", 10, "bold"),
-            text_color=CTK_TEAL_TEXT,
-            fg_color=CTK_ACCENT_CYAN,
+            font=(UI_FONT, 10, "bold"),
+            text_color="#ffffff",
+            fg_color=CTK_ACCENT_BLUE,
             padx=8,
             pady=4,
             corner_radius=12,
+            anchor="center",
         )
         version_badge.grid(row=0, column=1, sticky="e", padx=0)
 
@@ -90,8 +99,10 @@ class MainWindow:
         subtitle_label = ctk.CTkLabel(
             header_frame,
             text="Convert documents to optimized Markdown with AI",
-            font=("Helvetica", 11),
+            font=(UI_FONT, 11),
             text_color=CTK_SECONDARY_TEXT,
+            anchor="w",
+            justify="left",
         )
         subtitle_label.grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
@@ -111,9 +122,11 @@ class MainWindow:
         self.drop_label = ctk.CTkLabel(
             drop_card,
             text="📁 Click or Drag & Drop Files Here\n(PDF, DOCX, Images, Audio, Video)",
-            font=("Arial", 13),
+            font=(UI_FONT, 13),
             text_color=CTK_TEAL_TEXT,
             wraplength=350,
+            anchor="center",
+            justify="center",
         )
         self.drop_label.pack(fill="both", expand=True, padx=30, pady=30)
         self.drop_card = drop_card
@@ -132,42 +145,56 @@ class MainWindow:
         options_card.grid_columnconfigure(1, weight=1)
 
         options_label = ctk.CTkLabel(
-            options_card, text="⚙️ Options", font=("Arial", 13, "bold"), text_color=CTK_TEXT
+            options_card,
+            text="⚙️ Options",
+            font=(UI_FONT, 13, "bold"),
+            text_color=CTK_TEXT,
+            anchor="w",
         )
         options_label.grid(row=0, column=0, columnspan=2, sticky="w", padx=12, pady=(8, 10))
+
+        checkbox_kwargs = dict(
+            text_color=CTK_TEXT,
+            fg_color=CTK_ACCENT_BLUE,
+            hover_color=CTK_ACCENT_BLUE_HOVER,
+            font=(UI_FONT, 12),
+            checkbox_width=20,
+            checkbox_height=20,
+        )
 
         self.copy_var = ctk.BooleanVar(value=True)
         copy_check = ctk.CTkCheckBox(
             options_card,
             text="Auto-copy to clipboard",
             variable=self.copy_var,
-            text_color=CTK_TEXT,
-            fg_color=CTK_ACCENT_BLUE,
+            **checkbox_kwargs,
         )
-        copy_check.grid(row=1, column=0, columnspan=2, sticky="w", padx=12, pady=3)
+        copy_check.grid(row=1, column=0, columnspan=2, sticky="w", padx=12, pady=4)
 
         self.stats_var = ctk.BooleanVar(value=True)
         stats_check = ctk.CTkCheckBox(
             options_card,
             text="Show token stats",
             variable=self.stats_var,
-            text_color=CTK_TEXT,
-            fg_color=CTK_ACCENT_BLUE,
+            **checkbox_kwargs,
         )
-        stats_check.grid(row=2, column=0, columnspan=2, sticky="w", padx=12, pady=3)
+        stats_check.grid(row=2, column=0, columnspan=2, sticky="w", padx=12, pady=4)
 
         self.ocr_var = ctk.BooleanVar(value=True)
         ocr_check = ctk.CTkCheckBox(
             options_card,
             text="Enable OCR",
             variable=self.ocr_var,
-            text_color=CTK_TEXT,
-            fg_color=CTK_ACCENT_BLUE,
+            **checkbox_kwargs,
         )
-        ocr_check.grid(row=3, column=0, columnspan=2, sticky="w", padx=12, pady=3)
+        ocr_check.grid(row=3, column=0, columnspan=2, sticky="w", padx=12, pady=4)
 
         model_label = ctk.CTkLabel(
-            options_card, text="Audio Model:", text_color=CTK_TEXT, font=("Arial", 11)
+            options_card,
+            text="Audio Model:",
+            text_color=CTK_TEXT,
+            font=(UI_FONT, 11),
+            anchor="w",
         )
         model_label.grid(row=4, column=0, sticky="w", padx=12, pady=(10, 3))
 
@@ -176,10 +203,14 @@ class MainWindow:
             options_card,
             values=["tiny", "base", "small", "medium", "large-v3"],
             variable=self.model_var,
-            fg_color=CTK_ACCENT_BLUE,
+            fg_color="#ffffff",
+            border_color=CTK_BORDER,
             button_color=CTK_ACCENT_BLUE,
+            button_hover_color=CTK_ACCENT_BLUE_HOVER,
             text_color=CTK_TEXT,
+            font=(UI_FONT, 11),
             width=120,
+            justify="center",
         )
         model_combo.grid(row=4, column=1, sticky="e", padx=12, pady=(10, 3))
 
@@ -188,12 +219,20 @@ class MainWindow:
         analytics_card.pack(fill="x", pady=(0, 10))
 
         analytics_label = ctk.CTkLabel(
-            analytics_card, text="📊 Analytics", font=("Arial", 13, "bold"), text_color=CTK_TEXT
+            analytics_card,
+            text="📊 Analytics",
+            font=(UI_FONT, 13, "bold"),
+            text_color=CTK_TEXT,
+            anchor="w",
         )
         analytics_label.pack(anchor="w", padx=12, pady=(8, 5))
 
         self.analytics_text = ctk.CTkLabel(
-            analytics_card, text="No conversion yet", font=("Arial", 10), text_color=CTK_SECONDARY_TEXT
+            analytics_card,
+            text="No conversion yet",
+            font=(UI_FONT, 10),
+            text_color=CTK_SECONDARY_TEXT,
+            anchor="w",
         )
         self.analytics_text.pack(anchor="w", padx=12, pady=(0, 8))
 
@@ -211,7 +250,7 @@ class MainWindow:
         self.progress_bar = ctk.CTkProgressBar(
             progress_container,
             variable=self.progress_var,
-            fg_color=CTK_BG,
+            fg_color=CTK_BORDER,
             progress_color=CTK_ACCENT_BLUE,
             height=32,
         )
@@ -219,12 +258,20 @@ class MainWindow:
 
         # Percentage text embedded on the progress bar
         self.progress_overlay = ctk.CTkLabel(
-            progress_container, text="0%", font=("Helvetica", 11, "bold"), text_color=CTK_TEXT
+            progress_container,
+            text="0%",
+            font=(UI_FONT, 11, "bold"),
+            text_color=CTK_TEXT,
+            anchor="center",
         )
         self.progress_overlay.place(relx=0.5, rely=0.5, anchor="center")
 
         self.status_label = ctk.CTkLabel(
-            progress_card, text="Ready", text_color=CTK_TEAL_TEXT, font=("Arial", 10)
+            progress_card,
+            text="Ready",
+            text_color=CTK_TEAL_TEXT,
+            font=(UI_FONT, 10),
+            anchor="w",
         )
         self.status_label.grid(row=1, column=0, sticky="w", padx=12, pady=(0, 8))
 
@@ -233,54 +280,60 @@ class MainWindow:
         button_frame.pack(fill="x", padx=10, pady=(0, 10))
         button_frame.grid_columnconfigure(0, weight=1)
 
-        btn_kwargs = dict(font=("Arial", 11, "bold"), corner_radius=10, text_color=CTK_TEXT)
+        btn_kwargs = dict(
+            font=(UI_FONT, 12, "bold"),
+            corner_radius=8,
+            text_color="#ffffff",
+            height=38,
+            anchor="center",
+        )
 
         browse_btn = ctk.CTkButton(
             button_frame,
-            text="📂 Browse Files",
+            text="📂  Browse Files",
             command=self.browse_files,
             fg_color=CTK_ACCENT_BLUE,
-            hover_color="#8b9bf5",
+            hover_color=CTK_ACCENT_BLUE_HOVER,
             **btn_kwargs,
         )
         browse_btn.pack(side="left", padx=3)
 
         copy_btn = ctk.CTkButton(
             button_frame,
-            text="📋 Copy Result",
+            text="📋  Copy Result",
             command=self.copy_result,
             fg_color=CTK_ACCENT_BLUE,
-            hover_color="#8b9bf5",
+            hover_color=CTK_ACCENT_BLUE_HOVER,
             **btn_kwargs,
         )
         copy_btn.pack(side="left", padx=3)
 
         save_btn = ctk.CTkButton(
             button_frame,
-            text="💾 Save As...",
+            text="💾  Save As...",
             command=self.save_result,
             fg_color=CTK_ACCENT_CYAN,
-            hover_color="#5fb8a4",
+            hover_color=CTK_ACCENT_CYAN_HOVER,
             **btn_kwargs,
         )
         save_btn.pack(side="left", padx=3)
 
         folder_btn = ctk.CTkButton(
             button_frame,
-            text="🗂️ Open Folder",
+            text="🗂️  Open Folder",
             command=self.open_folder,
             fg_color=CTK_ACCENT_BLUE,
-            hover_color="#8b9bf5",
+            hover_color=CTK_ACCENT_BLUE_HOVER,
             **btn_kwargs,
         )
         folder_btn.pack(side="left", padx=3)
 
         exit_btn = ctk.CTkButton(
             button_frame,
-            text="❌ Exit",
+            text="❌  Exit",
             command=self.root.quit,
             fg_color=CTK_ACCENT_PINK,
-            hover_color="#f472b6",
+            hover_color=CTK_ACCENT_PINK_HOVER,
             **btn_kwargs,
         )
         exit_btn.pack(side="right", padx=3)

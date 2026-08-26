@@ -68,6 +68,19 @@ def collect_tkinter_resources() -> list[str]:
     return args
 
 
+def ensure_audio_dependencies() -> None:
+    """Ensure ffmpeg-python and faster-whisper are installed in the build
+    environment before PyInstaller runs, so its import scanner can find them.
+    """
+    print("[build_exe] Ensuring audio dependencies are installed before building...")
+    try:
+        subprocess.check_call(
+            [sys.executable, "-m", "pip", "install", "ffmpeg-python", "faster-whisper"]
+        )
+    except subprocess.CalledProcessError as exc:
+        print(f"[build_exe] WARNING: failed to install audio dependencies: {exc}")
+
+
 def bundle_ffmpeg_binaries() -> list[str]:
     """Bundle FFmpeg binaries if available on system PATH."""
     args: list[str] = []
@@ -94,6 +107,8 @@ def build() -> int:
     if not ENTRY.is_file():
         print(f"[build_exe] entry script missing: {ENTRY}")
         return 2
+
+    ensure_audio_dependencies()
 
     # Determine if we need icon file
     icon_path = ROOT / "assets" / "icon.ico"

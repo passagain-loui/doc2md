@@ -1,5 +1,8 @@
 # HISTORY.md
 
+`````````````````````````````text
+# HISTORY.md
+
 ````````````````````````````text
 # HISTORY.md
 
@@ -79,6 +82,20 @@
 # History & Verification Audit Trail
 
 This file records verification runs, timestamps, and quality metrics per release.
+
+## [0.3.14] - 2026-08-27
+
+- **Verification timestamp (UTC+7 local):** 2026-08-27, Gatekeeper Protocol v4.4 (Mandated Roles & Traceability)
+- **Gatekeeper:** LocalCore CLI via `python -m pytest tests/ --cov=doc2md --cov-fail-under=90 -v`
+- **Result:** `EXIT_CODE:0` — **VALIDATION PASSED**; Coverage: 93.45%; 307 passed, 1 skipped in 44.11s
+- **Loop iterations:** 1 (no fixes needed)
+- **Fixes & Enhancements:**
+ - Build-Time Audio Dependency Injection: `build_exe.py` runs `pip install ffmpeg-python faster-whisper` before PyInstaller invocation
+ - Icon-Text Alignment: Buttons (height=38, anchor=center), checkboxes (20x20 boxes), version badge, and drop zone all use explicit anchor + "Segoe UI" font for consistent icon/text baseline
+ - Modern Clean UI: Tailwind-inspired palette — slate-50 bg, white cards, slate-800 text, slate-200 borders, blue-600/teal-600/red-500 buttons with matching hover states
+- **Build:** PyInstaller with build-time audio dependency install, windnd/ffmpeg/faster_whisper hidden-imports, FFmpeg binary bundling
+- **Standalone build:** `dist/doc2md.exe`, `dist/doc2md_Setup_v0.3.14.exe`
+- **GitHub Release:** https://github.com/passagain-loui/doc2md/releases/tag/v0.3.14
 
 ## [0.3.13] - 2026-08-27
 
@@ -383,3 +400,4 @@ This file records verification runs, timestamps, and quality metrics per release
 ``````````````````````````
 ```````````````````````````
 ````````````````````````````
+`````````````````````````````

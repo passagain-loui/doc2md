@@ -1,5 +1,8 @@
 # CHANGELOG.md
 
+``````````````````````````````text
+# CHANGELOG.md
+
 `````````````````````````````text
 # CHANGELOG.md
 
@@ -80,6 +83,17 @@
 
 All notable changes to `doc2md` are documented here.
 Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
+
+## [0.3.14] - 2026-08-27
+
+### Fixed
+
+- **Build-Time Audio Dependency Injection:** `build_exe.py` now runs `pip install ffmpeg-python faster-whisper` in the build environment before invoking PyInstaller, so its import scanner can always find these modules — fixing exe builds where the build machine hadn't manually installed the `[audio]` extra beforehand.
+- **Icon-Text Alignment:** All buttons, checkboxes, the version badge, and the drag-and-drop zone now use explicit `anchor="center"`/`anchor="w"` plus a consistent height (buttons: 38px, checkboxes: 20px boxes) and the Windows-native "Segoe UI" font family, eliminating inconsistent vertical/horizontal centering of emoji icons versus label text.
+
+### Changed
+
+- **Modern Clean UI (Tailwind-inspired):** Replaced the pastel theme with a sharp, high-contrast interface — slate-50 page background, crisp white cards, slate-800 text, slate-200 borders, and vibrant blue-600/teal-600/red-500 primary buttons with matching hover states.
 
 ## [0.3.13] - 2026-08-27
 
@@ -334,3 +348,4 @@ Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
 ```````````````````````````
 ````````````````````````````
 `````````````````````````````
+``````````````````````````````
