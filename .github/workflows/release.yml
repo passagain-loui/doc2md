@@ -1,0 +1,57 @@
+name: Release Build
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-release:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          pip install -e ".[docs,ocr-rapid,exe,dev]"
+
+      - name: Build standalone EXE
+        run: python build_exe.py
+
+      - name: Build installer
+        run: python build_installer.py
+
+      - name: Get version from tag
+        id: tag_version
+        run: |
+          $version = "${{ github.ref }}".Replace('refs/tags/v', '')
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            dist/doc2md.exe
+            dist/doc2md_Setup_v*.exe
+          body: |
+            ## Release v${{ steps.tag_version.outputs.version }}
+
+            See [CHANGELOG.md](CHANGELOG.md) for details.
+
+            ### Downloads
+            - **Standalone EXE:** `doc2md.exe` - No Python installation required
+            - **Installer:** `doc2md_Setup_v*.exe` - Recommended for Windows users
+
+            ### Quick Start
+            ```bash
+            doc2md convert input.pdf -c -s
+            ```
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
