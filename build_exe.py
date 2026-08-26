@@ -66,6 +66,9 @@ def build() -> int:
         print(f"[build_exe] entry script missing: {ENTRY}")
         return 2
 
+    # Determine if we need icon file
+    icon_path = ROOT / "assets" / "icon.ico"
+
     cmd = [
         sys.executable,
         "-m",
@@ -73,7 +76,7 @@ def build() -> int:
         "--noconfirm",
         "--clean",
         "--onefile",
-        "--console",
+        "--windowed",
         "--name",
         "doc2md",
         "--workpath",
@@ -83,6 +86,9 @@ def build() -> int:
         "--specpath",
         str(BUILD_DIR),
     ]
+
+    if icon_path.is_file():
+        cmd.extend(["--icon", str(icon_path)])
     for hidden in HIDDEN_IMPORTS:
         cmd.extend(["--hidden-import", hidden])
     cmd.extend(collect_tiktoken_resources())

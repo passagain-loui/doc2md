@@ -1,5 +1,8 @@
 # CHANGELOG.md
 
+```````````````text
+# CHANGELOG.md
+
 ``````````````text
 # CHANGELOG.md
 
@@ -35,6 +38,19 @@
 
 All notable changes to `doc2md` are documented here.
 Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
+
+## [0.3.3] - 2026-08-26
+
+### Fixed
+
+- No-console GUI launch fix: PyInstaller now builds with `--windowed` flag, eliminating terminal window flicker when double-clicking `doc2md.exe` from desktop.
+- Added exception handling for GUI startup crashes: uncaught errors now display a user-friendly error dialog instead of silent exit.
+- Graceful error recovery: GUI remains responsive even if dependencies fail to load.
+
+### Enhanced
+
+- Modern "MD" app icon redesign: Dark slate background (#1E1E2E) with vibrant cyan text (#00F2FE), optimized for all sizes (16x16 to 256x256).
+- Icon embedded in Windows executable and installer for consistent branding.
 
 ## [0.3.2] - 2026-08-26
 
@@ -145,3 +161,4 @@ Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
 ````````````
 `````````````
 ``````````````
+```````````````
