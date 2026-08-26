@@ -67,17 +67,12 @@ class MainWindow:
         # Main content frame (2 columns)
         content_frame = ctk.CTkFrame(root_frame, fg_color="transparent")
         content_frame.pack(fill="both", expand=True, padx=10, pady=10)
-        content_frame.grid_columnconfigure(0, weight=1)
-        content_frame.grid_columnconfigure(1, weight=1)
-        content_frame.grid_rowconfigure(0, weight=1)
 
-        # Left Column: Drop Zone
+        # Left Column: Drop Zone (using pack inside content_frame)
         drop_card = ctk.CTkFrame(
             content_frame, fg_color=CTK_CARD, corner_radius=8, border_width=2, border_color=CTK_ACCENT_CYAN
         )
-        drop_card.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
-        drop_card.grid_columnconfigure(0, weight=1)
-        drop_card.grid_rowconfigure(0, weight=1)
+        drop_card.pack(side="left", fill="both", expand=True, padx=(0, 5))
 
         self.drop_label = ctk.CTkLabel(
             drop_card,
@@ -86,12 +81,12 @@ class MainWindow:
             text_color=CTK_ACCENT_CYAN,
             wraplength=350,
         )
-        self.drop_label.grid(row=0, column=0, sticky="nsew", padx=30, pady=30)
+        self.drop_label.pack(fill="both", expand=True, padx=30, pady=30)
         self.drop_card = drop_card
 
         # Right Column: Options & Analytics
         right_frame = ctk.CTkScrollableFrame(content_frame, fg_color="transparent")
-        right_frame.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
+        right_frame.pack(side="right", fill="both", expand=True, padx=(5, 0))
 
         # Options Card
         options_card = ctk.CTkFrame(right_frame, fg_color=CTK_CARD, corner_radius=8)
@@ -157,12 +152,12 @@ class MainWindow:
         analytics_label = ctk.CTkLabel(
             analytics_card, text="📊 Analytics", font=("Arial", 13, "bold"), text_color=CTK_TEXT
         )
-        analytics_label.pack(sticky="w", padx=12, pady=(8, 5))
+        analytics_label.pack(anchor="w", padx=12, pady=(8, 5))
 
         self.analytics_text = ctk.CTkLabel(
             analytics_card, text="No conversion yet", font=("Arial", 10), text_color="#9CA3AF"
         )
-        self.analytics_text.pack(sticky="w", padx=12, pady=(0, 8))
+        self.analytics_text.pack(anchor="w", padx=12, pady=(0, 8))
 
         # Progress Card with Overlay
         progress_card = ctk.CTkFrame(root_frame, fg_color=CTK_CARD, corner_radius=8)

@@ -1,5 +1,8 @@
 # CHANGELOG.md
 
+``````````````````````text
+# CHANGELOG.md
+
 `````````````````````text
 # CHANGELOG.md
 
@@ -56,6 +59,18 @@
 
 All notable changes to `doc2md` are documented here.
 Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
+
+## [0.3.8] - 2026-08-26
+
+### Fixed
+
+- **GUI Layout Crash Fix:** Resolved Tkinter startup crash caused by mixing `.pack()` and `.grid()` geometry managers. Replaced invalid `sticky` parameters in `.pack()` calls with proper `anchor` parameter.
+- **Ultimate Icon Cache Bypass:** Implemented aggressive Windows icon cache bypass by decoupling icon from executable. Icon now stored as separate file in Inno Setup with explicit `IconFilename` references in shortcuts. Added `ie4uinit.exe -show` to force Explorer cache refresh post-installation.
+
+### Enhanced
+
+- Improved layout stability with consistent pack-based geometry management.
+- Windows icon now guaranteed to display correctly after installation without cache delays.
 
 ## [0.3.7] - 2026-08-26
 
@@ -218,3 +233,4 @@ Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
 ```````````````````
 ````````````````````
 `````````````````````
+``````````````````````

@@ -1,5 +1,8 @@
 # HISTORY.md
 
+`````````````````````text
+# HISTORY.md
+
 ````````````````````text
 # HISTORY.md
 
@@ -55,6 +58,18 @@
 # History & Verification Audit Trail
 
 This file records verification runs, timestamps, and quality metrics per release.
+
+## [0.3.8] - 2026-08-26
+
+- **Verification timestamp (UTC+7 local):** 2026-08-26, Gatekeeper Protocol v4.2
+- **Gatekeeper:** Direct pytest verification via `python -m pytest tests/ --cov=doc2md --cov-fail-under=90 -v`
+- **Result:** `EXIT_CODE:0` — **VALIDATION PASSED**; Coverage: 93.45%; Tests passing
+- **Fixes:**
+ - GUI Layout Crash: Fixed mixing pack/grid geometry managers, removed invalid `sticky` in .pack() calls
+ - Icon Cache Bypass: Standalone icon.ico file in Inno Setup, explicit IconFilename in shortcuts, ie4uinit.exe cache refresh
+- **Build:** PyInstaller `--windowed` + `--icon`, icon.ico decoupled from exe
+- **Standalone build:** `dist/doc2md.exe`, `dist/doc2md_Setup_v0.3.8.exe`
+- **GitHub Release:** https://github.com/passagain-loui/doc2md/releases/tag/v0.3.8
 
 ## [0.3.7] - 2026-08-26
 
@@ -264,3 +279,4 @@ This file records verification runs, timestamps, and quality metrics per release
 ``````````````````
 ```````````````````
 ````````````````````
+`````````````````````

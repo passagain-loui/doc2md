@@ -3,7 +3,7 @@
 
 #define AppName "doc2md"
 #ifndef Version
-#define Version "0.3.7"
+#define Version "0.3.8"
 #endif
 
 [Setup]
@@ -27,11 +27,13 @@ ArchitecturesInstallIn64BitMode=x64compatible
 
 [Files]
 Source: "dist\doc2md.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "assets\icon.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "CHANGELOG.md"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 
 [Icons]
-Name: "{userdesktop}\{#AppName}"; Filename: "{app}\doc2md.exe"; Tasks: desktopicon
+Name: "{userdesktop}\{#AppName}"; Filename: "{app}\doc2md.exe"; IconFilename: "{app}\icon.ico"; Tasks: desktopicon
+Name: "{userstartmenu}\{#AppName}"; Filename: "{app}\doc2md.exe"; IconFilename: "{app}\icon.ico"
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional tasks:"; Flags: unchecked
@@ -42,6 +44,7 @@ Root: HKCU; Subkey: "Software\Classes\*\shell\doc2md"; ValueType: string; ValueN
 Root: HKCU; Subkey: "Software\Classes\*\shell\doc2md\command"; ValueType: string; ValueName: ""; ValueData: """{app}\doc2md.exe"" ""%1"" -c -s"; Flags: uninsdeletekey
 
 [Run]
+Filename: "{sys}\ie4uinit.exe"; Parameters: "-show"; Flags: runhidden waituntilterminated skipifsilent
 Filename: "{app}\doc2md.exe"; Parameters: "--version"; Description: "Verify installation"; Flags: runhidden nowait skipifsilent
 
 [UninstallDelete]
