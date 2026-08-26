@@ -1,5 +1,14 @@
 # CHANGELOG.md
 
+`````````````````````text
+# CHANGELOG.md
+
+````````````````````text
+# CHANGELOG.md
+
+```````````````````text
+# CHANGELOG.md
+
 ``````````````````text
 # CHANGELOG.md
 
@@ -47,6 +56,20 @@
 
 All notable changes to `doc2md` are documented here.
 Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
+
+## [0.3.7] - 2026-08-26
+
+### Added
+
+- **Multi-Format Export Engine:** Save conversion results as Markdown (`.md`), Plain Text (`.txt`), or Word Document (`.docx`) via new `💾 Save As...` button.
+- **Progress Overlay with Percentage:** Real-time progress bar with overlaid percentage display (e.g., "45%") for file conversions and model downloads.
+- **Soft Dark Dashboard Redesign:** New color palette (`#1B222C` window, `#242D3C` cards, `#3B82F6` & `#06B6D4` accents, `#F1F5F9` text).
+- **2-Column Layout:** Split interface with left drag-and-drop zone and right-side options/analytics card for better organization.
+
+### Fixed
+
+- Improved layout responsiveness with scrollable options panel.
+- Enhanced progress tracking with byte/percentage overlays for conversions.
 
 ## [0.3.5] - 2026-08-26
 
@@ -192,3 +215,6 @@ Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
 ````````````````
 `````````````````
 ``````````````````
+```````````````````
+````````````````````
+`````````````````````

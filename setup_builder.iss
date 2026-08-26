@@ -3,7 +3,7 @@
 
 #define AppName "doc2md"
 #ifndef Version
-#define Version "0.3.5"
+#define Version "0.3.7"
 #endif
 
 [Setup]

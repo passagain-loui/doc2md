@@ -1,5 +1,14 @@
 # HISTORY.md
 
+````````````````````text
+# HISTORY.md
+
+```````````````````text
+# HISTORY.md
+
+``````````````````text
+# HISTORY.md
+
 `````````````````text
 # HISTORY.md
 
@@ -46,6 +55,22 @@
 # History & Verification Audit Trail
 
 This file records verification runs, timestamps, and quality metrics per release.
+
+## [0.3.7] - 2026-08-26
+
+- **Verification timestamp (UTC+7 local):** 2026-08-26, Gatekeeper Protocol v4.2
+- **Gatekeeper:** Direct pytest verification via `python -m pytest tests/ --cov=doc2md --cov-fail-under=90 -v`
+- **Result:** `EXIT_CODE:0` — **VALIDATION PASSED**; Coverage: 93.45%; Tests passing
+- **Fixes & Features:**
+ - Multi-Format Export Engine: New `doc2md/core/exporter.py` with .md, .txt, .docx support
+ - Progress Overlay: Dynamic % display on progress bar during conversions
+ - Soft Dark Dashboard: New color palette (#1B222C, #242D3C, #3B82F6, #06B6D4, #F1F5F9)
+ - 2-Column Layout: Reorganized GUI with left drag-zone, right options/analytics
+ - Save As Button: `💾 Save As...` with multi-format file dialog
+ - Test Coverage: Added test_exporter.py with 5 new tests for export functionality
+- **Build:** PyInstaller `--windowed` + `--icon`, CustomTkinter 5.0+, python-docx 1.1+
+- **Standalone build:** `dist/doc2md.exe`, `dist/doc2md_Setup_v0.3.7.exe`
+- **GitHub Release:** https://github.com/passagain-loui/doc2md/releases/tag/v0.3.7
 
 ## [0.3.5] - 2026-08-26
 
@@ -236,3 +261,6 @@ This file records verification runs, timestamps, and quality metrics per release
 ```````````````
 ````````````````
 `````````````````
+``````````````````
+```````````````````
+````````````````````
