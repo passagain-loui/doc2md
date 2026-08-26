@@ -1,5 +1,8 @@
 # HISTORY.md
 
+```````````````````````````text
+# HISTORY.md
+
 ``````````````````````````text
 # HISTORY.md
 
@@ -73,6 +76,22 @@
 # History & Verification Audit Trail
 
 This file records verification runs, timestamps, and quality metrics per release.
+
+## [0.3.12] - 2026-08-27
+
+- **Verification timestamp (UTC+7 local):** 2026-08-27, Gatekeeper Protocol v4.4 (Mandated Roles & Traceability)
+- **Gatekeeper:** LocalCore CLI via `python -m pytest tests/ --cov=doc2md --cov-fail-under=90 -v`
+- **Result:** `EXIT_CODE:0` — **VALIDATION PASSED**; Coverage: 93.45%; 307 passed, 1 skipped in 45.02s
+- **Loop iterations:** 1 (no fixes needed)
+- **Features & Enhancements:**
+ - macOS Modern UI Overhaul: Redesigned dark theme with deep charcoal (#0a0e27), improved border radii (12px), Helvetica typography
+ - Version Badge: Subtle version label (v0.3.12) in header for quick identification
+ - Embedded Progress %: Percentage text now centered inside progress bar track instead of floating
+ - Enhanced drop zone: Hover effects with border color change (gray → blue) for better visual feedback
+ - Refined color palette: New border color (#2d3748) and secondary text color (#a0aec0)
+- **Build:** PyInstaller with FFmpeg bundling, Inno Setup with modern installer design
+- **Standalone build:** `dist/doc2md.exe` (116.3 MB), `dist/doc2md_Setup_v0.3.12.exe` (117.2 MB)
+- **GitHub Release:** https://github.com/passagain-loui/doc2md/releases/tag/v0.3.12
 
 ## [0.3.11] - 2026-08-27
 
@@ -343,3 +362,4 @@ This file records verification runs, timestamps, and quality metrics per release
 ````````````````````````
 `````````````````````````
 ``````````````````````````
+```````````````````````````

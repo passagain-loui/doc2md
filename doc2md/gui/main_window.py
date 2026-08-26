@@ -19,12 +19,14 @@ from doc2md.core.exporter import export_markdown
 
 logger = logging.getLogger(__name__)
 
-# Soft dark theme colors
-CTK_BG = "#1B222C"  # Dark soft slate
-CTK_CARD = "#242D3C"  # Card soft slate
-CTK_ACCENT_BLUE = "#3B82F6"  # Primary blue
-CTK_ACCENT_CYAN = "#06B6D4"  # Cyan accent
-CTK_TEXT = "#F1F5F9"  # Soft light text
+# macOS Modern dark theme colors
+CTK_BG = "#0a0e27"  # Deep charcoal background
+CTK_CARD = "#1a1f3a"  # Modern card slate
+CTK_ACCENT_BLUE = "#3b82f6"  # Vibrant primary blue
+CTK_ACCENT_CYAN = "#06b6d4"  # Cyan accent
+CTK_TEXT = "#f0f4f8"  # Clean light text
+CTK_BORDER = "#2d3748"  # Subtle border color
+CTK_SECONDARY_TEXT = "#a0aec0"  # Secondary text color
 
 
 class MainWindow:
@@ -48,32 +50,59 @@ class MainWindow:
         self._setup_dnd()
 
     def _setup_ui(self):
-        """Initialize UI components with 2-column soft dark theme."""
+        """Initialize UI components with macOS Modern dark theme."""
         # Root container
         root_frame = ctk.CTkFrame(self.root, fg_color=CTK_BG)
         root_frame.pack(fill="both", expand=True)
 
-        # Header Card
-        header_card = ctk.CTkFrame(root_frame, fg_color=CTK_CARD, corner_radius=8)
-        header_card.pack(fill="x", padx=10, pady=10)
+        # Header Container with Title and Version Badge
+        header_frame = ctk.CTkFrame(root_frame, fg_color="transparent")
+        header_frame.pack(fill="x", padx=16, pady=12)
+        header_frame.grid_columnconfigure(0, weight=1)
 
+        # Title Label
         title_label = ctk.CTkLabel(
-            header_card,
-            text="📄 doc2md Converter",
-            font=("Arial", 20, "bold"),
+            header_frame,
+            text="📄 doc2md",
+            font=("Helvetica", 24, "bold"),
             text_color=CTK_TEXT,
         )
-        title_label.pack(padx=15, pady=10)
+        title_label.grid(row=0, column=0, sticky="w")
+
+        # Version Badge (top-right)
+        version_badge = ctk.CTkLabel(
+            header_frame,
+            text=f"v{__version__}",
+            font=("Helvetica", 10, "bold"),
+            text_color="#94a3b8",
+            fg_color=CTK_CARD,
+            padx=8,
+            pady=4,
+            corner_radius=12,
+        )
+        version_badge.grid(row=0, column=1, sticky="e", padx=0)
+
+        # Subtitle
+        subtitle_label = ctk.CTkLabel(
+            header_frame,
+            text="Convert documents to optimized Markdown with AI",
+            font=("Helvetica", 11),
+            text_color=CTK_SECONDARY_TEXT,
+        )
+        subtitle_label.grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
         # Main content frame (2 columns)
         content_frame = ctk.CTkFrame(root_frame, fg_color="transparent")
-        content_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        content_frame.pack(fill="both", expand=True, padx=12, pady=12)
 
         # Left Column: Drop Zone (using pack inside content_frame)
         drop_card = ctk.CTkFrame(
-            content_frame, fg_color=CTK_CARD, corner_radius=8, border_width=2, border_color=CTK_ACCENT_CYAN
+            content_frame, fg_color=CTK_CARD, corner_radius=12, border_width=2, border_color=CTK_BORDER
         )
-        drop_card.pack(side="left", fill="both", expand=True, padx=(0, 5))
+        drop_card.pack(side="left", fill="both", expand=True, padx=(0, 6))
+        # Hover effect: change border on interaction
+        drop_card.bind("<Enter>", lambda e: drop_card.configure(border_color=CTK_ACCENT_BLUE))
+        drop_card.bind("<Leave>", lambda e: drop_card.configure(border_color=CTK_BORDER))
 
         self.drop_label = ctk.CTkLabel(
             drop_card,
@@ -164,23 +193,29 @@ class MainWindow:
         )
         self.analytics_text.pack(anchor="w", padx=12, pady=(0, 8))
 
-        # Progress Card with Overlay
-        progress_card = ctk.CTkFrame(root_frame, fg_color=CTK_CARD, corner_radius=8)
-        progress_card.pack(fill="x", padx=10, pady=(0, 10))
+        # Progress Card with Embedded Percentage
+        progress_card = ctk.CTkFrame(root_frame, fg_color=CTK_CARD, corner_radius=12)
+        progress_card.pack(fill="x", padx=12, pady=(0, 12))
         progress_card.grid_columnconfigure(0, weight=1)
+
+        # Progress bar container
+        progress_container = ctk.CTkFrame(progress_card, fg_color=CTK_CARD, corner_radius=8)
+        progress_container.grid(row=0, column=0, sticky="ew", padx=12, pady=10)
+        progress_container.grid_columnconfigure(0, weight=1)
 
         self.progress_var = ctk.DoubleVar(value=0)
         self.progress_bar = ctk.CTkProgressBar(
-            progress_card,
+            progress_container,
             variable=self.progress_var,
             fg_color=CTK_BG,
             progress_color=CTK_ACCENT_BLUE,
-            height=28,
+            height=32,
         )
-        self.progress_bar.grid(row=0, column=0, sticky="ew", padx=12, pady=10)
+        self.progress_bar.grid(row=0, column=0, sticky="ew")
 
+        # Percentage text embedded on the progress bar
         self.progress_overlay = ctk.CTkLabel(
-            progress_card, text="0%", font=("Arial", 10, "bold"), text_color="white"
+            progress_container, text="0%", font=("Helvetica", 11, "bold"), text_color="white"
         )
         self.progress_overlay.place(relx=0.5, rely=0.5, anchor="center")
 

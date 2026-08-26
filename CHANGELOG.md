@@ -1,5 +1,8 @@
 # CHANGELOG.md
 
+````````````````````````````text
+# CHANGELOG.md
+
 ```````````````````````````text
 # CHANGELOG.md
 
@@ -74,6 +77,22 @@
 
 All notable changes to `doc2md` are documented here.
 Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
+
+## [0.3.12] - 2026-08-27
+
+### Added
+
+- **macOS Modern UI Overhaul:** Completely redesigned dark theme with sleek charcoal background (#0a0e27), modern card styling, improved border radii (12px), and refined typography using Helvetica font family.
+- **Version Badge:** Application now displays version (`v0.3.12`) in a subtle badge in the header for quick identification.
+- **Embedded Progress Percentage:** Progress bar now displays percentage (`0%`, `50%`, `100%`) directly centered inside the progress bar track instead of floating outside.
+
+### Enhanced
+
+- Improved visual hierarchy with better spacing (padx/pady), refined accent colors, and modern macOS-inspired card design.
+- Enhanced drop zone with hover effects: border color changes from subtle gray to vibrant blue on mouse enter/leave.
+- Better typography: updated fonts to Helvetica with improved font sizes and weights for readability.
+- Refined color palette: new border color (#2d3748) and secondary text color (#a0aec0) for better visual balance.
+- Drag-and-drop zone more intuitive with visual feedback on hover.
 
 ## [0.3.11] - 2026-08-27
 
@@ -294,3 +313,4 @@ Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
 `````````````````````````
 ``````````````````````````
 ```````````````````````````
+````````````````````````````
