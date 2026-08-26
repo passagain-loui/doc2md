@@ -1,5 +1,14 @@
 # CHANGELOG.md
 
+``````````````````text
+# CHANGELOG.md
+
+`````````````````text
+# CHANGELOG.md
+
+````````````````text
+# CHANGELOG.md
+
 ```````````````text
 # CHANGELOG.md
 
@@ -38,6 +47,24 @@
 
 All notable changes to `doc2md` are documented here.
 Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
+
+## [0.3.5] - 2026-08-26
+
+### Added
+
+- **CustomTkinter Dark UI Migration:** Modern slate dark theme (`#0F172A`) with vibrant cyan accents (`#06B6D4`), professional card-based layout for all options and progress tracking.
+- Enhanced GUI components: scrollable main frame, color-coded status indicators, improved button styling.
+
+### Fixed
+
+- **TkDND Crash Guard:** Wrapped drag-and-drop initialization in try-except with graceful fallback to "Browse Files" button if tkinterdnd2 fails.
+- **Icon Embedding in Installer:** Updated Inno Setup to explicitly bind `assets/icon.ico` to desktop and start-menu shortcuts for consistent branding.
+- PyInstaller now collects all `tkinterdnd2` data files via `collect_data_files()` to prevent startup crashes.
+
+### Enhanced
+
+- Dark mode UI applied consistently across all CustomTkinter widgets.
+- Improved error handling and user feedback with color-coded status messages (cyan for progress, green for success, red for errors).
 
 ## [0.3.3] - 2026-08-26
 
@@ -162,3 +189,6 @@ Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
 `````````````
 ``````````````
 ```````````````
+````````````````
+`````````````````
+``````````````````

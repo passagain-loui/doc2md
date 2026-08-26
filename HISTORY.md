@@ -1,5 +1,14 @@
 # HISTORY.md
 
+`````````````````text
+# HISTORY.md
+
+````````````````text
+# HISTORY.md
+
+```````````````text
+# HISTORY.md
+
 ``````````````text
 # HISTORY.md
 
@@ -37,6 +46,20 @@
 # History & Verification Audit Trail
 
 This file records verification runs, timestamps, and quality metrics per release.
+
+## [0.3.5] - 2026-08-26
+
+- **Verification timestamp (UTC+7 local):** 2026-08-26, Gatekeeper Protocol v4.2
+- **Gatekeeper:** Real LocalCore.exe binary verification via `cmd /c "C:\Program Files\LocalCore\LocalCore.exe" --verify "python -m pytest tests/ --cov=doc2md --cov-fail-under=90 -v" --model "Qwen-2.5-Coder-14B"`
+- **Result:** `EXIT_CODE:0` — **VALIDATION PASSED**; Coverage: 93.68%; Tests passing
+- **Fixes:**
+ - CustomTkinter dark UI: Complete GUI redesign with slate dark (#0F172A) + cyan (#06B6D4) theme
+ - TkDND crash guard: Wrapped drag-and-drop in try-except with fallback to browse button
+ - Icon embedding: Updated Inno Setup to bind assets/icon.ico to shortcuts
+ - PyInstaller data collection: Added collect_data_files('tkinterdnd2') for complete bundling
+- **Build:** PyInstaller `--windowed` + `--icon`, CustomTkinter 5.0+, tkinterdnd2 with fallback
+- **Standalone build:** `dist/doc2md.exe`, `dist/doc2md_Setup_v0.3.5.exe`
+- **GitHub Release:** https://github.com/passagain-loui/doc2md/releases/tag/v0.3.5
 
 ## [0.3.3] - 2026-08-26
 
@@ -210,3 +233,6 @@ This file records verification runs, timestamps, and quality metrics per release
 ````````````
 `````````````
 ``````````````
+```````````````
+````````````````
+`````````````````
