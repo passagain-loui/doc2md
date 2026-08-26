@@ -16,6 +16,7 @@ except ImportError:
 from doc2md import __version__
 from doc2md.core.converter import Converter
 from doc2md.core.exporter import export_markdown
+from doc2md.engine.audio_engine import AudioEngine
 
 logger = logging.getLogger(__name__)
 
@@ -52,12 +53,17 @@ class MainWindow:
         ctk.set_appearance_mode("light")
         ctk.set_default_color_theme("blue")
 
-        self.converter = Converter(timeout=300)
+        self.converter = Converter(timeout=300, options={"audio_model": "small"})
+        self.audio_engine = AudioEngine()
         self.is_converting = False
         self.last_result = ""
 
         self._setup_ui()
         self._setup_dnd()
+
+        # Warm up the default audio model in the background so the first
+        # conversion doesn't pay the (multi-second) model-load cost lazily.
+        self._preload_model_async(self.model_var.get())
 
     def _setup_ui(self):
         """Initialize UI components with a Modern Clean (Tailwind-inspired) theme."""
@@ -203,6 +209,7 @@ class MainWindow:
             options_card,
             values=["tiny", "base", "small", "medium", "large-v3"],
             variable=self.model_var,
+            command=self._on_model_change,
             fg_color="#ffffff",
             border_color=CTK_BORDER,
             button_color=CTK_ACCENT_BLUE,
@@ -213,6 +220,16 @@ class MainWindow:
             justify="center",
         )
         model_combo.grid(row=4, column=1, sticky="e", padx=12, pady=(10, 3))
+
+        # Model warm-up status indicator
+        self.model_status_label = ctk.CTkLabel(
+            options_card,
+            text="",
+            text_color=CTK_SECONDARY_TEXT,
+            font=(UI_FONT, 10),
+            anchor="w",
+        )
+        self.model_status_label.grid(row=5, column=0, columnspan=2, sticky="w", padx=12, pady=(0, 8))
 
         # Analytics Card
         analytics_card = ctk.CTkFrame(right_frame, fg_color=CTK_CARD, corner_radius=8)
@@ -337,6 +354,39 @@ class MainWindow:
             **btn_kwargs,
         )
         exit_btn.pack(side="right", padx=3)
+
+    def _on_model_change(self, selected_model: str):
+        """Triggered when the user picks a different Whisper model size."""
+        self.converter.options["audio_model"] = selected_model
+        self._preload_model_async(selected_model)
+
+    def _preload_model_async(self, model_size: str):
+        """Warm up (load + cache) the given Whisper model in a background
+        thread, updating a visual status indicator instead of blocking the UI
+        or lazily paying the load cost during the first conversion."""
+        self.model_status_label.configure(
+            text=f"⏳ Warming up '{model_size}' model...", text_color=CTK_TEAL_TEXT
+        )
+
+        def worker():
+            try:
+                self.audio_engine.preload_model(model_size)
+                self.root.after(
+                    0,
+                    lambda: self.model_status_label.configure(
+                        text=f"✅ '{model_size}' model ready", text_color=CTK_SUCCESS
+                    ),
+                )
+            except Exception as exc:
+                logger.warning(f"Model preload failed: {exc}")
+                self.root.after(
+                    0,
+                    lambda: self.model_status_label.configure(
+                        text=f"⚠️ Model will load on first use", text_color=CTK_SECONDARY_TEXT
+                    ),
+                )
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _setup_dnd(self):
         """Setup native Windows drag-and-drop support (windnd) with fallback."""

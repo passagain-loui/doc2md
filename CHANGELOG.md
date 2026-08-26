@@ -1,5 +1,8 @@
 # CHANGELOG.md
 
+```````````````````````````````text
+# CHANGELOG.md
+
 ``````````````````````````````text
 # CHANGELOG.md
 
@@ -83,6 +86,17 @@
 
 All notable changes to `doc2md` are documented here.
 Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
+
+## [0.3.15] - 2026-08-27
+
+### Fixed
+
+- **Audio Transcribe Generator Bug:** Fixed `AttributeError: 'generator' object has no attribute 'start'` in `audio_engine.py`. `model.transcribe()` returns a `(segments_generator, info)` tuple; the generator is now explicitly unpacked and consumed into a list before segments are iterated for timestamp formatting.
+
+### Added
+
+- **Model Pre-loading / Warm-up:** The GUI now asynchronously loads (and caches) the selected Whisper model on startup and whenever the model dropdown changes, instead of paying the load cost lazily on the first conversion. A status indicator (`⏳ Warming up...` / `✅ model ready`) shows progress next to the model selector. `AudioEngine` gained a model instance cache (`_model_cache`) and a public `preload_model()` method.
+- **Inno Setup Post-Install Launch Option:** The installer now offers a "Launch doc2md Converter" checkbox (`Flags: postinstall nowait skipifsilent`) on the final wizard page.
 
 ## [0.3.14] - 2026-08-27
 
@@ -349,3 +363,4 @@ Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
 ````````````````````````````
 `````````````````````````````
 ``````````````````````````````
+```````````````````````````````

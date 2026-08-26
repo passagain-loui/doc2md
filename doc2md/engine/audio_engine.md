@@ -47,7 +47,7 @@ class AudioEngine(BaseEngine):
     name = "audio"
     supported_kinds = (FileKind.AUDIO, FileKind.VIDEO)
 
-    _model_cache = None
+    _model_cache: dict[str, Any] = {}
     _model_size = "small"
     MODEL_SIZES = ("tiny", "base", "small", "medium", "large-v3")
     MODEL_CACHE_DIR = Path.home() / ".cache" / "doc2md" / "models"
@@ -80,7 +80,11 @@ class AudioEngine(BaseEngine):
         model = self._load_model(model_size, options.get("download_progress"))
 
         try:
-            segments = model.transcribe(str(source), language="en")
+            segments_gen, info = model.transcribe(str(source), language="en")
+            # faster-whisper returns a lazy generator; consume it fully here
+            # so downstream formatting can iterate plain segment objects
+            # instead of accidentally iterating the (generator, info) tuple.
+            segments = list(segments_gen)
         except Exception as e:
             raise ConversionError(f"Transcription failed: {e}")
 
@@ -104,7 +108,12 @@ class AudioEngine(BaseEngine):
             return 0.0
 
     def _load_model(self, model_size: str, progress_callback=None):
-        """Load or download faster-whisper model."""
+        """Load or download faster-whisper model, reusing a cached instance
+        (e.g. one warmed up via `preload_model`) when available."""
+        if model_size in self._model_cache:
+            logger.debug(f"Reusing preloaded model: {model_size}")
+            return self._model_cache[model_size]
+
         try:
             from faster_whisper import WhisperModel
         except ImportError:
@@ -125,7 +134,16 @@ class AudioEngine(BaseEngine):
         else:
             model = WhisperModel(model_size, device=device, compute_type=compute_type)
 
+        self._model_cache[model_size] = model
         return model
+
+    def preload_model(self, model_size: str) -> None:
+        """Eagerly load (and cache) a Whisper model ahead of any conversion,
+        so the GUI can warm up the model on startup / model-selection change
+        instead of paying the load cost lazily during the first conversion."""
+        if model_size not in self.MODEL_SIZES:
+            model_size = self._model_size
+        self._load_model(model_size)
 
     def _has_gpu(self) -> bool:
         """Check if NVIDIA GPU is available."""

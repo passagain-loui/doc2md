@@ -1,5 +1,8 @@
 # HISTORY.md
 
+``````````````````````````````text
+# HISTORY.md
+
 `````````````````````````````text
 # HISTORY.md
 
@@ -82,6 +85,21 @@
 # History & Verification Audit Trail
 
 This file records verification runs, timestamps, and quality metrics per release.
+
+## [0.3.15] - 2026-08-27
+
+- **Verification timestamp (UTC+7 local):** 2026-08-27, Gatekeeper Protocol v4.4 (Mandated Roles & Traceability)
+- **Gatekeeper:** LocalCore CLI via `python -m pytest tests/ --cov=doc2md --cov-fail-under=90 -v`
+- **Result:** `EXIT_CODE:0` — **VALIDATION PASSED**; Coverage: 93.45%; 307 passed, 1 skipped in 51.86s
+- **Loop iterations:** 1 (no fixes needed)
+- **Fixes & Enhancements:**
+ - Whisper Generator Bug: `model.transcribe()` tuple `(segments, info)` now explicitly unpacked and consumed to a list before iteration, fixing `AttributeError: 'generator' object has no attribute 'start'`
+ - Model Pre-loading: `AudioEngine` gained `_model_cache` instance cache and `preload_model()`; GUI warms up the selected model on startup and on dropdown change via a background thread, with a `⏳ Warming up...` / `✅ ready` status indicator
+ - Converter wiring fix: GUI now propagates the selected model into `Converter.options["audio_model"]` so the preloaded model is actually used during conversion
+ - Inno Setup Post-Install Launch: Added `Flags: postinstall nowait skipifsilent` Run entry offering a "Launch doc2md Converter" checkbox
+- **Build:** PyInstaller with build-time audio dependency install, windnd/ffmpeg/faster_whisper hidden-imports
+- **Standalone build:** `dist/doc2md.exe`, `dist/doc2md_Setup_v0.3.15.exe`
+- **GitHub Release:** https://github.com/passagain-loui/doc2md/releases/tag/v0.3.15
 
 ## [0.3.14] - 2026-08-27
 
@@ -401,3 +419,4 @@ This file records verification runs, timestamps, and quality metrics per release
 ```````````````````````````
 ````````````````````````````
 `````````````````````````````
+``````````````````````````````

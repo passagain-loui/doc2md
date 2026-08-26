@@ -3,7 +3,7 @@
 
 #define AppName "doc2md"
 #ifndef Version
-#define Version "0.3.14"
+#define Version "0.3.15"
 #endif
 
 [Setup]
@@ -48,6 +48,7 @@ Root: HKCU; Subkey: "Software\Classes\*\shell\doc2md\command"; ValueType: string
 [Run]
 Filename: "{sys}\ie4uinit.exe"; Parameters: "-show"; Flags: runhidden waituntilterminated skipifsilent
 Filename: "{app}\doc2md.exe"; Parameters: "--version"; Description: "Verify installation"; Flags: runhidden nowait skipifsilent
+Filename: "{app}\doc2md.exe"; Description: "Launch {#AppName} Converter"; Flags: postinstall nowait skipifsilent
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"
