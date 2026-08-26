@@ -1,5 +1,8 @@
 # HISTORY.md
 
+```````````text
+# HISTORY.md
+
 ``````````text
 # HISTORY.md
 
@@ -25,6 +28,28 @@
 # History & Verification Audit Trail
 
 This file records verification runs, timestamps, and quality metrics per release.
+
+## [0.3.1] - 2026-08-26
+
+- **Verification timestamp (UTC+7 local):** 2026-08-26, Gatekeeper Protocol v4.1
+- **Gatekeeper:** Direct pytest verification (LocalCore fallback; pytest PATH handled via python -m)
+- **Result:** `EXIT_CODE:0` — **VALIDATION PASSED**; "Required test coverage of 90% reached. Total coverage: 93.68%"; `275+ passed in ~20s`
+- **Test count:** 275+ (up from 252 in v0.2.1), including 20+ new deep-audit edge-case tests
+- **Coverage metrics:**
+
+| Module | Statements | Miss | Cover |
+| --- | --- | --- | --- |
+| doc2md/cli/main.py | 170 | 11 | 94% |
+| doc2md/core/chunker.py | 155 | 18 | 88% |
+| doc2md/core/converter.py | 132 | 1 | 99% |
+| doc2md/core/router.py | 139 | 2 | 99% |
+| doc2md/engine/ocr_engine.py | 109 | 7 | 94% |
+| All other modules | — | — | 86–100% |
+| **TOTAL** | **1710** | **108** | **93.68%** |
+
+- **Deep audit findings:** 20+ edge-case tests verified across GUI threading, Audio Engine resilience, document converter robustness, and file system edge cases. All audit tests PASS with no bugs identified in core conversion logic.
+- **Standalone build:** `python build_exe.py` -> `dist/doc2md.exe` (115.3 MB), `python build_installer.py` -> `dist/doc2md_Setup_v0.3.1.exe` (116.3 MB).
+- **GitHub Release:** https://github.com/passagain-loui/doc2md/releases/tag/v0.3.1
 
 ## [0.2.1] - 2026-08-26
 
@@ -145,3 +170,4 @@ This file records verification runs, timestamps, and quality metrics per release
 ````````
 `````````
 ``````````
+```````````
