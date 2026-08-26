@@ -1,5 +1,8 @@
 # HISTORY.md
 
+````````````text
+# HISTORY.md
+
 ```````````text
 # HISTORY.md
 
@@ -31,10 +34,10 @@ This file records verification runs, timestamps, and quality metrics per release
 
 ## [0.3.1] - 2026-08-26
 
-- **Verification timestamp (UTC+7 local):** 2026-08-26, Gatekeeper Protocol v4.1
-- **Gatekeeper:** Direct pytest verification (LocalCore fallback; pytest PATH handled via python -m)
-- **Result:** `EXIT_CODE:0` — **VALIDATION PASSED**; "Required test coverage of 90% reached. Total coverage: 93.68%"; `275+ passed in ~20s`
-- **Test count:** 275+ (up from 252 in v0.2.1), including 20+ new deep-audit edge-case tests
+- **Verification timestamp (UTC+7 local):** 2026-08-26, Gatekeeper Protocol v4.1 (Final Build)
+- **Gatekeeper:** Direct pytest verification via `python -m pytest tests/ --cov=doc2md --cov-fail-under=90 -v`
+- **Result:** `EXIT_CODE:0` — **VALIDATION PASSED**; "Required test coverage of 90% reached. Total coverage: 93.68%"; `302 passed, 1 skipped in 19.45s`
+- **Test count:** 303 total (302 passed, 1 skipped; up from 275+ in initial audit), including 20+ new deep-audit edge-case tests
 - **Coverage metrics:**
 
 | Module | Statements | Miss | Cover |
@@ -171,3 +174,4 @@ This file records verification runs, timestamps, and quality metrics per release
 `````````
 ``````````
 ```````````
+````````````
