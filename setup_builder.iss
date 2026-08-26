@@ -3,7 +3,7 @@
 
 #define AppName "doc2md"
 #ifndef Version
-#define Version "0.3.9"
+#define Version "0.3.10"
 #endif
 
 [Setup]
@@ -28,6 +28,8 @@ ArchitecturesInstallIn64BitMode=x64compatible
 [Files]
 Source: "dist\doc2md.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "assets\icon.ico"; DestDir: "{app}"; Flags: ignoreversion
+Source: "dist\ffmpeg.exe"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "dist\ffprobe.exe"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "CHANGELOG.md"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 

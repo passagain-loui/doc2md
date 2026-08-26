@@ -40,14 +40,18 @@ HIDDEN_IMPORTS = [
     "tiktoken_ext.openai_public",
     "typer",
     "rich",
+    "customtkinter",
+    "tkinterdnd2",
 ]
 
 
-def collect_tiktoken_resources() -> list[str]:
+def collect_tkinter_resources() -> list[str]:
+    """Collect data files for tkinterdnd2 and other GUI libraries."""
     args: list[str] = []
     try:
-        from PyInstaller.utils.hooks import collect_all
+        from PyInstaller.utils.hooks import collect_all, collect_data_files
 
+        # Collect tiktoken resources
         for package in ("tiktoken_ext",):
             datas, binaries, hiddenimports = collect_all(package)
             for source, target in datas:
@@ -56,8 +60,33 @@ def collect_tiktoken_resources() -> list[str]:
                 args.extend(["--add-binary", f"{binary[0]};{binary[1]}"])
             for hidden in hiddenimports:
                 args.extend(["--hidden-import", hidden])
+
+        # Collect tkinterdnd2 data files (for drag-and-drop)
+        tkdnd_datas = collect_data_files('tkinterdnd2')
+        for source, target in tkdnd_datas:
+            args.extend(["--add-data", f"{source}{Path(':') if sys.platform != 'win32' else ';'}{target}"])
+
     except Exception as exc:
-        print(f"[build_exe] tiktoken resource collection skipped: {exc}")
+        print(f"[build_exe] resource collection skipped: {exc}")
+    return args
+
+
+def bundle_ffmpeg_binaries() -> list[str]:
+    """Bundle FFmpeg binaries if available on system PATH."""
+    args: list[str] = []
+    try:
+        ffmpeg_path = shutil.which("ffmpeg")
+        ffprobe_path = shutil.which("ffprobe")
+
+        if ffmpeg_path and ffprobe_path:
+            # Bundle both ffmpeg and ffprobe executables
+            args.extend(["--add-binary", f"{ffmpeg_path};."])
+            args.extend(["--add-binary", f"{ffprobe_path};."])
+            print(f"[build_exe] FFmpeg binaries bundled: {ffmpeg_path}")
+        else:
+            print("[build_exe] FFmpeg not found on PATH - audio conversion will require system FFmpeg")
+    except Exception as exc:
+        print(f"[build_exe] FFmpeg bundling skipped: {exc}")
     return args
 
 
@@ -69,6 +98,9 @@ def build() -> int:
         print(f"[build_exe] entry script missing: {ENTRY}")
         return 2
 
+    # Determine if we need icon file
+    icon_path = ROOT / "assets" / "icon.ico"
+
     cmd = [
         sys.executable,
         "-m",
@@ -76,7 +108,7 @@ def build() -> int:
         "--noconfirm",
         "--clean",
         "--onefile",
-        "--console",
+        "--windowed",
         "--name",
         "doc2md",
         "--workpath",
@@ -86,9 +118,13 @@ def build() -> int:
         "--specpath",
         str(BUILD_DIR),
     ]
+
+    if icon_path.is_file():
+        cmd.extend(["--icon", str(icon_path)])
     for hidden in HIDDEN_IMPORTS:
         cmd.extend(["--hidden-import", hidden])
-    cmd.extend(collect_tiktoken_resources())
+    cmd.extend(collect_tkinter_resources())
+    cmd.extend(bundle_ffmpeg_binaries())
     cmd.append(str(ENTRY))
 
     print("[build_exe]", " ".join(cmd))

@@ -68,6 +68,25 @@ def collect_tkinter_resources() -> list[str]:
     return args
 
 
+def bundle_ffmpeg_binaries() -> list[str]:
+    """Bundle FFmpeg binaries if available on system PATH."""
+    args: list[str] = []
+    try:
+        ffmpeg_path = shutil.which("ffmpeg")
+        ffprobe_path = shutil.which("ffprobe")
+
+        if ffmpeg_path and ffprobe_path:
+            # Bundle both ffmpeg and ffprobe executables
+            args.extend(["--add-binary", f"{ffmpeg_path};."])
+            args.extend(["--add-binary", f"{ffprobe_path};."])
+            print(f"[build_exe] FFmpeg binaries bundled: {ffmpeg_path}")
+        else:
+            print("[build_exe] FFmpeg not found on PATH - audio conversion will require system FFmpeg")
+    except Exception as exc:
+        print(f"[build_exe] FFmpeg bundling skipped: {exc}")
+    return args
+
+
 def build() -> int:
     if shutil.which("python") is None and sys.executable == "":
         print("[build_exe] python interpreter not found")
@@ -102,6 +121,7 @@ def build() -> int:
     for hidden in HIDDEN_IMPORTS:
         cmd.extend(["--hidden-import", hidden])
     cmd.extend(collect_tkinter_resources())
+    cmd.extend(bundle_ffmpeg_binaries())
     cmd.append(str(ENTRY))
 
     print("[build_exe]", " ".join(cmd))

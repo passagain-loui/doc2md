@@ -21,7 +21,7 @@ from doc2md.core.stats import build_rows, render_table
 app = typer.Typer(
     name="doc2md",
     help="Convert documents (PDF/DOCX/XLSX/PPTX/HTML/EML/images/code) to token-optimized Markdown.",
-    no_args_is_help=True,
+    no_args_is_help=False,
     add_completion=False,
 )
 

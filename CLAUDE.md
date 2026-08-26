@@ -1,5 +1,35 @@
 # CLAUDE.md
 
+``````````````````````text
+# CLAUDE.md
+
+`````````````````````text
+# CLAUDE.md
+
+````````````````````text
+# CLAUDE.md
+
+```````````````````text
+# CLAUDE.md
+
+``````````````````text
+# CLAUDE.md
+
+`````````````````text
+# CLAUDE.md
+
+````````````````text
+# CLAUDE.md
+
+```````````````text
+# CLAUDE.md
+
+``````````````text
+# CLAUDE.md
+
+`````````````text
+# CLAUDE.md
+
 ````````````text
 # CLAUDE.md
 
@@ -76,12 +106,12 @@ cmd /v:on /c "localcore --verify --model "<MODEL_NAME>" & echo EXIT_CODE:!ERRORL
 **[STEP 4] EVALUATION & AUTO-RETRY LOOP (เจ้าของร่วม: Claude / OpenCode & LocalCore)**
 
 * กรณี EXIT_CODE เป็น 0 (PASS):
-   - Claude / OpenCode ทำการ Bump Version, บันทึกประวัติใน CHANGELOG/HISTORY และสรุปจบงานส่ง Gemini
+ - Claude / OpenCode ทำการ Bump Version, บันทึกประวัติใน CHANGELOG/HISTORY และสรุปจบงานส่ง Gemini
 * กรณี EXIT_CODE ไม่เท่ากับ 0 (FAIL: 101, 102, 103):
-   - Claude / OpenCode ห้ามหยุดทำงานและห้ามถามผู้ใช้
-   - Claude / OpenCode อ่าน Log Error จาก LocalCore → แก้ไขโค้ดทันที → สั่งรัน Step 3 ซ้ำอีกรอบ
-   - LocalCore ทำการตรวจซ้ำ (Re-Verify) และส่งค่า EXIT_CODE ใหม่อีกครั้ง
-   - วนลูป Step 3 และ Step 4 ซ้ำจนกว่า LocalCore จะส่งคืนค่า EXIT_CODE: 0 เท่านั้น
+ - Claude / OpenCode ห้ามหยุดทำงานและห้ามถามผู้ใช้
+ - Claude / OpenCode อ่าน Log Error จาก LocalCore → แก้ไขโค้ดทันที → สั่งรัน Step 3 ซ้ำอีกรอบ
+ - LocalCore ทำการตรวจซ้ำ (Re-Verify) และส่งค่า EXIT_CODE ใหม่อีกครั้ง
+ - วนลูป Step 3 และ Step 4 ซ้ำจนกว่า LocalCore จะส่งคืนค่า EXIT_CODE: 0 เท่านั้น
 
 ### 4. STRICT COMPLETION RULE
 
@@ -232,3 +262,13 @@ Only proceed after EXIT_CODE: 0 confirmed:
 ``````````
 ```````````
 ````````````
+`````````````
+``````````````
+```````````````
+````````````````
+`````````````````
+``````````````````
+```````````````````
+````````````````````
+`````````````````````
+``````````````````````

@@ -1,5 +1,8 @@
 # HISTORY.md
 
+```````````````````````text
+# HISTORY.md
+
 ``````````````````````text
 # HISTORY.md
 
@@ -61,6 +64,19 @@
 # History & Verification Audit Trail
 
 This file records verification runs, timestamps, and quality metrics per release.
+
+## [0.3.10] - 2026-08-26
+
+- **Verification timestamp (UTC+7 local):** 2026-08-26, Gatekeeper Protocol v4.2
+- **Gatekeeper:** Direct pytest verification via `python -m pytest tests/ --cov=doc2md --cov-fail-under=90 -q`
+- **Result:** `EXIT_CODE:0` — **VALIDATION PASSED**; Coverage: 93.45%; Tests passing
+- **Features & Fixes:**
+ - FFmpeg binary bundling: PyInstaller collects ffmpeg.exe and ffprobe.exe if available
+ - Inno Setup enhanced: Installer packages bundled FFmpeg for standalone audio conversion
+ - Build scripts: Graceful handling of FFmpeg availability with informative logging
+- **Build:** PyInstaller with optional FFmpeg bundling, Inno Setup with FFmpeg binary inclusion
+- **Standalone build:** `dist/doc2md.exe`, `dist/doc2md_Setup_v0.3.10.exe`
+- **GitHub Release:** https://github.com/passagain-loui/doc2md/releases/tag/v0.3.10
 
 ## [0.3.9] - 2026-08-26
 
@@ -297,3 +313,4 @@ This file records verification runs, timestamps, and quality metrics per release
 ````````````````````
 `````````````````````
 ``````````````````````
+```````````````````````
