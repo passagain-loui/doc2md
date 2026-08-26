@@ -76,13 +76,17 @@ class MainWindow:
 
         self.drop_label = ctk.CTkLabel(
             drop_card,
-            text="📁 Drag & Drop Files Here\n(PDF, DOCX, Images, Audio, Video)",
+            text="📁 Click or Drag & Drop Files Here\n(PDF, DOCX, Images, Audio, Video)",
             font=("Arial", 13),
             text_color=CTK_ACCENT_CYAN,
             wraplength=350,
         )
         self.drop_label.pack(fill="both", expand=True, padx=30, pady=30)
         self.drop_card = drop_card
+
+        # Bind click event to drop card for fallback file browser
+        drop_card.bind("<Button-1>", lambda e: self.browse_files())
+        self.drop_label.bind("<Button-1>", lambda e: self.browse_files())
 
         # Right Column: Options & Analytics
         right_frame = ctk.CTkScrollableFrame(content_frame, fg_color="transparent")
@@ -306,6 +310,7 @@ class MainWindow:
             self.root.update()
 
             results = []
+            errors = []
             for i, file_path in enumerate(files):
                 progress = ((i + 1) / total) * 100
                 self.progress_var.set(progress / 100)
@@ -318,8 +323,12 @@ class MainWindow:
                         results.append(result.markdown)
                         logger.info(f"✅ Converted: {file_path}")
                     else:
-                        logger.error(f"❌ Failed: {file_path} - {result.error}")
+                        error_msg = f"{Path(file_path).name}: {result.error}"
+                        errors.append(error_msg)
+                        logger.error(f"❌ Failed: {error_msg}")
                 except Exception as exc:
+                    error_msg = f"{Path(file_path).name}: {type(exc).__name__}: {str(exc)}"
+                    errors.append(error_msg)
                     logger.error(f"❌ Error converting {file_path}: {exc}")
 
             self.progress_var.set(1.0)
@@ -327,16 +336,32 @@ class MainWindow:
 
             if results:
                 self.last_result = "\n\n---\n\n".join(results)
-                self.status_label.configure(
-                    text=f"✅ Success: {len(results)} file(s) converted", text_color="#10B981"
-                )
+                status_msg = f"✅ Success: {len(results)} file(s) converted"
+                if errors:
+                    status_msg += f" ({len(errors)} failed)"
+                self.status_label.configure(text=status_msg, text_color="#10B981")
                 self.analytics_text.configure(text=f"Files: {len(results)} | Ready to export")
+
+                # Show errors if any
+                if errors:
+                    error_summary = "\n".join(errors[:5])
+                    if len(errors) > 5:
+                        error_summary += f"\n... and {len(errors) - 5} more errors"
+                    messagebox.showwarning("Partial Conversion", f"Some files failed to convert:\n\n{error_summary}")
             else:
                 self.status_label.configure(text="❌ No files converted", text_color="#DC2626")
+                if errors:
+                    error_summary = "\n".join(errors[:5])
+                    if len(errors) > 5:
+                        error_summary += f"\n... and {len(errors) - 5} more errors"
+                    messagebox.showerror("Conversion Failed", f"All files failed to convert:\n\n{error_summary}")
+                else:
+                    messagebox.showerror("Conversion Failed", "No files were converted. Please check your files and try again.")
 
         except Exception as exc:
             logger.exception(f"Conversion error: {exc}")
             self.status_label.configure(text=f"❌ Error: {exc}", text_color="#DC2626")
+            messagebox.showerror("Conversion Error", f"An unexpected error occurred:\n\n{type(exc).__name__}: {str(exc)}")
         finally:
             self.is_converting = False
 

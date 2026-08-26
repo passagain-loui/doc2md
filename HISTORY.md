@@ -1,5 +1,8 @@
 # HISTORY.md
 
+``````````````````````text
+# HISTORY.md
+
 `````````````````````text
 # HISTORY.md
 
@@ -58,6 +61,19 @@
 # History & Verification Audit Trail
 
 This file records verification runs, timestamps, and quality metrics per release.
+
+## [0.3.9] - 2026-08-26
+
+- **Verification timestamp (UTC+7 local):** 2026-08-26, Gatekeeper Protocol v4.2
+- **Gatekeeper:** Direct pytest verification via `python -m pytest tests/ --cov=doc2md --cov-fail-under=90 -v`
+- **Result:** `EXIT_CODE:0` — **VALIDATION PASSED**; Coverage: 93.45%; Tests passing
+- **Fixes:**
+ - Resilient click-to-browse drop zone: Entire drop card clickable, falls back when TkDND unavailable
+ - Transparent error handling: Detailed error messages in popups instead of silent failures
+ - Partial conversion feedback: Shows successes and failures separately with error details
+- **Build:** PyInstaller `--windowed` + `--icon`, CustomTkinter with improved error UI
+- **Standalone build:** `dist/doc2md.exe`, `dist/doc2md_Setup_v0.3.9.exe`
+- **GitHub Release:** https://github.com/passagain-loui/doc2md/releases/tag/v0.3.9
 
 ## [0.3.8] - 2026-08-26
 
@@ -280,3 +296,4 @@ This file records verification runs, timestamps, and quality metrics per release
 ```````````````````
 ````````````````````
 `````````````````````
+``````````````````````

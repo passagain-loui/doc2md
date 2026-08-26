@@ -1,5 +1,8 @@
 # CHANGELOG.md
 
+```````````````````````text
+# CHANGELOG.md
+
 ``````````````````````text
 # CHANGELOG.md
 
@@ -59,6 +62,20 @@
 
 All notable changes to `doc2md` are documented here.
 Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
+
+## [0.3.9] - 2026-08-26
+
+### Fixed
+
+- **Resilient Click-to-Browse Drop Zone:** Updated drop zone UI to indicate clicking is available. Entire drop card now responds to clicks and opens file browser, providing reliable fallback when TkDND fails.
+- **Transparent Conversion Error Handling:** All conversion errors now display detailed error messages in popup dialogs instead of silently failing. Error tracking collects all failures and shows them to user with file names and error types.
+- **Partial Conversion Feedback:** When some files convert successfully and others fail, user sees status showing both successes and failures with error details.
+
+### Enhanced
+
+- Drop zone text updated: "Click or Drag & Drop Files Here" for better UX clarity.
+- Error messages now include file name, exception type, and detailed message for debugging.
+- Graceful handling of edge cases: missing dependencies, corrupted files, permission errors.
 
 ## [0.3.8] - 2026-08-26
 
@@ -234,3 +251,4 @@ Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
 ````````````````````
 `````````````````````
 ``````````````````````
+```````````````````````
