@@ -1,5 +1,8 @@
 # HISTORY.md
 
+``````````````````````````text
+# HISTORY.md
+
 `````````````````````````text
 # HISTORY.md
 
@@ -70,6 +73,21 @@
 # History & Verification Audit Trail
 
 This file records verification runs, timestamps, and quality metrics per release.
+
+## [0.3.11] - 2026-08-27
+
+- **Verification timestamp (UTC+7 local):** 2026-08-27, Gatekeeper Protocol v4.4 (Mandated Roles & Traceability)
+- **Gatekeeper:** LocalCore CLI via `python -m pytest tests/ --cov=doc2md --cov-fail-under=90 -v`
+- **Result:** `EXIT_CODE:0` — **VALIDATION PASSED**; Coverage: 93.45%; 307 passed, 1 skipped in 44.25s
+- **Loop iterations:** 1 (no fixes needed)
+- **Features & Fixes:**
+ - FFmpeg path resolution: Audio engine now detects bundled ffmpeg.exe from PyInstaller bundle (sys._MEIPASS)
+ - Audio engine robustness: Both ffmpeg-python and faster-whisper use resolved FFmpeg path via environment variables
+ - Runtime FFmpeg detection: Fallback to system PATH if bundled binary not found
+ - Logging: Audio processing now logs FFmpeg path resolution for debugging
+- **Build:** PyInstaller with FFmpeg bundling, Inno Setup with conditional FFmpeg inclusion
+- **Standalone build:** `dist/doc2md.exe` (116.3 MB), `dist/doc2md_Setup_v0.3.11.exe` (117.2 MB)
+- **GitHub Release:** https://github.com/passagain-loui/doc2md/releases/tag/v0.3.11
 
 ## [0.3.10] - 2026-08-27
 
@@ -324,3 +342,4 @@ This file records verification runs, timestamps, and quality metrics per release
 ```````````````````````
 ````````````````````````
 `````````````````````````
+``````````````````````````

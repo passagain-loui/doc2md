@@ -1,5 +1,8 @@
 # CHANGELOG.md
 
+```````````````````````````text
+# CHANGELOG.md
+
 ``````````````````````````text
 # CHANGELOG.md
 
@@ -71,6 +74,18 @@
 
 All notable changes to `doc2md` are documented here.
 Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
+
+## [0.3.11] - 2026-08-27
+
+### Fixed
+
+- **FFmpeg Path Resolution:** Hardcoded bundled FFmpeg runtime detection in audio processing. When running as PyInstaller bundle, audio engine now automatically detects and uses `ffmpeg.exe` and `ffprobe.exe` from `sys._MEIPASS` (bundled location) or system PATH, ensuring audio transcription works out-of-the-box without requiring separate FFmpeg installation.
+- **Audio Engine Robustness:** Both ffmpeg-python and faster-whisper now have proper FFmpeg path resolution through environment variable setup before initialization.
+
+### Enhanced
+
+- Audio processing now logs FFmpeg path resolution for debugging: shows whether bundled or system FFmpeg is used.
+- Improved error messages when FFmpeg is not available in either bundled or system location.
 
 ## [0.3.10] - 2026-08-27
 
@@ -278,3 +293,4 @@ Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
 ````````````````````````
 `````````````````````````
 ``````````````````````````
+```````````````````````````

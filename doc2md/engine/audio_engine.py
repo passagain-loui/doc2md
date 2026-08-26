@@ -6,6 +6,7 @@ import logging
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,26 @@ from doc2md.core.router import FileKind
 from doc2md.engine.base import BaseEngine
 
 logger = logging.getLogger(__name__)
+
+
+def _get_ffmpeg_path() -> str:
+    """Resolve FFmpeg executable path from bundled or system location."""
+    if getattr(sys, 'frozen', False):
+        # Running as PyInstaller bundle
+        base_path = sys._MEIPASS
+        ffmpeg_exe = os.path.join(base_path, "ffmpeg.exe")
+        if os.path.exists(ffmpeg_exe):
+            logger.debug(f"Using bundled FFmpeg: {ffmpeg_exe}")
+            return ffmpeg_exe
+
+    # Fallback to system PATH
+    ffmpeg_in_path = shutil.which("ffmpeg")
+    if ffmpeg_in_path:
+        logger.debug(f"Using system FFmpeg: {ffmpeg_in_path}")
+        return ffmpeg_in_path
+
+    logger.warning("FFmpeg not found in bundled location or system PATH")
+    return "ffmpeg"  # Let ffmpeg-python handle the lookup
 
 
 class AudioEngine(BaseEngine):
@@ -42,6 +63,12 @@ class AudioEngine(BaseEngine):
                 "Install via: pip install 'doc2md[audio]'"
             )
 
+        # Ensure bundled FFmpeg is available for both ffmpeg-python and faster-whisper
+        ffmpeg_path = _get_ffmpeg_path()
+        if ffmpeg_path != "ffmpeg":
+            ffmpeg_dir = os.path.dirname(ffmpeg_path)
+            os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
+
         model_size = options.get("audio_model", self._model_size)
         if model_size not in self.MODEL_SIZES:
             model_size = self._model_size
@@ -60,6 +87,13 @@ class AudioEngine(BaseEngine):
         """Get audio/video duration in seconds."""
         try:
             import ffmpeg
+
+            # Ensure bundled FFmpeg is in PATH for ffmpeg-python
+            ffmpeg_path = _get_ffmpeg_path()
+            if ffmpeg_path != "ffmpeg":
+                # Prepend bundled FFmpeg directory to PATH
+                ffmpeg_dir = os.path.dirname(ffmpeg_path)
+                os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
 
             probe = ffmpeg.probe(str(source))
             return float(probe["format"]["duration"])
