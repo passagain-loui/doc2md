@@ -1,5 +1,8 @@
 # HISTORY.md
 
+`````````````text
+# HISTORY.md
+
 ````````````text
 # HISTORY.md
 
@@ -31,6 +34,19 @@
 # History & Verification Audit Trail
 
 This file records verification runs, timestamps, and quality metrics per release.
+
+## [0.3.2] - 2026-08-26
+
+- **Verification timestamp (UTC+7 local):** 2026-08-26, Gatekeeper Protocol v4.1
+- **Gatekeeper:** Direct pytest verification via `python -m pytest tests/ --cov=doc2md --cov-fail-under=90 -v`
+- **Result:** `EXIT_CODE:0` — **VALIDATION PASSED**; "Required test coverage of 90% reached. Total coverage: 93.68%"; `302 passed, 1 skipped in ~20s`
+- **Test count:** 303 total (302 passed, 1 skipped) — no new tests required; fix is entry-point logic only
+- **Coverage metrics:** 93.68% (1710 core statements, 108 missed) — unchanged from v0.3.1
+- **Fix:** Auto-launch GUI when exe is run with zero CLI arguments (double-click from desktop/installer)
+- **Entry-point change:** Updated `doc2md_exe_entry.py` to detect `len(sys.argv) == 1` and inject `"gui"` subcommand
+- **CLI config change:** Updated `typer.Typer` config `no_args_is_help=False` to allow zero-argument entry
+- **Standalone build:** `python build_exe.py` -> `dist/doc2md.exe` (115.3 MB), `python build_installer.py` -> `dist/doc2md_Setup_v0.3.2.exe` (116.3 MB)
+- **GitHub Release:** https://github.com/passagain-loui/doc2md/releases/tag/v0.3.2
 
 ## [0.3.1] - 2026-08-26
 
@@ -175,3 +191,4 @@ This file records verification runs, timestamps, and quality metrics per release
 ``````````
 ```````````
 ````````````
+`````````````

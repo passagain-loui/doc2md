@@ -1,5 +1,14 @@
 # CHANGELOG.md
 
+``````````````text
+# CHANGELOG.md
+
+`````````````text
+# CHANGELOG.md
+
+````````````text
+# CHANGELOG.md
+
 ```````````text
 # CHANGELOG.md
 
@@ -26,6 +35,14 @@
 
 All notable changes to `doc2md` are documented here.
 Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
+
+## [0.3.2] - 2026-08-26
+
+### Fixed
+
+- Auto-launch GUI dashboard when `doc2md.exe` is run with no CLI arguments (double-click from desktop/installer shortcuts).
+- Improved entry-point logic to gracefully handle zero-argument execution without displaying help text.
+- Enhanced user experience: launching the executable now defaults to interactive GUI mode instead of CLI help mode.
 
 ## [0.3.1] - 2026-08-26
 
@@ -125,3 +142,6 @@ Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
 `````````
 ``````````
 ```````````
+````````````
+`````````````
+``````````````
