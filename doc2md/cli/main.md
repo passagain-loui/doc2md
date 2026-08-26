@@ -266,6 +266,25 @@ def context_menu_status_command() -> None:
     typer.echo(contextmenu.status())
 
 
+@app.command("gui")
+def gui_command() -> None:
+    """Launch the interactive GUI dashboard for drag-and-drop file conversion."""
+    try:
+        import tkinter as tk
+        from doc2md.gui import MainWindow
+
+        root = tk.Tk()
+        app_window = MainWindow(root)
+        root.mainloop()
+    except ImportError as e:
+        typer.secho(
+            f"GUI dependencies missing: {e}\n"
+            "Install via: pip install 'doc2md[gui]'",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=1)
+
+
 if __name__ == "__main__":
     app()
 ```

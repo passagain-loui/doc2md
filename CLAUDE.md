@@ -1,3 +1,18 @@
+# CLAUDE.md
+
+````````text
+# CLAUDE.md
+
+```````text
+# CLAUDE.md
+
+``````text
+# CLAUDE.md
+
+`````text
+# CLAUDE.md
+
+````text
 # CLAUDE.md — Project Development & Verification Protocol
 
 ## TRI-AGENT WORKFLOW PROTOCOL (v4.1 — RE-VERIFICATION ENABLED)
@@ -73,13 +88,13 @@ This loop continues until EXIT_CODE: 0 is achieved:
 
 **Step D (Evaluate Re-Audit)**
 - If Re-Audit returns **EXIT_CODE: 0**
-  - ✅ Fix confirmed! Proceed to Version Bump & Release
-  - ✅ Document the fix in HISTORY.md
-  - ✅ Update CHANGELOG.md
+ - ✅ Fix confirmed! Proceed to Version Bump & Release
+ - ✅ Document the fix in HISTORY.md
+ - ✅ Update CHANGELOG.md
 
 - If Re-Audit STILL returns **EXIT_CODE != 0**
-  - ❌ Return to Step A and repeat the loop
-  - ❌ Maximum retries: 5 (then escalate/investigate deeper)
+ - ❌ Return to Step A and repeat the loop
+ - ❌ Maximum retries: 5 (then escalate/investigate deeper)
 
 #### [C] STRICT EXIT CONDITION
 
@@ -168,12 +183,12 @@ Only proceed after EXIT_CODE: 0 confirmed:
 
 ### 8. PROJECT CONTEXT
 
-**Repository:** https://github.com/passagain-loui/doc2md  
-**Current Version:** 0.2.1 (Hardened Release)  
-**Python:** 3.9+ (tested on 3.10, 3.11)  
-**Platform:** Windows (primary), Linux/macOS (supported)  
-**Test Framework:** pytest 8.0+ with coverage (pytest-cov)  
-**Build Tools:** PyInstaller 6.10+, Inno Setup 6  
+**Repository:** https://github.com/passagain-loui/doc2md
+**Current Version:** 0.2.1 (Hardened Release)
+**Python:** 3.9+ (tested on 3.10, 3.11)
+**Platform:** Windows (primary), Linux/macOS (supported)
+**Test Framework:** pytest 8.0+ with coverage (pytest-cov)
+**Build Tools:** PyInstaller 6.10+, Inno Setup 6
 
 **Key Files:**
 - `pyproject.toml` — Package metadata & dependencies
@@ -218,6 +233,11 @@ Only proceed after EXIT_CODE: 0 confirmed:
 
 ---
 
-**Last Updated:** 2026-08-26  
-**Next Review:** After v0.3.0 release  
+**Last Updated:** 2026-08-26
+**Next Review:** After v0.3.0 release
 **Maintainer:** doc2md Development Team
+````
+`````
+``````
+```````
+````````

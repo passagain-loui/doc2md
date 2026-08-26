@@ -7,8 +7,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "doc2md"
-version = "0.2.1"
-description = "Universal Document to Markdown converter: token-optimized, resilient, process-isolated."
+version = "0.3.0"
+description = "Universal Document to Markdown converter with Audio Engine (8+ hrs) & Drag-and-Drop GUI."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
@@ -42,6 +42,14 @@ docs = [
 ]
 ocr = ["Pillow>=10.0", "pytesseract>=0.3.10"]
 ocr-rapid = ["rapidocr-onnxruntime>=1.3"]
+audio = [
+    "faster-whisper>=1.0",
+    "ffmpeg-python>=0.2",
+    "torch>=2.0; platform_system != 'Darwin'",
+]
+gui = [
+    "tkinterdnd2>=0.3.0; platform_system == 'Windows'",
+]
 exe = ["pyinstaller>=6.10"]
 dev = ["pytest>=8.0", "pytest-timeout>=2.3", "pytest-cov>=5.0"]
 
@@ -57,4 +65,18 @@ include = ["doc2md*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+
+[tool.coverage.run]
+omit = [
+    "doc2md/gui/*",
+    "doc2md/engine/audio_engine.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.",
+]
 ```

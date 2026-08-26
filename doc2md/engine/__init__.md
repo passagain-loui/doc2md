@@ -16,6 +16,12 @@ from doc2md.engine.pdf_engine import PdfEngine
 from doc2md.engine.pptx_engine import PptxEngine
 from doc2md.engine.web_engine import WebEngine
 
+try:
+    from doc2md.engine.audio_engine import AudioEngine
+    _AUDIO_AVAILABLE = True
+except ImportError:
+    _AUDIO_AVAILABLE = False
+
 _ENGINES: list[BaseEngine] = [
     PdfEngine(),
     DocxEngine(),
@@ -25,6 +31,9 @@ _ENGINES: list[BaseEngine] = [
     OcrEngine(),
     CodeEngine(),
 ]
+
+if _AUDIO_AVAILABLE:
+    _ENGINES.append(AudioEngine())
 
 _REGISTRY: dict[FileKind, BaseEngine] = {}
 _BY_NAME: dict[str, BaseEngine] = {}

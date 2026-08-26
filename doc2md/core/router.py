@@ -20,6 +20,8 @@ class FileKind(str, Enum):
     HTML = "html"
     EML = "eml"
     IMAGE = "image"
+    AUDIO = "audio"
+    VIDEO = "video"
     JSON = "json"
     CODE = "code"
     TEXT = "text"
@@ -66,6 +68,28 @@ IMAGE_EXTENSIONS = {
     ".webp": "image/webp",
 }
 
+AUDIO_EXTENSIONS = {
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".m4a": "audio/mp4",
+    ".aac": "audio/aac",
+    ".flac": "audio/flac",
+    ".ogg": "audio/ogg",
+    ".wma": "audio/x-ms-wma",
+    ".aiff": "audio/aiff",
+}
+
+VIDEO_EXTENSIONS = {
+    ".mp4": "video/mp4",
+    ".mkv": "video/x-matroska",
+    ".avi": "video/x-msvideo",
+    ".mov": "video/quicktime",
+    ".flv": "video/x-flv",
+    ".wmv": "video/x-ms-wmv",
+    ".webm": "video/webm",
+    ".m4v": "video/mp4",
+}
+
 CODE_EXTENSIONS: dict[str, str] = {
     ".py": "python",
     ".js": "javascript",
@@ -107,6 +131,8 @@ MIME_BY_KIND: dict[FileKind, str] = {
     FileKind.HTML: "text/html",
     FileKind.EML: "message/rfc822",
     FileKind.IMAGE: "application/octet-stream",
+    FileKind.AUDIO: "audio/mpeg",
+    FileKind.VIDEO: "video/mp4",
     FileKind.JSON: "application/json",
     FileKind.CODE: "text/x-code",
     FileKind.TEXT: "text/plain",
@@ -225,6 +251,10 @@ def _detect_extension(p: Path) -> Detection | None:
         return Detection(kind, MIME_BY_KIND[kind], "extension")
     if suffix in IMAGE_EXTENSIONS:
         return Detection(FileKind.IMAGE, IMAGE_EXTENSIONS[suffix], "extension")
+    if suffix in AUDIO_EXTENSIONS:
+        return Detection(FileKind.AUDIO, AUDIO_EXTENSIONS[suffix], "extension")
+    if suffix in VIDEO_EXTENSIONS:
+        return Detection(FileKind.VIDEO, VIDEO_EXTENSIONS[suffix], "extension")
     if suffix in CODE_EXTENSIONS:
         return Detection(FileKind.CODE, MIME_BY_KIND[FileKind.CODE], "extension")
     return None

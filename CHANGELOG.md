@@ -1,5 +1,20 @@
 # CHANGELOG.md
 
+``````````text
+# CHANGELOG.md
+
+`````````text
+# CHANGELOG.md
+
+````````text
+# CHANGELOG.md
+
+```````text
+# CHANGELOG.md
+
+``````text
+# CHANGELOG.md
+
 `````text
 # CHANGELOG.md
 
@@ -8,6 +23,23 @@
 
 All notable changes to `doc2md` are documented here.
 Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
+
+## [0.3.0] - 2026-08-26
+
+### Added
+
+- **Audio Engine (faster-whisper):** Process 8+ hour audio/video files with flat memory consumption via generator-based streaming transcription.
+- **Dynamic Model Loader:** On-demand downloading of Whisper models (`tiny`, `base`, `small`, `medium`, `large-v3`) with persistent caching in `~/.cache/doc2md/models`.
+- **GPU/CPU Auto-Detection:** NVIDIA CUDA (`float16`) fallback to CPU (`int8`/`float32`) without crashes.
+- **Drag-and-Drop GUI Dashboard:** Modern tkinter-based UI with background worker threads, real-time progress bars, and configuration toggles (`Auto-Copy`, `Token Stats`, `OCR Enable`, `Model Size`).
+- **Audio File Routing:** Extended FileKind enum to support `.mp3`, `.wav`, `.m4a`, `.aac`, `.flac`, `.ogg`, `.wma` (audio) and `.mp4`, `.mkv`, `.avi`, `.mov`, `.flv`, `.wmv`, `.webm` (video).
+- `doc2md gui` command: Launch interactive GUI from CLI.
+- Updated `pyproject.toml` with `[audio]` and `[gui]` optional dependencies.
+
+### Enhanced
+
+- File detection (router.py) now includes magic-byte and extension-based detection for audio/video formats.
+- CLI help text updated to reflect new audio/GUI capabilities.
 
 ## [0.2.1] - 2026-08-26
 
@@ -75,3 +107,8 @@ Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
 - Test suite covering corrupted PDFs, unknown encodings, oversized tables, timeout kills, and temp cleanup.
 ````
 `````
+``````
+```````
+````````
+`````````
+``````````
