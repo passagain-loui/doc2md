@@ -81,7 +81,7 @@
 ````text
 # CLAUDE.md — Project Development & Verification Protocol
 
-## TRI-AGENT WORKFLOW PROTOCOL (v4.4 — MANDATED ROLES & TRACEABILITY)
+## TRI-AGENT WORKFLOW PROTOCOL (v4.7 — COMPLETE MASTER SPECIFICATION)
 
 This document outlines the collaborative workflow between three AI agents and the gatekeeper system for ensuring code quality and automated verification with ZERO-TOLERANCE anti-simulation enforcement and mandatory Log traceability.
 
@@ -92,77 +92,88 @@ This document outlines the collaborative workflow between three AI agents and th
 - ข้อจำกัด: เป็นผู้วางแผนและสั่งการ ห้ามลงมือแก้ไขโค้ดในโปรเจกต์โดยตรง
 
 **Execution Engine (Claude Code / OpenCode)**
-- หน้าที่: รับคำสั่งจาก Master Architect, เขียนโค้ด, ทำ Auto-Fix, และรันคำสั่งผ่าน Terminal จริงตามโปรโตคอล
-- ข้อจำกัด: ห้ามแอบอ้างผลลัพธ์ (No Simulation) และห้ามข้ามขั้นตอนการตรวจสอบ
+- หน้าที่: รับคำสั่ง เขียนโค้ด คิดวิเคราะห์อย่างรอบด้านเพื่อให้แก้ไขจบได้ในครั้งเดียวและประหยัดโทเค็น ทำ Auto-Fix และรันคำสั่งตรวจสอบตามโปรโตคอล
+- ข้อจำกัด: ห้ามแอบอ้างผลลัพธ์หรือข้ามขั้นตอน
 
 **Gatekeeper Auditor (LocalCore CLI)**
-- หน้าที่: สแกนตรวจสอบโค้ดแบบ Read-Only และพ่นค่า EXIT_CODE ออกมาทาง stdout พร้อมบันทึก Log ลงระบบ
-- ข้อจำกัด: เป็นผู้ตรวจทานความถูกต้องเด็ดขาด ไม่ทำการแก้ไขโค้ดเอง
+- หน้าที่: สแกนตรวจสอบโค้ดแบบ Read-Only และพ่นค่า EXIT_CODE พร้อมบันทึก Log ลงระบบ
+- ข้อจำกัด: ห้ามแก้ไขโค้ดเอง
 
 ---
 
-### 2. MANDATORY GATEKEEPER EXECUTION RULE
+### 2. PROJECT ROOT & MARKER VALIDATION RULE
 
-Execution Engine ต้องรันคำสั่งผ่าน Windows PATH และ Delayed Expansion (/v:on) ใน Terminal จริงเท่านั้น:
+ก่อนสั่งรัน LocalCore ทุกครั้ง ต้องตรวจสอบและเปลี่ยนไดเรกทอรี (`cd`) เข้าไปในโฟลเดอร์หลักของโปรเจกต์ (Project Root) ที่มีไฟล์มาร์กเกอร์ (เช่น `pyproject.toml`, `package.json`) เรียบร้อยแล้ว
 
-```batch
-cmd /v:on /c "localcore --verify --model "<MODEL_NAME>" & echo EXIT_CODE:!ERRORLEVEL!"
+**ห้ามรันจากโฟลเดอร์แม่เด็ดขาด** เพื่อป้องกันข้อผิดพลาด `no markers`
+- หากพบปัญหานี้ให้ค้นหาโฟลเดอร์ Root และย้าย Working Directory ทันที
+
+---
+
+### 3. MANDATORY GATEKEEPER EXECUTION RULE (SILENT BACKGROUND MODE)
+
+เพื่อป้องกันไม่ให้หน้าต่าง LocalCore เด้งซ้อนทับหน้าต่าง Log หลัก Execution Engine ต้องรันคำสั่งผ่าน PowerShell แบบซ่อนหน้าต่างทุกครั้ง:
+
+```powershell
+powershell -Command "$p = Start-Process -FilePath 'C:\Program Files\LocalCore\localcore.exe' -ArgumentList '--verify', '--model', 'Qwen-2.5-Coder-14B' -NoNewWindow -PassThru; $p.WaitForExit(); exit $p.ExitCode"
 ```
 
-**หมายเหตุ:** แทนที่ `<MODEL_NAME>` ด้วยโมเดลจริง เช่น `Qwen-2.5-Coder-14B`, `claude-opus`, หรือ `claude-sonnet` (หากมีการติดตั้ง)
+**หรือใช้ cmd with Delayed Expansion:**
+```batch
+cd /d <PROJECT_ROOT>
+cmd /v:on /c "C:\PROGRA~1\LocalCore\localcore.exe --verify --model "Qwen-2.5-Coder-14B" & echo EXIT_CODE:!ERRORLEVEL!"
+```
 
 ---
 
-### 3. STRICT ANTI-SIMULATION & LOG TRACEABILITY (ZERO-TOLERANCE)
+### 4. STRICT ANTI-SIMULATION & CLEAN COMMAND ENFORCEMENT (ZERO-TOLERANCE)
 
-**ห้ามใช้คำสั่งเทสภายใน:**
-- ❌ **PROHIBITED:** ใช้ pytest, cargo test, npm test เดี่ยวๆ แล้วนำ Exit Code มาอ้างอิงแทน LocalCore เด็ดขาด
-- ❌ **PROHIBITED:** การจำลอง (Simulate) หรือแอบอ้างผลลัพธ์ LocalCore ออกมาแบบไม่จริง
-- ❌ **PROHIBITED:** ข้ามขั้นตอนการตรวจสอบและลงมือทำ Version Bump, Build, หรือ Git Commit
+**ห้ายัดคำสั่งเทสภายนอกเข้าไปเป็น Argument ของ LocalCore เด็ดขาด**
+- ❌ **PROHIBITED:** ใช้ `pytest`, `cargo test`, `npm test` เป็น Argument ของ LocalCore
+- ❌ **PROHIBITED:** โครงสร้างคำสั่งต้องใช้เฉพาะ `--verify` และ `--model` เท่านั้น ห้ามดัดแปลง Syntax
+- ❌ **PROHIBITED:** ใช้คำสั่งเทสภายในแล้วนำ Exit Code มาอ้างอิงแทน Gatekeeper เด็ดขาด
 
 **บังคับให้ใช้ LocalCore จริง:**
-- ✅ **REQUIRED:** บังคับให้ข้อมูลและ Request ต้องวิ่งเข้าประมวลผลผ่าน LocalCore CLI จริงเท่านั้น
+- ✅ **REQUIRED:** ข้อมูลต้องวิ่งผ่าน LocalCore CLI จริงเท่านั้น
 - ✅ **REQUIRED:** ต้องปรากฏ Log หลักฐานของการทำงาน (Log Trace) ในระบบ LocalCore
-- ✅ **REQUIRED:** หากผลลัพธ์แสดง EXIT_CODE: 0 แต่ไม่มีร่องรอยการทำงานหรือ Log วิ่งผ่าน LocalCore จะถือว่า "เป็นโมฆะทันที" (Invalid Execution)
-
-**VIOLATION CONSEQUENCES:**
-- Protocol non-compliance ถ้าใช้ exit code ที่เดาหรือจำลอง ไม่ได้จากการรัน LocalCore จริง
-- ห้ามทำ Version Bump, Build, Commit ได้เลย หากไม่มีหลักฐาน EXIT_CODE: 0 จาก LocalCore จริง
-- หากไม่ได้ EXIT_CODE จาก LocalCore จริง ต้อง HALT และบันทึกการเบี่ยงเบนโปรโตคอล
+- ✅ **REQUIRED:** หากแสดง `EXIT_CODE: 0` แต่ไม่มีร่องรอย Log จะถือว่าเป็นโมฆะทันที
 
 ---
 
-### 4. AUTOMATED RE-VERIFICATION LOOP
+### 5. AUTOMATED RE-VERIFICATION LOOP
 
 **INITIAL CHECK:**
 - รันคำสั่งผ่าน Gatekeeper หากได้ EXIT_CODE: 0 ให้ไปขั้นตอน Release ทันที
 
 **FAIL LOOP:**
 หาก EXIT_CODE != 0 (FAIL):
-- Execution Engine ห้ามหยุดทำงานและห้ามถามผู้ใช้
-- อ่าน Error Trace จาก Log ของ LocalCore → ทำการแก้ไขโค้ด (Auto-Fix) → สั่งรันคำสั่ง Gatekeeper ซ้ำใน Terminal จริงทันที
-- ทำซ้ำจนกว่า LocalCore จะพ่นค่า EXIT_CODE: 0 ออกมาจริงๆ เท่านั้น
-
-**[STEP 1] TASK CREATION & ARCHITECTURE (เจ้าของ: Gemini)**
-- Gemini ทำการวิเคราะห์ปัญหา วางโครงสร้างการแก้ไข และออกคำสั่ง [TASK] ให้ Execution Engine
-
-**[STEP 2] CODE IMPLEMENTATION (เจ้าของ: Claude / OpenCode)**
-- Claude / OpenCode ทำการแก้ไขโค้ดใน Codebase ให้เรียบร้อยตามคำสั่ง
-
-**[STEP 3] GATEKEEPER VERIFICATION (เจ้าของ: LocalCore CLI)**
-- Claude / OpenCode รันคำสั่ง Gatekeeper ผ่าน Terminal จริง
-- LocalCore ประมวลผล แล้วพ่น EXIT_CODE ออกมา พร้อมบันทึก Log ลงระบบ
-
-**[STEP 4] RELEASE DEPLOYMENT (เจ้าของร่วม: Claude / OpenCode & LocalCore)**
-- ห้ามทำการ Bump Version, Build Binaries, หรือ Git Commit ได้เลย หากไม่มีหลักฐาน EXIT_CODE: 0 จาก LocalCore จริง
-
-### 5. STRICT EXIT & DEPLOYMENT CONDITION
-
-งานจะเสร็จสมบูรณ์และอนุญาตให้ทำ Version Bump, Build Binaries, รวมถึง Git Commit/Push ได้ ก็ต่อเมื่อมีหลักฐาน Log และ EXIT_CODE: 0 จากการรัน LocalCore จริงยืนยันเท่านั้น!
+- Execution Engine ห้ามหยุดหรือถามผู้ใช้
+- อ่าน Error Trace จาก Log → คิดวิเคราะห์รอบด้านและทำ Auto-Fix → รันคำสั่งซ้ำใน Terminal ทันที
+- ทำซ้ำจนกว่าจะได้ `EXIT_CODE: 0` เท่านั้น
 
 ---
 
-### 6. PROJECT-SPECIFIC GATEKEEPER COMMANDS
+### 6. STRICT VERSION BUMP & RELEASE PROTOCOL
+
+**ห้ามทำ Version Bump, Build Binaries, สร้าง Git Tag หรือ Commit/Push เด็ดขาด จนกว่าจะมีหลักฐาน `EXIT_CODE: 0` จากการรัน LocalCore จริงยืนยัน**
+
+**Version Increment (SemVer):**
+- **MAJOR (X.0.0):** เปลี่ยนแปลงสถาปัตยกรรมครั้งใหญ่ หรือมี Breaking Changes
+- **MINOR (0.X.0):** เพิ่มฟีเจอร์ใหม่หรือฟังก์ชันหลักที่ผ่านการตรวจแล้ว
+- **PATCH (0.0.X):** แก้ไขบั๊ก ปรับปรุงโค้ดภายใน หรือทำ Auto-Fix
+
+**Mandatory Documentation & Audit Trail Sync:**
+- ก่อน Build หรือ Commit ต้องอัปเดตเอกสารครบถ้วน (`CHANGELOG.md`, `HISTORY.md` บันทึกประวัติและ Timestamp)
+- อัปเดต Version Variable ในโค้ดให้ตรงกันทุกจุด (`pyproject.toml`, `__init__.py`, `setup_builder.iss`)
+
+**Deployment Gateway:**
+- Build ไฟล์ Binaries ต่อได้ทันที
+- ทำ Git Commit ระบุเลขเวอร์ชัน (เช่น `"chore: release v0.3.20"`)
+- Push ขึ้นรีโมทรีโปเป็นขั้นตอนสุดท้าย
+
+---
+
+### 7. PROJECT-SPECIFIC GATEKEEPER COMMANDS
 
 **For doc2md v0.2.1:**
 
@@ -188,7 +199,7 @@ coverage run -m pytest tests/ && coverage report --include=doc2md/*
 
 ---
 
-### 7. RELEASE CHECKLIST (Post-Verification)
+### 8. RELEASE CHECKLIST (Post-Verification)
 
 Only proceed after EXIT_CODE: 0 confirmed:
 
@@ -205,7 +216,7 @@ Only proceed after EXIT_CODE: 0 confirmed:
 
 ---
 
-### 8. DOCUMENTATION & AUDIT TRAIL
+### 9. DOCUMENTATION & AUDIT TRAIL
 
 **HISTORY.md Format:**
 ```markdown
@@ -220,7 +231,7 @@ Only proceed after EXIT_CODE: 0 confirmed:
 
 ---
 
-### 9. COMMUNICATION PROTOCOL
+### 10. COMMUNICATION PROTOCOL
 
 **Execution Engine to Master Architect:**
 - Report EXIT_CODE immediately after gatekeeper run
@@ -239,7 +250,7 @@ Only proceed after EXIT_CODE: 0 confirmed:
 
 ---
 
-### 10. PROJECT CONTEXT
+### 11. PROJECT CONTEXT
 
 **Repository:** https://github.com/passagain-loui/doc2md
 **Current Version:** 0.3.20 (Clean Build, High-DPI Text, Stop Conversion Button)
@@ -259,7 +270,7 @@ Only proceed after EXIT_CODE: 0 confirmed:
 
 ---
 
-### 11. ESCALATION & FAILURE SCENARIOS
+### 12. ESCALATION & FAILURE SCENARIOS
 
 **Scenario: EXIT_CODE 101 (Missing dependencies)**
 1. Analyze: Check which module/package is missing
@@ -284,24 +295,25 @@ Only proceed after EXIT_CODE: 0 confirmed:
 
 | Version | Protocol | Status | Notes |
 |---------|----------|--------|-------|
-| 4.4 | Tri-Agent + Mandated Roles & Traceability | Active | Current (This Document) |
+| 4.7 | Complete Master Specification | Active | Current (This Document) - Project Root, Silent Mode, Clean Commands |
+| 4.4 | Tri-Agent + Mandated Roles & Traceability | Deprecated | Replaced by v4.7 |
 | 4.3 | Tri-Agent + Strict Anti-Simulation | Deprecated | Replaced by v4.4 |
 | 4.2 | Tri-Agent + Responsibility Matrix | Deprecated | Replaced by v4.3 |
 | 4.1 | Tri-Agent + Re-Verification | Deprecated | Replaced by v4.2 |
 | 4.0 | Tri-Agent | Deprecated | Replaced by v4.1 |
 | 3.4 | Gatekeeper v3 | Deprecated | Original protocol |
 
-**Compliance:** All releases ≥0.3.2 must follow Protocol v4.4
+**Compliance:** All releases ≥0.3.2 must follow Protocol v4.7
 
 ---
 
-**Recent Releases (Protocol v4.4):**
+**Recent Releases (Protocol v4.7):**
 - v0.3.20 (2026-08-27): Clean build pipeline, High-DPI crisp text, stop conversion button
 - v0.3.19 (2026-08-27): Force kill process before setup extraction
 - v0.3.18 (2026-08-27): Automatic application termination during setup
 - v0.3.17 (2026-08-27): Modern dark UI overhaul, extended audio timeout (1800s), spinner animation
 
-**Last Updated:** 2026-08-27 (Protocol v4.4, v0.3.20)
+**Last Updated:** 2026-08-27 (Protocol v4.7 - Complete Master Specification, v0.3.20)
 **Next Review:** After v0.4.0 release
 **Maintainer:** doc2md Development Team
 ````
