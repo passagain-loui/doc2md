@@ -56,6 +56,7 @@ class MainWindow:
         self.converter = Converter(timeout=1800, options={"audio_model": "small"})
         self.audio_engine = AudioEngine()
         self.is_converting = False
+        self.stop_requested = False
         self.last_result = ""
         self.staged_files: list[str] = []
         self.spinner_frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
@@ -507,7 +508,20 @@ class MainWindow:
         if not self.staged_files:
             messagebox.showwarning("No Files", "Please select files to convert")
             return
+        self.stop_requested = False
+        # Update button to show "Stop Conversion" during conversion
+        self.convert_btn.configure(
+            text="⏹️  Stop Conversion",
+            command=self._stop_conversion,
+            fg_color="#dc2626",
+            hover_color="#b91c1c"
+        )
         self.convert_files(self.staged_files)
+
+    def _stop_conversion(self):
+        """Request cancellation of the ongoing conversion."""
+        self.stop_requested = True
+        self.status_label.configure(text="Stopping conversion...", text_color=CTK_SECONDARY_TEXT)
 
     def convert_files(self, files: list[str]):
         """Convert files in background thread."""
@@ -537,6 +551,11 @@ class MainWindow:
             pulse_direction = 1
             pulse_value = 0.3
             for i, file_path in enumerate(files):
+                # Allow user to stop conversion
+                if self.stop_requested:
+                    self.status_label.configure(text="Conversion stopped by user", text_color=CTK_SECONDARY_TEXT)
+                    break
+
                 # Simulate indeterminate progress by pulsing
                 pulse_value += 0.05 * pulse_direction
                 if pulse_value >= 0.7:
@@ -594,8 +613,16 @@ class MainWindow:
             messagebox.showerror("Conversion Error", f"An unexpected error occurred:\n\n{type(exc).__name__}: {str(exc)}")
         finally:
             self.is_converting = False
+            self.stop_requested = False
             self.staged_files.clear()
             self._update_staging_status()
+            # Reset button to show "Start Conversion"
+            self.convert_btn.configure(
+                text="▶️  Start Conversion",
+                command=self._start_conversion,
+                fg_color="#059669",
+                hover_color="#047857"
+            )
 
     def copy_result(self):
         """Copy last conversion result to clipboard."""

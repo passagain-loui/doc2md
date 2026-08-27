@@ -90,6 +90,18 @@
 All notable changes to `doc2md` are documented here.
 Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
 
+## [0.3.20] - 2026-08-27
+
+### Added
+
+- **Stop Conversion Button:** Dynamic button toggle during conversion—shows red "⏹️ Stop Conversion" button while processing and switches back to green "▶️ Start Conversion" when complete. Users can cleanly abort batch processing by clicking the stop button, which sets a `stop_requested` flag that's checked between files.
+- **High-DPI Awareness:** Added `SetProcessDpiAwareness(2)` Windows API call at startup for per-monitor DPI awareness, enabling crisp, razor-sharp font rendering on high-DPI displays (4K, Surface, etc.) instead of blurry scaled text.
+
+### Fixed
+
+- **Clean Build Pipeline:** Added explicit cleanup of `build/` and `dist/` directories at the start of `build_exe.py` before PyInstaller runs, ensuring the resulting executable always reflects the current code version without stale cache artifacts.
+- **Stale Binary Cache:** Prevents version mismatch where dist/doc2md.exe was from v0.3.18 but claimed to be v0.3.20. Build now always starts fresh.
+
 ## [0.3.19] - 2026-08-27
 
 ### Fixed
