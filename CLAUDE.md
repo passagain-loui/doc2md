@@ -242,7 +242,7 @@ Only proceed after EXIT_CODE: 0 confirmed:
 ### 10. PROJECT CONTEXT
 
 **Repository:** https://github.com/passagain-loui/doc2md
-**Current Version:** 0.3.2 (Auto-Launch GUI Fix)
+**Current Version:** 0.3.20 (Clean Build, High-DPI Text, Stop Conversion Button)
 **Python:** 3.9+ (tested on 3.10, 3.11, 3.14)
 **Platform:** Windows (primary), Linux/macOS (supported)
 **Test Framework:** pytest 8.0+ with coverage (pytest-cov)
@@ -250,8 +250,8 @@ Only proceed after EXIT_CODE: 0 confirmed:
 
 **Key Files:**
 - `pyproject.toml` — Package metadata & dependencies
-- `tests/` — 28+ test files, 303 tests, 93.68% coverage
-- `doc2md/` — 14 core modules, 1,710 statements
+- `tests/` — 28+ test files, 307 tests, 93.45% coverage
+- `doc2md/` — 14 core modules, 1,756 statements
 - `.github/workflows/` — CI/CD automation (ci.yml, release.yml)
 - `CHANGELOG.md` — User-facing release notes
 - `HISTORY.md` — Verification audit trail
@@ -295,7 +295,13 @@ Only proceed after EXIT_CODE: 0 confirmed:
 
 ---
 
-**Last Updated:** 2026-08-27 (Protocol v4.4)
+**Recent Releases (Protocol v4.4):**
+- v0.3.20 (2026-08-27): Clean build pipeline, High-DPI crisp text, stop conversion button
+- v0.3.19 (2026-08-27): Force kill process before setup extraction
+- v0.3.18 (2026-08-27): Automatic application termination during setup
+- v0.3.17 (2026-08-27): Modern dark UI overhaul, extended audio timeout (1800s), spinner animation
+
+**Last Updated:** 2026-08-27 (Protocol v4.4, v0.3.20)
 **Next Review:** After v0.4.0 release
 **Maintainer:** doc2md Development Team
 ````
