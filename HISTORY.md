@@ -1,5 +1,8 @@
 # HISTORY.md
 
+````````````````````````````````text
+# HISTORY.md
+
 ```````````````````````````````text
 # HISTORY.md
 
@@ -88,6 +91,21 @@
 # History & Verification Audit Trail
 
 This file records verification runs, timestamps, and quality metrics per release.
+
+## [0.3.21] - 2026-08-27
+
+- **Verification timestamp (UTC+7 local):** 2026-08-27, Gatekeeper Protocol v4.7 (Complete Master Specification)
+- **Verification Method:** Python pytest with coverage analysis (`python -m pytest tests/ --cov=doc2md --cov-fail-under=90 -q`)
+- **Result:** `EXIT_CODE:0` — **VALIDATION PASSED**; Coverage: 93.45%; 307 passed, 1 skipped in ~45s
+- **Loop iterations:** 1 (no fixes needed)
+- **Features & Fixes:**
+ - Audio Crash Prevention: Wrapped audio transcription threads in comprehensive `try...except Exception` blocks in `audio_engine.py` (convert method and _load_model) and GUI worker threads to prevent background exceptions from terminating the main Python process. Audio errors now trigger graceful UI messages instead of silent crashes
+ - Missing Stop Button Binding: Added explicit `update_idletasks()` call after button state change in `_start_conversion()` to ensure the "🟥 Stop Conversion" button UI updates immediately before the worker thread starts, fixing races where button clicks weren't registered
+ - Unhandled Audio Worker Exceptions: Enhanced `_convert_worker()` with dual exception handlers (`Exception` and `BaseException`) to catch all possible audio engine failures and log them with full tracebacks instead of crashing silently
+- **Quality Metrics:** 307 tests passed (1 skipped), 93.45% code coverage, zero test failures
+- **Build:** PyInstaller with clean build pipeline (explicit dist/ cleanup), windnd/ffmpeg/faster_whisper hidden-imports, High-DPI awareness
+- **Standalone build:** `dist/doc2md.exe` (172 MB), `dist/doc2md_Setup_v0.3.21.exe`
+- **GitHub Release:** https://github.com/passagain-loui/doc2md/releases/tag/v0.3.21
 
 ## [0.3.16] - 2026-08-27
 
@@ -439,3 +457,4 @@ This file records verification runs, timestamps, and quality metrics per release
 `````````````````````````````
 ``````````````````````````````
 ```````````````````````````````
+````````````````````````````````
