@@ -90,6 +90,13 @@
 All notable changes to `doc2md` are documented here.
 Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
 
+## [0.3.19] - 2026-08-27
+
+### Fixed
+
+- **Force Kill Process Before Setup Extraction:** Enhanced installer robustness by executing `taskkill.exe /F /IM doc2md.exe /T` at the start of installation (`ssInstall` step), ensuring all running instances (including background worker threads) are forcefully terminated before file extraction. Fixes edge cases where standard `CloseApplications` fails when background threads are active.
+- **Complete Process Tree Termination:** The `/T` flag ensures the entire process tree is killed (parent + all child threads), preventing locked file handles from blocking file replacement during updates.
+
 ## [0.3.18] - 2026-08-27
 
 ### Fixed

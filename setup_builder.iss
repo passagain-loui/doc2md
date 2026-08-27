@@ -3,7 +3,7 @@
 
 #define AppName "doc2md"
 #ifndef Version
-#define Version "0.3.18"
+#define Version "0.3.19"
 #endif
 
 [Setup]
@@ -94,7 +94,15 @@ end;
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   Path, AppDir: string;
+  ResultCode: Integer;
 begin
+  if CurStep = ssInstall then
+  begin
+    // Forcefully kill any running instances of doc2md.exe and child threads before installation
+    // Use /F (force), /IM (image name), /T (tree - kill process tree including children)
+    Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM doc2md.exe /T', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  end;
+
   if CurStep = ssPostInstall then
   begin
     AppDir := ExpandConstant('{app}');
