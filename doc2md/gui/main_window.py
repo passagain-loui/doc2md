@@ -57,6 +57,7 @@ class MainWindow:
         self.audio_engine = AudioEngine()
         self.is_converting = False
         self.last_result = ""
+        self.staged_files: list[str] = []
 
         self._setup_ui()
         self._setup_dnd()
@@ -140,6 +141,16 @@ class MainWindow:
         # Bind click event to drop card for fallback file browser
         drop_card.bind("<Button-1>", lambda e: self.browse_files())
         self.drop_label.bind("<Button-1>", lambda e: self.browse_files())
+
+        # Staging status label
+        self.staging_status_label = ctk.CTkLabel(
+            content_frame,
+            text="",
+            text_color=CTK_SECONDARY_TEXT,
+            font=(UI_FONT, 10),
+            anchor="w",
+        )
+        self.staging_status_label.pack(side="left", fill="x", padx=12, pady=(4, 0))
 
         # Right Column: Options & Analytics
         right_frame = ctk.CTkScrollableFrame(content_frame, fg_color="transparent")
@@ -315,6 +326,16 @@ class MainWindow:
         )
         browse_btn.pack(side="left", padx=3)
 
+        self.convert_btn = ctk.CTkButton(
+            button_frame,
+            text="▶️  Start Conversion",
+            command=self._start_conversion,
+            fg_color="#059669",
+            hover_color="#047857",
+            **btn_kwargs,
+        )
+        self.convert_btn.pack(side="left", padx=3)
+
         copy_btn = ctk.CTkButton(
             button_frame,
             text="📋  Copy Result",
@@ -408,7 +429,7 @@ class MainWindow:
                 for f in filenames
             ]
             if decoded:
-                self.convert_files(decoded)
+                self._stage_files(decoded)
         except Exception as exc:
             logger.error(f"Error processing dropped files: {exc}")
             messagebox.showerror("Error", f"Error processing dropped files: {exc}")
@@ -426,7 +447,35 @@ class MainWindow:
             ]
         )
         if files:
-            self.convert_files(list(files))
+            self._stage_files(list(files))
+
+    def _stage_files(self, files: list[str]):
+        """Stage files for conversion (store them but don't start conversion yet)."""
+        if not files:
+            return
+        self.staged_files = files
+        self._update_staging_status()
+
+    def _update_staging_status(self):
+        """Update the UI to show how many files are staged."""
+        if self.staged_files:
+            count = len(self.staged_files)
+            status = f"✓ {count} file(s) ready for conversion. Click 'Start Conversion' to begin."
+            self.staging_status_label.configure(
+                text=status,
+                text_color=CTK_SUCCESS,
+            )
+            self.convert_btn.configure(state="normal")
+        else:
+            self.staging_status_label.configure(text="")
+            self.convert_btn.configure(state="disabled")
+
+    def _start_conversion(self):
+        """Start the conversion process using staged files."""
+        if not self.staged_files:
+            messagebox.showwarning("No Files", "Please select files to convert")
+            return
+        self.convert_files(self.staged_files)
 
     def convert_files(self, files: list[str]):
         """Convert files in background thread."""
@@ -447,14 +496,22 @@ class MainWindow:
         try:
             total = len(files)
             self.status_label.configure(text=f"Converting {total} file(s)...", text_color=CTK_TEAL_TEXT)
+            # Set progress to indeterminate (pulsing between 0.3 and 0.7)
+            self.progress_overlay.configure(text="Processing...")
             self.root.update()
 
             results = []
             errors = []
+            pulse_direction = 1
+            pulse_value = 0.3
             for i, file_path in enumerate(files):
-                progress = ((i + 1) / total) * 100
-                self.progress_var.set(progress / 100)
-                self.progress_overlay.configure(text=f"{int(progress)}%")
+                # Simulate indeterminate progress by pulsing
+                pulse_value += 0.05 * pulse_direction
+                if pulse_value >= 0.7:
+                    pulse_direction = -1
+                elif pulse_value <= 0.3:
+                    pulse_direction = 1
+                self.progress_var.set(pulse_value)
                 self.root.update()
 
                 try:
@@ -471,6 +528,7 @@ class MainWindow:
                     errors.append(error_msg)
                     logger.error(f"❌ Error converting {file_path}: {exc}")
 
+            # Mark completion with full progress bar
             self.progress_var.set(1.0)
             self.progress_overlay.configure(text="100%")
 
@@ -504,6 +562,8 @@ class MainWindow:
             messagebox.showerror("Conversion Error", f"An unexpected error occurred:\n\n{type(exc).__name__}: {str(exc)}")
         finally:
             self.is_converting = False
+            self.staged_files.clear()
+            self._update_staging_status()
 
     def copy_result(self):
         """Copy last conversion result to clipboard."""

@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "doc2md"
-version = "0.3.15"
+version = "0.3.16"
 description = "Universal Document to Markdown converter with Audio Engine (8+ hrs), Drag-and-Drop GUI, Multi-Format Export & Progress Tracking."
 readme = "README.md"
 requires-python = ">=3.9"

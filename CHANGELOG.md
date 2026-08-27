@@ -1,5 +1,8 @@
 # CHANGELOG.md
 
+````````````````````````````````text
+# CHANGELOG.md
+
 ```````````````````````````````text
 # CHANGELOG.md
 
@@ -86,6 +89,13 @@
 
 All notable changes to `doc2md` are documented here.
 Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
+
+## [0.3.16] - 2026-08-27
+
+### Changed
+
+- **Explicit Conversion Workflow:** Drag-and-drop or file browser selections no longer auto-convert immediately. Instead, files are staged and a status label shows `"X file(s) ready for conversion."` Users can adjust settings (model, OCR) before clicking the new `Start Conversion` button.
+- **Fixed Progress Bar Logic:** Progress bar now uses indeterminate mode (pulsing between 30% and 70%) during conversion instead of jumping instantly to 100%. Only reaches 100% when the background worker thread completes successfully, providing accurate visual feedback for long-running operations like audio transcription.
 
 ## [0.3.15] - 2026-08-27
 
@@ -364,3 +374,4 @@ Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
 `````````````````````````````
 ``````````````````````````````
 ```````````````````````````````
+````````````````````````````````

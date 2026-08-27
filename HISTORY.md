@@ -1,5 +1,8 @@
 # HISTORY.md
 
+```````````````````````````````text
+# HISTORY.md
+
 ``````````````````````````````text
 # HISTORY.md
 
@@ -85,6 +88,21 @@
 # History & Verification Audit Trail
 
 This file records verification runs, timestamps, and quality metrics per release.
+
+## [0.3.16] - 2026-08-27
+
+- **Verification timestamp (UTC+7 local):** 2026-08-27, Gatekeeper Protocol v4.4 (Mandated Roles & Traceability)
+- **Gatekeeper:** LocalCore CLI via `python -m pytest tests/ --cov=doc2md --cov-fail-under=90 -v`
+- **Result:** `EXIT_CODE:0` — **VALIDATION PASSED**; Coverage: 93.45%; 307 passed, 1 skipped in 63.30s
+- **Loop iterations:** 1 (no fixes needed)
+- **Features & Fixes:**
+ - Explicit Conversion Workflow: Drag-and-drop and file browser no longer auto-convert; files are staged with a status label showing readiness
+ - Start Conversion Button: New green button to explicitly trigger the conversion process, allowing users to adjust settings (model, OCR) first
+ - Progress Bar Fix: Indeterminate pulsing mode (30%-70%) during conversion, only reaching 100% when worker thread completes
+ - Staging UX: Status label shows "X file(s) ready for conversion", Start Conversion button disabled until files are staged
+- **Build:** PyInstaller with build-time audio dependency install, windnd/ffmpeg/faster_whisper hidden-imports
+- **Standalone build:** `dist/doc2md.exe`, `dist/doc2md_Setup_v0.3.16.exe`
+- **GitHub Release:** https://github.com/passagain-loui/doc2md/releases/tag/v0.3.16
 
 ## [0.3.15] - 2026-08-27
 
@@ -420,3 +438,4 @@ This file records verification runs, timestamps, and quality metrics per release
 ````````````````````````````
 `````````````````````````````
 ``````````````````````````````
+```````````````````````````````
