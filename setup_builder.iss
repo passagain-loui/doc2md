@@ -3,7 +3,7 @@
 
 #define AppName "doc2md"
 #ifndef Version
-#define Version "0.3.17"
+#define Version "0.3.18"
 #endif
 
 [Setup]
@@ -22,7 +22,10 @@ DisableProgramGroupPage=yes
 WizardStyle=modern
 Compression=lzma2/max
 SolidCompression=yes
-CloseApplications=no
+CloseApplications=yes
+CloseApplicationsFilter=*doc2md.exe*
+RestartApplications=no
+AppMutex=doc2md_Single_Instance_Mutex
 ArchitecturesInstallIn64BitMode=x64compatible
 
 [Files]

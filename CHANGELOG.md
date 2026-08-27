@@ -90,6 +90,13 @@
 All notable changes to `doc2md` are documented here.
 Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
 
+## [0.3.18] - 2026-08-27
+
+### Fixed
+
+- **Automatic Process Closure During Setup:** Updated Inno Setup installer to automatically detect and terminate running `doc2md.exe` instances before file extraction, eliminating `DeleteFile failed; code 5` (access denied) errors during updates or repairs. New configuration: `CloseApplications=yes`, `CloseApplicationsFilter=*doc2md.exe*`, `RestartApplications=no`, `AppMutex=doc2md_Single_Instance_Mutex`.
+- **Installer Robustness:** Single-instance mutex prevents multiple installer instances; users can safely run the installer while the application is active without triggering file lock errors.
+
 ## [0.3.16] - 2026-08-27
 
 ### Changed
