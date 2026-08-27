@@ -90,6 +90,17 @@
 All notable changes to `doc2md` are documented here.
 Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
 
+## [0.3.21] - 2026-08-27
+
+### Added
+
+- **Audio Crash Prevention:** Wrapped audio transcription threads in comprehensive `try...except Exception` blocks in both `audio_engine.py` (convert method and _load_model) and GUI worker threads to prevent background exceptions from terminating the main Python process. Audio errors now trigger graceful UI error messages instead of silent crashes.
+
+### Fixed
+
+- **Missing Stop Button Binding:** Added explicit `update_idletasks()` call after button state change in `_start_conversion()` to ensure the "🟥 Stop Conversion" button UI updates immediately before the worker thread starts, fixing races where button clicks weren't registered.
+- **Unhandled Audio Worker Exceptions:** Enhanced `_convert_worker()` with dual exception handlers (`Exception` and `BaseException`) to catch all possible audio engine failures and log them with full tracebacks instead of crashing silently.
+
 ## [0.3.20] - 2026-08-27
 
 ### Added

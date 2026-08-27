@@ -511,11 +511,12 @@ class MainWindow:
         self.stop_requested = False
         # Update button to show "Stop Conversion" during conversion
         self.convert_btn.configure(
-            text="⏹️  Stop Conversion",
+            text="🟥 Stop Conversion",
             command=self._stop_conversion,
             fg_color="#dc2626",
             hover_color="#b91c1c"
         )
+        self.root.update_idletasks()
         self.convert_files(self.staged_files)
 
     def _stop_conversion(self):
@@ -577,7 +578,7 @@ class MainWindow:
                 except Exception as exc:
                     error_msg = f"{Path(file_path).name}: {type(exc).__name__}: {str(exc)}"
                     errors.append(error_msg)
-                    logger.error(f"❌ Error converting {file_path}: {exc}")
+                    logger.exception(f"❌ Error converting {file_path}: {exc}")
 
             # Mark completion with full progress bar
             self.progress_var.set(1.0)
@@ -608,9 +609,13 @@ class MainWindow:
                     messagebox.showerror("Conversion Failed", "No files were converted. Please check your files and try again.")
 
         except Exception as exc:
-            logger.exception(f"Conversion error: {exc}")
-            self.status_label.configure(text=f"❌ Error: {exc}", text_color=CTK_ERROR)
+            logger.exception(f"Conversion worker error: {exc}")
+            self.status_label.configure(text=f"❌ Error: {type(exc).__name__}", text_color=CTK_ERROR)
             messagebox.showerror("Conversion Error", f"An unexpected error occurred:\n\n{type(exc).__name__}: {str(exc)}")
+        except BaseException as e:
+            logger.critical(f"Critical conversion error (will not crash): {e}", exc_info=True)
+            self.status_label.configure(text="❌ Critical Error", text_color=CTK_ERROR)
+            messagebox.showerror("Critical Error", f"A critical error occurred but the application continues:\n\n{type(e).__name__}: {str(e)}")
         finally:
             self.is_converting = False
             self.stop_requested = False
