@@ -80,41 +80,47 @@ def ensure_audio_dependencies() -> None:
 
 
 def bundle_ffmpeg_binaries() -> list[str]:
-    """Bundle FFmpeg binaries from system PATH or imageio_ffmpeg package."""
+    """Force-bundle FFmpeg binaries into standalone exe via PyInstaller binaries parameter."""
     args: list[str] = []
     ffmpeg_path = None
     ffprobe_path = None
 
-    # Priority 1: Try system PATH first
+    # Priority 1: Prefer imageio_ffmpeg (guaranteed to have FFmpeg)
     try:
-        ffmpeg_path = shutil.which("ffmpeg")
-        ffprobe_path = shutil.which("ffprobe")
-        if ffmpeg_path:
-            print(f"[build_exe] Found FFmpeg on system PATH: {ffmpeg_path}")
-    except Exception:
-        pass
+        import imageio_ffmpeg
+        ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
+        ffprobe_exe = Path(ffmpeg_path).parent / "ffprobe.exe"
+        ffprobe_path = str(ffprobe_exe) if ffprobe_exe.exists() else None
+        if ffmpeg_path and os.path.exists(ffmpeg_path):
+            print(f"[build_exe] ✓ FORCE EMBED FFmpeg via imageio_ffmpeg: {ffmpeg_path}")
+        else:
+            ffmpeg_path = None
+    except (ImportError, Exception) as exc:
+        print(f"[build_exe] imageio_ffmpeg not available ({exc}), falling back to system PATH")
 
-    # Priority 2: Try imageio_ffmpeg package as fallback
+    # Priority 2: Fallback to system PATH if imageio_ffmpeg failed
     if not ffmpeg_path:
         try:
-            import imageio_ffmpeg
-            ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
-            ffprobe_exe = Path(ffmpeg_path).parent / "ffprobe.exe"
-            ffprobe_path = str(ffprobe_exe) if ffprobe_exe.exists() else None
-            if ffmpeg_path:
-                print(f"[build_exe] Found FFmpeg via imageio_ffmpeg: {ffmpeg_path}")
-        except (ImportError, Exception) as exc:
-            print(f"[build_exe] imageio_ffmpeg not available: {exc}")
+            ffmpeg_path = shutil.which("ffmpeg")
+            ffprobe_path = shutil.which("ffprobe")
+            if ffmpeg_path and os.path.exists(ffmpeg_path):
+                print(f"[build_exe] ✓ FORCE EMBED FFmpeg from system PATH: {ffmpeg_path}")
+            else:
+                ffmpeg_path = None
+        except Exception:
+            pass
 
-    # Bundle if found
+    # Mandatory bundling - error if not found
     if ffmpeg_path and os.path.exists(ffmpeg_path):
         args.extend(["--add-binary", f"{ffmpeg_path};."])
-        print(f"[build_exe] ✓ Bundling FFmpeg: {ffmpeg_path}")
+        print(f"[build_exe] 🎯 Bundled FFmpeg executable ({os.path.getsize(ffmpeg_path) / 1024 / 1024:.1f} MB)")
         if ffprobe_path and os.path.exists(ffprobe_path):
             args.extend(["--add-binary", f"{ffprobe_path};."])
-            print(f"[build_exe] ✓ Bundling ffprobe: {ffprobe_path}")
+            print(f"[build_exe] 🎯 Bundled ffprobe executable ({os.path.getsize(ffprobe_path) / 1024 / 1024:.1f} MB)")
     else:
-        print("[build_exe] ⚠️  FFmpeg not found - users must have FFmpeg installed on system PATH")
+        print("[build_exe] ❌ CRITICAL: FFmpeg not found!")
+        print("[build_exe] Install with: pip install imageio-ffmpeg")
+        raise RuntimeError("FFmpeg binary is required for bundle but not found")
 
     return args
 

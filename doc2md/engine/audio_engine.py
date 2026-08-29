@@ -20,47 +20,48 @@ logger = logging.getLogger(__name__)
 
 
 def _get_ffmpeg_path() -> str:
-    """Resolve FFmpeg executable path from bundled or system location."""
-    # Priority 1: PyInstaller bundle (_MEIPASS)
+    """Resolve FFmpeg executable path with preference for bundled PyInstaller version."""
+    # Priority 1: PyInstaller bundle (_MEIPASS) - HIGHEST PRIORITY FOR STANDALONE
     if getattr(sys, 'frozen', False):
         base_path = sys._MEIPASS
         ffmpeg_exe = os.path.join(base_path, "ffmpeg.exe")
         if os.path.exists(ffmpeg_exe):
-            logger.debug(f"Using bundled FFmpeg (PyInstaller): {ffmpeg_exe}")
+            logger.info(f"✓ Using EMBEDDED FFmpeg from PyInstaller bundle: {ffmpeg_exe}")
             return ffmpeg_exe
+        logger.warning(f"PyInstaller bundle path checked but FFmpeg not found: {base_path}")
 
-    # Priority 2: Bundled next to Python executable (local development or portable)
-    python_dir = os.path.dirname(sys.executable)
-    ffmpeg_exe = os.path.join(python_dir, "ffmpeg.exe")
+    # Priority 2: Current execution directory (fallback for standalone)
+    exec_dir = os.path.dirname(sys.executable)
+    ffmpeg_exe = os.path.join(exec_dir, "ffmpeg.exe")
     if os.path.exists(ffmpeg_exe):
-        logger.debug(f"Using bundled FFmpeg (Python dir): {ffmpeg_exe}")
+        logger.info(f"✓ Using bundled FFmpeg (execution dir): {ffmpeg_exe}")
         return ffmpeg_exe
 
     # Priority 3: Project root directory (local development)
     project_root = Path(__file__).parent.parent.parent
     ffmpeg_exe = str(project_root / "ffmpeg.exe")
     if os.path.exists(ffmpeg_exe):
-        logger.debug(f"Using bundled FFmpeg (project root): {ffmpeg_exe}")
+        logger.info(f"✓ Using bundled FFmpeg (project root): {ffmpeg_exe}")
         return ffmpeg_exe
 
     # Priority 4: System PATH
     ffmpeg_in_path = shutil.which("ffmpeg")
     if ffmpeg_in_path:
-        logger.debug(f"Using system FFmpeg: {ffmpeg_in_path}")
+        logger.info(f"✓ Using system FFmpeg: {ffmpeg_in_path}")
         return ffmpeg_in_path
 
-    # Priority 5: Try imageio_ffmpeg as fallback
+    # Priority 5: Try imageio_ffmpeg as final fallback
     try:
         import imageio_ffmpeg
         ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
         if os.path.exists(ffmpeg_exe):
-            logger.debug(f"Using imageio_ffmpeg FFmpeg: {ffmpeg_exe}")
+            logger.info(f"✓ Using imageio_ffmpeg FFmpeg: {ffmpeg_exe}")
             return ffmpeg_exe
     except (ImportError, Exception):
         pass
 
-    logger.warning("FFmpeg not found in bundled locations or system PATH")
-    return "ffmpeg"  # Let ffmpeg-python handle the lookup
+    logger.error("CRITICAL: FFmpeg not found in any location (bundled, system PATH, or imageio_ffmpeg)")
+    return "ffmpeg"  # Last resort - let ffmpeg-python try to find it
 
 
 class AudioEngine(BaseEngine):

@@ -105,6 +105,28 @@
 All notable changes to `doc2md` are documented here.
 Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
 
+## [1.0.3] - 2026-08-29
+
+### Patch: Force Embed FFmpeg into Standalone Executable
+
+**Overview:** v1.0.3 implements aggressive FFmpeg bundling via PyInstaller's binaries parameter, ensuring the standalone `doc2md.exe` carries FFmpeg directly without external dependencies. Users no longer need system FFmpeg installation or imageio_ffmpeg package.
+
+### Added
+
+- **Force-Embedded FFmpeg Binary:** Updated `build_exe.py` to detect FFmpeg via `imageio_ffmpeg.get_ffmpeg_exe()` and explicitly inject it into PyInstaller's `--add-binary` configuration for guaranteed standalone packaging.
+- **Standalone Execution Path Override:** Audio engine now prioritizes `sys._MEIPASS` (PyInstaller bundle) as the first FFmpeg lookup location, with fallback chain for development/legacy scenarios.
+
+### Fixed
+
+- **Mandatory FFmpeg Requirement:** Build process now raises `RuntimeError` if FFmpeg cannot be located, preventing accidental creation of broken builds.
+- **Embedded FFmpeg Discovery:** Execution path logic detects bundled `ffmpeg.exe` inside standalone package without requiring `imageio_ffmpeg` at runtime.
+
+### Enhanced
+
+- **Build Logging:** Added file size reporting for bundled binaries and clearer progress indicators (✓ = success, 🎯 = bundled, ❌ = critical).
+
+---
+
 ## [1.0.2] - 2026-08-29
 
 ### Patch: Bulletproof Audio Crash Guard & Developer Credit
