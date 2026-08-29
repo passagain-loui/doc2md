@@ -1,5 +1,8 @@
 # CLAUDE.md
 
+`````````````````````````````````text
+# CLAUDE.md
+
 ````````````````````````````````text
 # CLAUDE.md
 
@@ -116,11 +119,11 @@ powershell -ExecutionPolicy Bypass -File ./tools/verify.ps1
 - อ่าน `EXIT_CODE` จาก PowerShell ผลลัพธ์
 - อ่าน **ทั้งหมด** Text Log ที่ LocalCore CLI พ่นออกมา (stdout + stderr)
 - สแกน Log เพื่อหา Keywords ที่บ่งบอก Internal Validation Failure:
-  - `VALIDATION FAILED`
-  - `No command given`
-  - `No project markers`
-  - `Internal Error`
-  - `Test failed`
+ - `VALIDATION FAILED`
+ - `No command given`
+ - `No project markers`
+ - `Internal Error`
+ - `Test failed`
 
 **Phase B: Decision Logic**
 - **กรณี `EXIT_CODE: 0` AND ไม่พบ Failure Keywords (TRUE PASS):** อนุญาตให้ไปดำเนินการ Step 5 ต่อได้ทันที ✅
@@ -406,3 +409,4 @@ Only proceed after EXIT_CODE: 0 confirmed:
 ``````````````````````````````
 ```````````````````````````````
 ````````````````````````````````
+`````````````````````````````````

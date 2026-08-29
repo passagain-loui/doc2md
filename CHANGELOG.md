@@ -1,5 +1,8 @@
 # CHANGELOG.md
 
+```````````````````````````````````text
+# CHANGELOG.md
+
 ``````````````````````````````````text
 # CHANGELOG.md
 
@@ -106,11 +109,11 @@ Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
 
 - **Bundled FFmpeg Executable:** PyInstaller now automatically bundles `ffmpeg.exe` and `ffprobe.exe` (if available) into the distribution, ensuring audio transcription works immediately on target systems without external FFmpeg installation.
 - **Enhanced FFmpeg Path Detection:** `_get_ffmpeg_path()` now implements a multi-priority search strategy:
-  1. PyInstaller `sys._MEIPASS` bundled FFmpeg
-  2. Python executable directory (portable installs)
-  3. Project root directory (local development)
-  4. System PATH lookup
-  5. `imageio_ffmpeg` package fallback
+ 1. PyInstaller `sys._MEIPASS` bundled FFmpeg
+ 2. Python executable directory (portable installs)
+ 3. Project root directory (local development)
+ 4. System PATH lookup
+ 5. `imageio_ffmpeg` package fallback
 
 ### Fixed
 
@@ -480,3 +483,4 @@ Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
 ````````````````````````````````
 `````````````````````````````````
 ``````````````````````````````````
+```````````````````````````````````
