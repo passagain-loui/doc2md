@@ -162,6 +162,9 @@ class AudioEngine(BaseEngine):
             except Exception as e:
                 logger.exception(f"Audio conversion error: {e}")
                 raise ConversionError(f"Audio processing failed: {type(e).__name__}: {str(e)}")
+        except ConversionError:
+            # Re-raise ConversionError as-is (already properly handled)
+            raise
         except BaseException as e:
             # Bulletproof outer crash guard for CTranslate2, Whisper, FFmpeg crashes
             logger.critical(f"BULLETPROOF AUDIO CRASH GUARD: {type(e).__name__}: {str(e)}", exc_info=True)
