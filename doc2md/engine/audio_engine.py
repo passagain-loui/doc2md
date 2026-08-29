@@ -8,8 +8,9 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from doc2md.core.errors import ConversionError
 from doc2md.core.router import FileKind
@@ -49,12 +50,26 @@ class AudioEngine(BaseEngine):
     MODEL_SIZES = ("tiny", "base", "small", "medium", "large-v3")
     MODEL_CACHE_DIR = Path.home() / ".cache" / "doc2md" / "models"
 
-    def convert(self, source: Path | str, options: dict) -> str:
-        """Transcribe audio/video file and return structured Markdown."""
+    def convert(self, source: Path | str, options: dict, abort_event: Optional[threading.Event] = None) -> str:
+        """Transcribe audio/video file and return structured Markdown.
+
+        Args:
+            source: Path to audio/video file
+            options: Conversion options dict (can include 'abort_event' key)
+            abort_event: Optional threading.Event to signal cancellation during transcription
+        """
         try:
             source = Path(source)
             if not source.is_file():
                 raise ConversionError(f"Audio file not found: {source}")
+
+            # Extract abort_event from options if not provided directly
+            if abort_event is None:
+                abort_event = options.get("abort_event")
+
+            # Check abort signal early
+            if abort_event and abort_event.is_set():
+                raise ConversionError("Transcription cancelled by user")
 
             try:
                 import ffmpeg
@@ -82,7 +97,14 @@ class AudioEngine(BaseEngine):
                 # faster-whisper returns a lazy generator; consume it fully here
                 # so downstream formatting can iterate plain segment objects
                 # instead of accidentally iterating the (generator, info) tuple.
-                segments = list(segments_gen)
+                segments = []
+                for segment in segments_gen:
+                    # Check abort signal before processing each segment
+                    if abort_event and abort_event.is_set():
+                        raise ConversionError("Transcription cancelled by user")
+                    segments.append(segment)
+            except ConversionError:
+                raise
             except Exception as e:
                 raise ConversionError(f"Transcription failed: {e}")
 

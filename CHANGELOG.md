@@ -1,5 +1,8 @@
 # CHANGELOG.md
 
+`````````````````````````````````text
+# CHANGELOG.md
+
 ````````````````````````````````text
 # CHANGELOG.md
 
@@ -89,6 +92,17 @@
 
 All notable changes to `doc2md` are documented here.
 Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
+
+## [0.3.22] - 2026-08-27
+
+### Added
+
+- **Instant Worker Abort Event:** Introduced `threading.Event` abort signal mechanism for immediate transcription cancellation. Audio engine now checks `abort_event.is_set()` before and during segment processing loops to terminate heavy transcription jobs instantly upon user cancellation request, preventing long-running operations from blocking the UI.
+
+### Fixed
+
+- **UI State Recovery Guarantee:** Enhanced `_stop_conversion()` to immediately update status text to "Conversion cancelled by user", stop spinner animation, reset progress bar to 0%, and restore "▶️ Start Conversion" button (Emerald `#059669`) without waiting for background worker to complete. Prevents "stuck" UI state during cancellation.
+- **Abort Event Integration:** Audio engine now extracts `abort_event` from conversion options dict, allowing the GUI to pass cancellation signals directly to transcription loops for instant response to user cancellation clicks.
 
 ## [0.3.21] - 2026-08-27
 
@@ -412,3 +426,4 @@ Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
 ``````````````````````````````
 ```````````````````````````````
 ````````````````````````````````
+`````````````````````````````````

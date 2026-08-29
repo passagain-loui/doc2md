@@ -23,21 +23,21 @@ from doc2md.engine.audio_engine import AudioEngine
 
 logger = logging.getLogger(__name__)
 
-# Modern Clean UI theme colors (Tailwind-inspired: slate + blue)
-CTK_BG = "#f8fafc"  # slate-50 page background
-CTK_CARD = "#ffffff"  # Crisp white card
-CTK_ACCENT_BLUE = "#2563eb"  # blue-600 primary action
-CTK_ACCENT_BLUE_HOVER = "#1d4ed8"  # blue-700 hover
-CTK_ACCENT_CYAN = "#0d9488"  # teal-600 secondary action
-CTK_ACCENT_CYAN_HOVER = "#0f766e"  # teal-700 hover
-CTK_ACCENT_PINK = "#ef4444"  # red-500 destructive action
-CTK_ACCENT_PINK_HOVER = "#dc2626"  # red-600 hover
-CTK_TEXT = "#1e293b"  # slate-800 crisp primary text
-CTK_BORDER = "#e2e8f0"  # slate-200 subtle border
-CTK_SECONDARY_TEXT = "#64748b"  # slate-500 muted secondary text
-CTK_TEAL_TEXT = "#0f766e"  # teal-700 readable accent text
-CTK_SUCCESS = "#059669"  # emerald-600 success
-CTK_ERROR = "#dc2626"  # red-600 error
+# Modern Dark UI theme colors (High-contrast sleek dark mode)
+CTK_BG = "#0F172A"  # Slate 900 / Dark Charcoal main background
+CTK_CARD = "#1E2937"  # Slate 800 cards/frames background
+CTK_ACCENT_BLUE = "#2563EB"  # Blue 600 primary action buttons
+CTK_ACCENT_BLUE_HOVER = "#1D4ED8"  # Blue 700 hover
+CTK_ACCENT_CYAN = "#059669"  # Emerald 600 (reused for Start button)
+CTK_ACCENT_CYAN_HOVER = "#047857"  # Emerald 700 hover
+CTK_ACCENT_PINK = "#DC2626"  # Red 600 destructive action
+CTK_ACCENT_PINK_HOVER = "#991B1B"  # Red 800 hover
+CTK_TEXT = "#F8FAFC"  # Slate 50 - High contrast white primary text
+CTK_BORDER = "#334155"  # Slate 700 subtle borders
+CTK_SECONDARY_TEXT = "#94A3B8"  # Slate 400 muted secondary text/badges
+CTK_TEAL_TEXT = "#06B6D4"  # Cyan 500 for accent text (better contrast in dark mode)
+CTK_SUCCESS = "#059669"  # Emerald 600 success
+CTK_ERROR = "#DC2626"  # Red 600 error
 
 # Shared font family for crisp, consistently-aligned icon+text rendering
 UI_FONT = "Segoe UI"
@@ -52,15 +52,19 @@ class MainWindow:
         self.root.geometry("900x700")
         self.root.minsize(700, 500)
 
-        # Configure Modern Clean light theme
-        ctk.set_appearance_mode("light")
+        # Configure Modern Dark theme
+        ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
 
-        self.converter = Converter(timeout=300, options={"audio_model": "small"})
+        self.converter = Converter(timeout=1800, options={"audio_model": "small"})
         self.audio_engine = AudioEngine()
         self.is_converting = False
+        self.stop_requested = False
         self.last_result = ""
         self.staged_files: list[str] = []
+        self.spinner_frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+        self.spinner_index = 0
+        self.spinner_id = None
 
         self._setup_ui()
         self._setup_dnd()
@@ -129,6 +133,10 @@ class MainWindow:
         drop_card.bind("<Enter>", lambda e: drop_card.configure(border_color=CTK_ACCENT_BLUE))
         drop_card.bind("<Leave>", lambda e: drop_card.configure(border_color=CTK_BORDER))
 
+        # Configure grid for drop zone layout
+        drop_card.grid_rowconfigure(0, weight=1)
+        drop_card.grid_columnconfigure(0, weight=1)
+
         self.drop_label = ctk.CTkLabel(
             drop_card,
             text="📁 Click or Drag & Drop Files Here\n(PDF, DOCX, Images, Audio, Video)",
@@ -138,22 +146,22 @@ class MainWindow:
             anchor="center",
             justify="center",
         )
-        self.drop_label.pack(fill="both", expand=True, padx=30, pady=30)
+        self.drop_label.grid(row=0, column=0, sticky="nsew", padx=30, pady=30)
         self.drop_card = drop_card
+
+        # Staging status label (inside drop card, at the bottom)
+        self.staging_status_label = ctk.CTkLabel(
+            drop_card,
+            text="",
+            text_color=CTK_SUCCESS,
+            font=(UI_FONT, 9),
+            anchor="center",
+        )
+        self.staging_status_label.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 8))
 
         # Bind click event to drop card for fallback file browser
         drop_card.bind("<Button-1>", lambda e: self.browse_files())
         self.drop_label.bind("<Button-1>", lambda e: self.browse_files())
-
-        # Staging status label
-        self.staging_status_label = ctk.CTkLabel(
-            content_frame,
-            text="",
-            text_color=CTK_SECONDARY_TEXT,
-            font=(UI_FONT, 10),
-            anchor="w",
-        )
-        self.staging_status_label.pack(side="left", fill="x", padx=12, pady=(4, 0))
 
         # Right Column: Options & Analytics
         right_frame = ctk.CTkScrollableFrame(content_frame, fg_color="transparent")
@@ -412,6 +420,31 @@ class MainWindow:
 
         threading.Thread(target=worker, daemon=True).start()
 
+    def _start_spinner(self):
+        """Start the animated spinner in the status label."""
+        self.spinner_index = 0
+        self._animate_spinner()
+
+    def _animate_spinner(self):
+        """Animate the spinner character cycling."""
+        if self.is_converting:
+            self.spinner_index = (self.spinner_index + 1) % len(self.spinner_frames)
+            frame = self.spinner_frames[self.spinner_index]
+            current_text = self.status_label.cget("text")
+            # Remove old spinner if present and append new one
+            if current_text and current_text[0] in self.spinner_frames:
+                text_without_spinner = current_text[2:] if len(current_text) > 2 else "Processing..."
+            else:
+                text_without_spinner = current_text if current_text else "Processing..."
+            self.status_label.configure(text=f"{frame} {text_without_spinner}")
+            self.spinner_id = self.root.after(200, self._animate_spinner)
+
+    def _stop_spinner(self):
+        """Stop the spinner animation."""
+        if self.spinner_id:
+            self.root.after_cancel(self.spinner_id)
+            self.spinner_id = None
+
     def _setup_dnd(self):
         """Setup native Windows drag-and-drop support (windnd) with fallback."""
         try:
@@ -478,7 +511,21 @@ class MainWindow:
         if not self.staged_files:
             messagebox.showwarning("No Files", "Please select files to convert")
             return
+        self.stop_requested = False
+        # Update button to show "Stop Conversion" during conversion
+        self.convert_btn.configure(
+            text="🟥 Stop Conversion",
+            command=self._stop_conversion,
+            fg_color="#dc2626",
+            hover_color="#b91c1c"
+        )
+        self.root.update_idletasks()
         self.convert_files(self.staged_files)
+
+    def _stop_conversion(self):
+        """Request cancellation of the ongoing conversion."""
+        self.stop_requested = True
+        self.status_label.configure(text="Stopping conversion...", text_color=CTK_SECONDARY_TEXT)
 
     def convert_files(self, files: list[str]):
         """Convert files in background thread."""
@@ -508,6 +555,11 @@ class MainWindow:
             pulse_direction = 1
             pulse_value = 0.3
             for i, file_path in enumerate(files):
+                # Allow user to stop conversion
+                if self.stop_requested:
+                    self.status_label.configure(text="Conversion stopped by user", text_color=CTK_SECONDARY_TEXT)
+                    break
+
                 # Simulate indeterminate progress by pulsing
                 pulse_value += 0.05 * pulse_direction
                 if pulse_value >= 0.7:
@@ -529,7 +581,7 @@ class MainWindow:
                 except Exception as exc:
                     error_msg = f"{Path(file_path).name}: {type(exc).__name__}: {str(exc)}"
                     errors.append(error_msg)
-                    logger.error(f"❌ Error converting {file_path}: {exc}")
+                    logger.exception(f"❌ Error converting {file_path}: {exc}")
 
             # Mark completion with full progress bar
             self.progress_var.set(1.0)
@@ -560,13 +612,25 @@ class MainWindow:
                     messagebox.showerror("Conversion Failed", "No files were converted. Please check your files and try again.")
 
         except Exception as exc:
-            logger.exception(f"Conversion error: {exc}")
-            self.status_label.configure(text=f"❌ Error: {exc}", text_color=CTK_ERROR)
+            logger.exception(f"Conversion worker error: {exc}")
+            self.status_label.configure(text=f"❌ Error: {type(exc).__name__}", text_color=CTK_ERROR)
             messagebox.showerror("Conversion Error", f"An unexpected error occurred:\n\n{type(exc).__name__}: {str(exc)}")
+        except BaseException as e:
+            logger.critical(f"Critical conversion error (will not crash): {e}", exc_info=True)
+            self.status_label.configure(text="❌ Critical Error", text_color=CTK_ERROR)
+            messagebox.showerror("Critical Error", f"A critical error occurred but the application continues:\n\n{type(e).__name__}: {str(e)}")
         finally:
             self.is_converting = False
+            self.stop_requested = False
             self.staged_files.clear()
             self._update_staging_status()
+            # Reset button to show "Start Conversion"
+            self.convert_btn.configure(
+                text="▶️  Start Conversion",
+                command=self._start_conversion,
+                fg_color="#059669",
+                hover_color="#047857"
+            )
 
     def copy_result(self):
         """Copy last conversion result to clipboard."""

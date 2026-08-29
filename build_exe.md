@@ -101,6 +101,13 @@ def bundle_ffmpeg_binaries() -> list[str]:
 
 
 def build() -> int:
+    # Clean stale build/dist directories to ensure fresh build with current version
+    for folder in ["build", "dist"]:
+        folder_path = ROOT / folder
+        if folder_path.exists():
+            print(f"[build_exe] Cleaning stale {folder}/ directory...")
+            shutil.rmtree(folder_path)
+
     if shutil.which("python") is None and sys.executable == "":
         print("[build_exe] python interpreter not found")
         return 2

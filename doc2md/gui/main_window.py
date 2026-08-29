@@ -57,6 +57,7 @@ class MainWindow:
         self.audio_engine = AudioEngine()
         self.is_converting = False
         self.stop_requested = False
+        self.abort_event = threading.Event()
         self.last_result = ""
         self.staged_files: list[str] = []
         self.spinner_frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
@@ -520,9 +521,28 @@ class MainWindow:
         self.convert_files(self.staged_files)
 
     def _stop_conversion(self):
-        """Request cancellation of the ongoing conversion."""
+        """Request cancellation of the ongoing conversion and restore UI state immediately."""
         self.stop_requested = True
-        self.status_label.configure(text="Stopping conversion...", text_color=CTK_SECONDARY_TEXT)
+        self.abort_event.set()
+
+        # Update status to show cancellation
+        self.status_label.configure(text="Conversion cancelled by user", text_color=CTK_SECONDARY_TEXT)
+
+        # Stop spinner animation if running
+        self._stop_spinner()
+
+        # Reset progress bar to 0
+        self.progress_var.set(0.0)
+        self.progress_overlay.configure(text="0%")
+
+        # Restore button to Start Conversion immediately (don't wait for finally)
+        self.convert_btn.configure(
+            text="▶️  Start Conversion",
+            command=self._start_conversion,
+            fg_color="#059669",
+            hover_color="#047857"
+        )
+        self.root.update_idletasks()
 
     def convert_files(self, files: list[str]):
         """Convert files in background thread."""
@@ -541,6 +561,10 @@ class MainWindow:
     def _convert_worker(self, files: list[str]):
         """Background worker for file conversion."""
         try:
+            # Reset abort event at start of conversion
+            self.abort_event.clear()
+            self.stop_requested = False
+
             total = len(files)
             self.status_label.configure(text=f"Converting {total} file(s)...", text_color=CTK_TEAL_TEXT)
             # Set progress to indeterminate (pulsing between 0.3 and 0.7)
@@ -553,8 +577,7 @@ class MainWindow:
             pulse_value = 0.3
             for i, file_path in enumerate(files):
                 # Allow user to stop conversion
-                if self.stop_requested:
-                    self.status_label.configure(text="Conversion stopped by user", text_color=CTK_SECONDARY_TEXT)
+                if self.stop_requested or self.abort_event.is_set():
                     break
 
                 # Simulate indeterminate progress by pulsing
@@ -567,6 +590,8 @@ class MainWindow:
                 self.root.update()
 
                 try:
+                    # Pass abort_event to converter for audio processing cancellation
+                    self.converter.options["abort_event"] = self.abort_event
                     result = self.converter.convert_file(Path(file_path))
                     if result.success:
                         results.append(result.markdown)

@@ -13,6 +13,16 @@ if getattr(sys, "frozen", False):
     _bundle_dir = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
     os.environ["PATH"] = _bundle_dir + os.pathsep + os.environ.get("PATH", "")
 
+# Enable Windows High-DPI Awareness for crisp text rendering on high-DPI displays
+# SetProcessDpiAwareness(2) = Per-monitor DPI awareness (Windows 10+)
+if sys.platform == "win32":
+    try:
+        import ctypes
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+    except (AttributeError, OSError):
+        # Older Windows versions or if the call fails, continue without high-DPI awareness
+        pass
+
 from doc2md.cli.main import app
 
 if __name__ == "__main__":
