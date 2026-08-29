@@ -1,5 +1,8 @@
 # CLAUDE.md
 
+```````````````````````````````````````````text
+# CLAUDE.md
+
 ``````````````````````````````````````````text
 # CLAUDE.md
 
@@ -119,7 +122,7 @@
 
 ---
 
-## EXECUTION GUIDELINES & WORKFLOW STANDARDS (v5.2)
+## EXECUTION GUIDELINES & WORKFLOW STANDARDS (v5.3)
 
 ### 1. Role & Execution Guidelines
 
@@ -140,13 +143,13 @@
 powershell -ExecutionPolicy Bypass -File ./tools/verify.ps1
 ```
 
-**Step 4 (Strict Re-Validation & Mandatory Auto-Fix Loop):**
+**Step 4 (Strict Re-Validation, Environment Check & Auto-Fix Loop):**
 - อ่านทั้ง `EXIT_CODE` และ Text Log สดๆ จาก Terminal ใน Step 3
 - **กรณี `EXIT_CODE: 0` (PASS):** ตรวจสอบใน Log ต้องไม่มีคำว่า `VALIDATION FAILED`, `No command given` หรือ `is not recognized` หากสะอาด 100% จึงจะอนุญาตให้ไป Step 5 (Packaging & Build)
-- **กรณี `EXIT_CODE != 0` หรือพบ Failure Log (FAIL/ERROR):**
- - **MANDATORY AUTO-EXECUTION:** ห้ามหยุดทำงาน ห้ามสรุปปิดงาน และห้ามข้ามไป Step 5 เด็ดขาด
- - อ่าน Error Log ที่ LocalCore CLI พ่นออกมาทันที (เช่น ปัญหา command/pytest/syntax)
- - **ดำเนินการทันทีอัตโนมัติ:** วนกลับไป **Step 1** เพื่อแก้ไขโค้ด/การตั้งค่า ➔ **Step 2** (Purge Cache) ➔ **Step 3** (รัน `./tools/verify.ps1` ตรวจซ้ำ)
+- **กรณี `EXIT_CODE != 0` หรือพบ Failure Log (FAIL/ERROR/ENVIRONMENT BUG):**
+ - **MANDATORY AUTO-EXECUTION:** ห้ามหยุดทำงาน ห้ามสรุปปิดงาน และห้ามข้ามไป Step 5 เด็ดขาด (หากหลุด Release ให้ Rollback ทันที)
+ - อ่าน Error Log ที่ LocalCore CLI พ่นออกมาทันที (รวมถึงปัญหา CLI Syntax, PATH error หรือ pytest command missing)
+ - **ดำเนินการอัตโนมัติทันที:** วนกลับไป **Step 1** เพื่อแก้ไขโค้ด/สคริปต์/Environment ➔ **Step 2** (Purge Cache) ➔ **Step 3** (สั่งรัน `./tools/verify.ps1` ตรวจซ้ำให้อัตโนมัติ)
  - **ต้องส่งตรวจใหม่ซ้ำไปเรื่อยๆ จนกว่าจะได้รับ `EXIT_CODE: 0` ของจริงเท่านั้น** (No Mock/No Assumption)
 
 **Step 5 (Packaging & Build):** เมื่อผ่านการอนุมัติ `EXIT_CODE: 0` ของจริงจาก LocalCore CLI แล้ว ให้ดำเนินการสร้าง Release Build (จำกัดการใช้ CPU/RAM ไม่เกิน 85%)
@@ -442,3 +445,4 @@ Only proceed after EXIT_CODE: 0 confirmed:
 ````````````````````````````````````````
 `````````````````````````````````````````
 ``````````````````````````````````````````
+```````````````````````````````````````````

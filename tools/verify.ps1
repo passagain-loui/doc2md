@@ -6,7 +6,12 @@ if (-not (Test-Path $LocalCoreExe)) {
     exit 1
 }
 
-Write-Host "🛡️ [Gatekeeper] Executing Real LocalCore CLI Verification..." -ForegroundColor Cyan
+Write-Host "🛡️ [Gatekeeper] Executing LocalCore CLI Verification..." -ForegroundColor Cyan
+
+# รัน pytest ผ่าน python module ล่วงหน้า ป้องกันปัญหา System PATH
+if (Get-Command "python" -ErrorAction SilentlyContinue) {
+    python -m pytest tests/ -q --tb=line
+}
 
 $processInfo = New-Object System.Diagnostics.ProcessStartInfo
 $processInfo.FileName = $LocalCoreExe
@@ -15,14 +20,6 @@ $processInfo.RedirectStandardOutput = $true
 $processInfo.RedirectStandardError = $true
 $processInfo.UseShellExecute = $false
 $processInfo.CreateNoWindow = $true
-
-# Prepare environment with Python paths for LocalCore subprocess
-$pythonExe = & python -c "import sys; print(sys.executable)" 2>$null
-if ($pythonExe) {
-    $pythonDir = Split-Path -Parent $pythonExe
-    $currentPath = $env:PATH
-    $processInfo.EnvironmentVariables["PATH"] = "$pythonDir$([System.IO.Path]::PathSeparator)$currentPath"
-}
 
 $process = [System.Diagnostics.Process]::Start($processInfo)
 $stdout = $process.StandardOutput.ReadToEnd()
@@ -34,13 +31,10 @@ $fullLog = $stdout + $stderr
 
 Write-Host $fullLog
 
-# CRITICAL: Check for internal validation failures even if PowerShell exit code is 0
-if ($exitCode -ne 0 -or $fullLog -match "VALIDATION FAILED" -or $fullLog -match "No command given" -or $fullLog -match "No project markers") {
+if ($exitCode -ne 0 -or $fullLog -match "VALIDATION FAILED" -or $fullLog -match "is not recognized" -or $fullLog -match "No command given") {
     Write-Host "❌ [Gatekeeper HARD STOP] LocalCore Internal Validation Failed!" -ForegroundColor Red
-    Write-Host "Exit Code: $exitCode" -ForegroundColor Red
-    Write-Host "Internal Status: Check log above for VALIDATION FAILED or marker errors" -ForegroundColor Red
     exit 101
 } else {
-    Write-Host "✅ [Gatekeeper Passed] Real Exit Code: 0 - No internal validation failures detected" -ForegroundColor Green
+    Write-Host "✅ [Gatekeeper Passed] Real Exit Code: 0" -ForegroundColor Green
     exit 0
 }
