@@ -1,5 +1,11 @@
 # CHANGELOG.md
 
+``````````````````````````````````````````text
+# CHANGELOG.md
+
+`````````````````````````````````````````text
+# CHANGELOG.md
+
 ````````````````````````````````````````text
 # CHANGELOG.md
 
@@ -113,6 +119,23 @@
 
 All notable changes to `doc2md` are documented here.
 Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
+
+## [1.0.7] - 2026-08-29
+
+### Fix: ffprobe-less Duration Probing & Windows No-Console Subprocess Hardening
+
+**Overview:** v1.0.7 fixes a critical bug reported by users: the progress bar appeared permanently stuck at 0% during audio conversion, and in some cases the app could not be closed while a conversion was active. Root-caused to two related subprocess issues specific to the compiled `--windowed` (console-less) executable.
+
+### Fixed
+
+- **Progress Bar Stuck at 0%:** `_get_duration()` previously used `ffmpeg-python`'s `ffmpeg.probe()`, which defaults to invoking a bare `"ffprobe"` executable. doc2md has only ever bundled `ffmpeg.exe` (via `imageio_ffmpeg`), never `ffprobe.exe`, and `ffprobe` is not expected on a user's system PATH either — so probing always failed silently and returned `duration = 0.0`. Since the segment-loop's progress callback is gated on `duration > 0`, it was **never invoked**, even though transcription was proceeding normally in the background. `_get_duration()` now shells out to the bundled `ffmpeg.exe` directly (`ffmpeg -i <file>`, parsing `Duration: HH:MM:SS.ss` from stderr) with no `ffprobe` dependency at all. Verified against a synthetic test file: correctly reports duration instead of always returning 0.
+- **App Unclosable During Conversion:** `kill_all_ffmpeg_processes()`'s `taskkill` subprocess call had no `creationflags=CREATE_NO_WINDOW` / `stdin=subprocess.DEVNULL`. In the compiled `--windowed` build, `sys.stdin is None` (no console), and a subprocess call that tries to inherit a nonexistent std handle can hang instead of raising — and this call runs synchronously on the main thread during window close (`WM_DELETE_WINDOW`), which could make the app unclosable while `is_converting` was True.
+
+### Added
+
+- **Bounded Exit Cleanup:** `_on_exit_request()` now runs `kill_all_ffmpeg_processes()` / `cleanup_temp_audio_chunks()` in a background thread with a 3-second bounded `join()`, guaranteeing `os._exit(0)` always fires within ~3 seconds regardless of what those calls do — the window can no longer become permanently unclosable, even in an unforeseen failure mode.
+
+---
 
 ## [1.0.6] - 2026-08-29
 
@@ -611,3 +634,5 @@ Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
 ``````````````````````````````````````
 ```````````````````````````````````````
 ````````````````````````````````````````
+`````````````````````````````````````````
+``````````````````````````````````````````

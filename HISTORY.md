@@ -1,5 +1,11 @@
 # HISTORY.md
 
+`````````````````````````````````````````text
+# HISTORY.md
+
+````````````````````````````````````````text
+# HISTORY.md
+
 ```````````````````````````````````````text
 # HISTORY.md
 
@@ -112,6 +118,19 @@
 # History & Verification Audit Trail
 
 This file records verification runs, timestamps, and quality metrics per release.
+
+## [1.0.7] - 2026-08-29
+
+- **Verification timestamp (UTC+7 local):** 2026-08-29, Gatekeeper Protocol v4.7 (Complete Master Specification)
+- **Verification Method:** `powershell -ExecutionPolicy Bypass -File ./tools/verify.ps1` (LocalCore CLI, `--verify --model Qwen-2.5-Coder-7B`) + `python -m pytest tests/ -v`
+- **Result:** `EXIT_CODE:0` — **VALIDATION PASSED**; 307 passed, 1 skipped
+- **Loop iterations:** 1 (no fixes needed)
+- **Root cause investigation:** User-reported bug — progress bar stuck at 0% during audio conversion, app occasionally unclosable while converting. Traced to `ffmpeg-python`'s `ffmpeg.probe()` defaulting to a bare `"ffprobe"` executable that doc2md has never bundled (only `ffmpeg.exe` via `imageio_ffmpeg`) and is not expected on a user's PATH; probing silently failed and returned `duration=0.0`, which permanently disabled the progress-callback guard (`if progress_callback and duration > 0`).
+- **Features & Fixes:**
+ - `_get_duration()` now probes duration via the bundled `ffmpeg.exe` directly (`ffmpeg -i <file>`, parsing `Duration:` from stderr) - no `ffprobe` dependency; verified against a synthetic test file (correct 2.0s detection vs. previous always-0.0)
+ - `kill_all_ffmpeg_processes()` hardened with `creationflags=subprocess.CREATE_NO_WINDOW` and `stdin=subprocess.DEVNULL`, preventing a Windows `--windowed`-build subprocess hang risk on the main thread during window close
+ - `_on_exit_request()` now runs its cleanup in a background thread with a 3-second bounded `join()`, guaranteeing `os._exit(0)` fires promptly regardless of cleanup outcome
+- **GitHub Release:** https://github.com/passagain-loui/doc2md/releases/tag/v1.0.7
 
 ## [1.0.6] - 2026-08-29
 
@@ -515,3 +534,5 @@ This file records verification runs, timestamps, and quality metrics per release
 `````````````````````````````````````
 ``````````````````````````````````````
 ```````````````````````````````````````
+````````````````````````````````````````
+`````````````````````````````````````````

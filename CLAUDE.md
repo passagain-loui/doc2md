@@ -1,5 +1,11 @@
 # CLAUDE.md
 
+````````````````````````````````````````text
+# CLAUDE.md
+
+```````````````````````````````````````text
+# CLAUDE.md
+
 ``````````````````````````````````````text
 # CLAUDE.md
 
@@ -332,7 +338,7 @@ Only proceed after EXIT_CODE: 0 confirmed:
 ### 11. PROJECT CONTEXT
 
 **Repository:** https://github.com/passagain-loui/doc2md
-**Current Version:** 0.3.20 (Clean Build, High-DPI Text, Stop Conversion Button)
+**Current Version:** 1.0.7 (ffprobe-less Duration Probing, Windows No-Console Subprocess Hardening)
 **Python:** 3.9+ (tested on 3.10, 3.11, 3.14)
 **Platform:** Windows (primary), Linux/macOS (supported)
 **Test Framework:** pytest 8.0+ with coverage (pytest-cov)
@@ -387,13 +393,19 @@ Only proceed after EXIT_CODE: 0 confirmed:
 ---
 
 **Recent Releases (Protocol v4.7):**
+- v1.0.7 (2026-08-29): ffprobe-less duration probing (fixes progress bar stuck at 0%), Windows no-console subprocess hardening, bounded exit cleanup
+- v1.0.6 (2026-08-29): Decoupled main-thread queue polling architecture (task_queue/result_queue)
+- v1.0.5 (2026-08-29): Hard Exit Protocol, grid geometry fix, combobox/progress label styling
+- v1.0.4 (2026-08-29): Numeric percentage progress bar, removed static "Processing..." overlay
+- v1.0.3 (2026-08-29): Force-embedded FFmpeg binary into standalone executable
+- v1.0.0 (2026-08-29): Major production release - thread-safe race condition prevention, bulletproof audio crash guard
 - v0.3.20 (2026-08-27): Clean build pipeline, High-DPI crisp text, stop conversion button
 - v0.3.19 (2026-08-27): Force kill process before setup extraction
 - v0.3.18 (2026-08-27): Automatic application termination during setup
 - v0.3.17 (2026-08-27): Modern dark UI overhaul, extended audio timeout (1800s), spinner animation
 
-**Last Updated:** 2026-08-27 (Protocol v4.7 - Complete Master Specification, v0.3.20)
-**Next Review:** After v0.4.0 release
+**Last Updated:** 2026-08-29 (Protocol v4.7 - Complete Master Specification, v1.0.7)
+**Next Review:** After v1.1.0 release
 **Maintainer:** doc2md Development Team
 ````
 `````
@@ -430,3 +442,5 @@ Only proceed after EXIT_CODE: 0 confirmed:
 ````````````````````````````````````
 `````````````````````````````````````
 ``````````````````````````````````````
+```````````````````````````````````````
+````````````````````````````````````````

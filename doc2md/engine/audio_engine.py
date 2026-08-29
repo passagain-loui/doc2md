@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -195,20 +196,45 @@ class AudioEngine(BaseEngine):
             )
 
     def _get_duration(self, source: Path) -> float:
-        """Get audio/video duration in seconds."""
+        """Get audio/video duration in seconds using the bundled ffmpeg.exe
+        directly (via `-i <file>` and parsing the "Duration: HH:MM:SS.ss"
+        line from stderr).
+
+        Deliberately does NOT use ffmpeg-python's `ffmpeg.probe()`: that
+        function shells out to a bare `"ffprobe"` executable, which is never
+        bundled (imageio_ffmpeg only ships ffmpeg.exe) and is not expected to
+        be on a user's PATH, so probing always failed silently and returned
+        0.0 - which meant `progress_callback` was never invoked (its guard
+        requires duration > 0), leaving the GUI progress bar stuck at 0% for
+        the entire transcription even though work was proceeding normally.
+        """
         try:
-            import ffmpeg
-
-            # Ensure bundled FFmpeg is in PATH for ffmpeg-python
             ffmpeg_path = _get_ffmpeg_path()
-            if ffmpeg_path != "ffmpeg":
-                # Prepend bundled FFmpeg directory to PATH
-                ffmpeg_dir = os.path.dirname(ffmpeg_path)
-                os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
+            if ffmpeg_path == "ffmpeg":
+                return 0.0
 
-            probe = ffmpeg.probe(str(source))
-            return float(probe["format"]["duration"])
-        except Exception:
+            kwargs: dict = {}
+            if sys.platform == "win32":
+                kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+
+            result = subprocess.run(
+                [ffmpeg_path, "-i", str(source)],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=15,
+                **kwargs,
+            )
+            # ffmpeg -i with no output file exits non-zero by design; the
+            # stream info (including Duration) is printed to stderr.
+            output = result.stderr.decode("utf-8", errors="ignore")
+            match = re.search(r"Duration:\s*(\d+):(\d+):(\d+)\.(\d+)", output)
+            if not match:
+                return 0.0
+            hours, minutes, seconds, centiseconds = (int(g) for g in match.groups())
+            return hours * 3600 + minutes * 60 + seconds + centiseconds / 100
+        except Exception as exc:
+            logger.debug(f"Duration probe failed (progress bar will show 0% only): {exc}")
             return 0.0
 
     def _load_model(self, model_size: str, progress_callback=None):
@@ -259,14 +285,25 @@ class AudioEngine(BaseEngine):
     def kill_all_ffmpeg_processes() -> None:
         """Forcefully terminate any FFmpeg processes spawned during
         transcription. Used by the GUI's Hard Exit Protocol to prevent
-        zombie ffmpeg.exe processes from lingering after a forced shutdown."""
+        zombie ffmpeg.exe processes from lingering after a forced shutdown.
+
+        stdin is explicitly set to DEVNULL and CREATE_NO_WINDOW is passed on
+        Windows: a --windowed PyInstaller build has no console (sys.stdin is
+        None), and spawning a subprocess that tries to inherit a
+        nonexistent/invalid std handle can hang instead of raising - which
+        would block this call on the GUI main thread (it runs synchronously
+        from the WM_DELETE_WINDOW handler) and make the window impossible to
+        close while a conversion is active.
+        """
         if sys.platform != "win32":
             return
         try:
             subprocess.run(
                 ["taskkill", "/F", "/IM", "ffmpeg.exe", "/T"],
+                stdin=subprocess.DEVNULL,
                 capture_output=True,
                 timeout=5,
+                creationflags=subprocess.CREATE_NO_WINDOW,
             )
         except Exception as exc:
             logger.warning(f"Failed to kill FFmpeg processes: {exc}")

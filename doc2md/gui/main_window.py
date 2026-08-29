@@ -813,10 +813,24 @@ class MainWindow:
         """Hard Exit Protocol: if a conversion is active, forcefully kill any
         spawned FFmpeg processes and delete leftover temp audio chunks before
         instantly terminating the process, so a frozen main thread (stuck in
-        a native transcription call) can never block application shutdown."""
+        a native transcription call) can never block application shutdown.
+
+        The cleanup itself runs in a background thread with a bounded join:
+        this handler executes synchronously on the main thread (it's the
+        WM_DELETE_WINDOW callback), so if kill_all_ffmpeg_processes() or
+        cleanup_temp_audio_chunks() were ever to hang for an unexpected
+        reason, os._exit(0) is still guaranteed to fire within ~3 seconds
+        instead of leaving the window permanently unclosable.
+        """
         if self.is_converting:
             self.abort_event.set()
             self.stop_requested = True
-            AudioEngine.kill_all_ffmpeg_processes()
-            AudioEngine.cleanup_temp_audio_chunks()
+
+            def _cleanup():
+                AudioEngine.kill_all_ffmpeg_processes()
+                AudioEngine.cleanup_temp_audio_chunks()
+
+            cleanup_thread = threading.Thread(target=_cleanup, daemon=True)
+            cleanup_thread.start()
+            cleanup_thread.join(timeout=3)
         os._exit(0)
