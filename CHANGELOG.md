@@ -1,5 +1,8 @@
 # CHANGELOG.md
 
+```````````````````````````````````````````text
+# CHANGELOG.md
+
 ``````````````````````````````````````````text
 # CHANGELOG.md
 
@@ -119,6 +122,27 @@
 
 All notable changes to `doc2md` are documented here.
 Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
+
+## [1.0.8] - 2026-08-29
+
+### Performance: Auto Hardware Acceleration & Faster Default Transcription
+
+**Overview:** v1.0.8 optimizes the audio engine for real-world transcription speed with automatic hardware acceleration and faster decoding defaults, with no user configuration required.
+
+### Added
+
+- **Auto Hardware Detection:** `_load_model()` now explicitly logs and applies the detected hardware profile — CUDA with `float16` compute when a GPU is available, otherwise CPU with `int8` compute and `cpu_threads=os.cpu_count()` to use all available cores for CPU-only inference.
+- **Configurable `beam_size`:** `model.transcribe()` now defaults `beam_size=1` (greedy decoding) instead of faster-whisper's default of 5, cutting transcription time significantly with negligible accuracy impact for typical use. Overridable via `options["beam_size"]` for callers that want higher-accuracy beam search.
+
+### Fixed
+
+- **GPU Detection Robustness:** `_has_gpu()` now catches any exception from `torch.cuda.is_available()` (not just `ImportError`), so a present-but-misconfigured CUDA driver falls back cleanly to CPU instead of risking an unhandled failure during model load.
+
+### Notes
+
+- Default audio model in the GUI was already `"small"` (not `"large-v3"`) — already the faster of the two options this task considered, so no change was needed there.
+
+---
 
 ## [1.0.7] - 2026-08-29
 
@@ -636,3 +660,4 @@ Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
 ````````````````````````````````````````
 `````````````````````````````````````````
 ``````````````````````````````````````````
+```````````````````````````````````````````

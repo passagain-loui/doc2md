@@ -1,5 +1,8 @@
 # HISTORY.md
 
+``````````````````````````````````````````text
+# HISTORY.md
+
 `````````````````````````````````````````text
 # HISTORY.md
 
@@ -118,6 +121,19 @@
 # History & Verification Audit Trail
 
 This file records verification runs, timestamps, and quality metrics per release.
+
+## [1.0.8] - 2026-08-29
+
+- **Verification timestamp (UTC+7 local):** 2026-08-29, Gatekeeper Protocol v5.2 (Mandatory Auto-Fix Loop)
+- **Verification Method:** `python -m pytest tests/ -v`
+- **Result:** `EXIT_CODE:0` — **VALIDATION PASSED**
+- **Loop iterations:** 1 (no fixes needed)
+- **Features & Fixes:**
+ - Auto Hardware Detection: `_load_model()` applies CUDA + `float16` when a GPU is available, else CPU + `int8` + `cpu_threads=os.cpu_count()`
+ - `beam_size` default reduced from faster-whisper's default of 5 to 1 (greedy decoding) for significantly faster transcription, overridable via `options["beam_size"]`
+ - `_has_gpu()` hardened to catch any exception (not just `ImportError`) from `torch.cuda.is_available()`, falling back cleanly to CPU on a broken CUDA driver
+ - Default GUI audio model confirmed already `"small"` (task's suggested target); no change needed
+- **GitHub Release:** https://github.com/passagain-loui/doc2md/releases/tag/v1.0.8
 
 ## [1.0.7] - 2026-08-29
 
@@ -536,3 +552,4 @@ This file records verification runs, timestamps, and quality metrics per release
 ```````````````````````````````````````
 ````````````````````````````````````````
 `````````````````````````````````````````
+``````````````````````````````````````````

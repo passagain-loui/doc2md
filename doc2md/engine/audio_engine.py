@@ -134,8 +134,16 @@ class AudioEngine(BaseEngine):
                 duration = self._get_duration(source)
                 model = self._load_model(model_size, options.get("download_progress"))
 
+                # Speed optimization: faster-whisper defaults beam_size to 5,
+                # which is significantly slower for a negligible accuracy
+                # gain in most transcription use cases. Default to 1 (greedy
+                # decoding), overridable via options["beam_size"].
+                beam_size = options.get("beam_size", 1)
+
                 try:
-                    segments_gen, info = model.transcribe(str(source), language="en")
+                    segments_gen, info = model.transcribe(
+                        str(source), language="en", beam_size=beam_size
+                    )
                     # faster-whisper returns a lazy generator; consume it fully here
                     # so downstream formatting can iterate plain segment objects
                     # instead of accidentally iterating the (generator, info) tuple.
@@ -255,15 +263,22 @@ class AudioEngine(BaseEngine):
             self.MODEL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
             model_path = self.MODEL_CACHE_DIR / model_size
+
+            # Auto Hardware Detection: prefer CUDA (float16) when available,
+            # otherwise fall back to CPU (int8) using all available cores.
             device = "cuda" if self._has_gpu() else "cpu"
             compute_type = "float16" if device == "cuda" else "int8"
+            model_kwargs: dict = {"device": device, "compute_type": compute_type}
+            if device == "cpu":
+                model_kwargs["cpu_threads"] = os.cpu_count() or 4
+            logger.info(f"Loading '{model_size}' model with {model_kwargs}")
 
             if not model_path.exists():
                 logger.info(f"Downloading {model_size} model to {model_path}...")
                 # WhisperModel auto-downloads to cache_dir
-                model = WhisperModel(model_size, device=device, compute_type=compute_type)
+                model = WhisperModel(model_size, **model_kwargs)
             else:
-                model = WhisperModel(model_size, device=device, compute_type=compute_type)
+                model = WhisperModel(model_size, **model_kwargs)
 
             self._model_cache[model_size] = model
             return model
@@ -324,12 +339,16 @@ class AudioEngine(BaseEngine):
             logger.warning(f"Failed to clean up temp audio chunks: {exc}")
 
     def _has_gpu(self) -> bool:
-        """Check if NVIDIA GPU is available."""
+        """Check if NVIDIA GPU/CUDA is available for hardware acceleration."""
         try:
             import torch
 
             return torch.cuda.is_available()
-        except ImportError:
+        except Exception as exc:
+            # Broader than ImportError: a present-but-broken CUDA driver can
+            # raise other exceptions from torch.cuda.is_available(); treat
+            # any failure here as "no usable GPU" and fall back to CPU.
+            logger.debug(f"GPU detection failed, falling back to CPU: {exc}")
             return False
 
     def _format_output(

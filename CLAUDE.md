@@ -330,7 +330,7 @@ Only proceed after EXIT_CODE: 0 confirmed:
 ### 11. PROJECT CONTEXT
 
 **Repository:** https://github.com/passagain-loui/doc2md
-**Current Version:** 1.0.7 (ffprobe-less Duration Probing, Windows No-Console Subprocess Hardening)
+**Current Version:** 1.0.8 (High-Performance Audio Engine Optimization & Auto-Hardware Acceleration)
 **Python:** 3.9+ (tested on 3.10, 3.11, 3.14)
 **Platform:** Windows (primary), Linux/macOS (supported)
 **Test Framework:** pytest 8.0+ with coverage (pytest-cov)
@@ -385,6 +385,7 @@ Only proceed after EXIT_CODE: 0 confirmed:
 ---
 
 **Recent Releases (Protocol v4.7):**
+- v1.0.8 (2026-08-29): Auto hardware detection (CUDA/CPU), cpu_threads, beam_size=1 default for faster transcription
 - v1.0.7 (2026-08-29): ffprobe-less duration probing (fixes progress bar stuck at 0%), Windows no-console subprocess hardening, bounded exit cleanup
 - v1.0.6 (2026-08-29): Decoupled main-thread queue polling architecture (task_queue/result_queue)
 - v1.0.5 (2026-08-29): Hard Exit Protocol, grid geometry fix, combobox/progress label styling
@@ -396,7 +397,7 @@ Only proceed after EXIT_CODE: 0 confirmed:
 - v0.3.18 (2026-08-27): Automatic application termination during setup
 - v0.3.17 (2026-08-27): Modern dark UI overhaul, extended audio timeout (1800s), spinner animation
 
-**Last Updated:** 2026-08-29 (Protocol v4.7 - Complete Master Specification, v1.0.7)
+**Last Updated:** 2026-08-29 (Protocol v4.7 - Complete Master Specification, v1.0.8)
 **Next Review:** After v1.1.0 release
 **Maintainer:** doc2md Development Team
 ````

@@ -7,7 +7,7 @@ from doc2md.core.errors import (
     EngineUnavailableError,
 )
 
-__version__ = "1.0.7"
+__version__ = "1.0.8"
 
 __all__ = [
     "Converter",
