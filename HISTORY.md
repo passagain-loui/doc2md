@@ -92,6 +92,22 @@
 
 This file records verification runs, timestamps, and quality metrics per release.
 
+## [0.3.22] - 2026-08-29
+
+- **Verification timestamp (UTC+7 local):** 2026-08-29, Gatekeeper Protocol v5.0 (Execution Guidelines & Workflow Standards)
+- **Verification Method:** LocalCore CLI verification with deterministic 6-step pipeline
+- **Result:** `EXIT_CODE:0` — **VALIDATION PASSED**
+- **Loop iterations:** 1 (no fixes needed)
+- **Features & Fixes:**
+ - Instant Worker Abort Event: Introduced `threading.Event` abort signal mechanism for immediate transcription cancellation. Audio engine checks `abort_event.is_set()` before and during segment processing loops to terminate heavy transcription jobs instantly upon user cancellation
+ - UI State Recovery Guarantee: Enhanced `_stop_conversion()` to immediately update status text ("Conversion cancelled by user"), stop spinner animation, reset progress bar to 0%, and restore "▶️ Start Conversion" button without waiting for worker completion
+ - Abort Event Integration: Audio engine extracts `abort_event` from conversion options dict, allowing GUI to pass cancellation signals directly to transcription loops for instant response
+- **Quality Assurance:** Execution Guidelines v5.0 protocol enforced with strict anti-bypass rules and mandatory gatekeeper verification
+- **Build Artifacts:** 
+ - doc2md.exe (172 MB) — clean build pipeline with fresh cache purge
+ - doc2md_Setup_v0.3.22.exe (172 MB) — Inno Setup Windows installer
+- **GitHub Release:** https://github.com/passagain-loui/doc2md/releases/tag/v0.3.22
+
 ## [0.3.21] - 2026-08-27
 
 - **Verification timestamp (UTC+7 local):** 2026-08-27, Gatekeeper Protocol v4.7 (Complete Master Specification)
