@@ -60,6 +60,7 @@ class MainWindow:
         self.abort_event = threading.Event()
         self.last_result = ""
         self.staged_files: list[str] = []
+        self.convert_thread: Optional[threading.Thread] = None
         self.spinner_frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
         self.spinner_index = 0
         self.spinner_id = None
@@ -524,6 +525,7 @@ class MainWindow:
         """Request cancellation of the ongoing conversion and restore UI state immediately."""
         self.stop_requested = True
         self.abort_event.set()
+        self.staged_files.clear()
 
         # Update status to show cancellation
         self.status_label.configure(text="Conversion cancelled by user", text_color=CTK_SECONDARY_TEXT)
@@ -542,6 +544,7 @@ class MainWindow:
             fg_color="#059669",
             hover_color="#047857"
         )
+        self._update_staging_status()
         self.root.update_idletasks()
 
     def convert_files(self, files: list[str]):
@@ -554,9 +557,15 @@ class MainWindow:
             messagebox.showwarning("No Files", "Please select files to convert")
             return
 
+        # Ensure previous thread is fully terminated before starting new one
+        if self.convert_thread is not None and self.convert_thread.is_alive():
+            logger.warning("Previous conversion thread still running, waiting for termination...")
+            self.convert_thread.join(timeout=5)
+
         self.is_converting = True
-        thread = threading.Thread(target=self._convert_worker, args=(files,), daemon=True)
-        thread.start()
+        self.abort_event.clear()
+        self.convert_thread = threading.Thread(target=self._convert_worker, args=(files,), daemon=True)
+        self.convert_thread.start()
 
     def _convert_worker(self, files: list[str]):
         """Background worker for file conversion."""

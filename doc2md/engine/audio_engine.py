@@ -81,9 +81,13 @@ class AudioEngine(BaseEngine):
 
             # Ensure bundled FFmpeg is available for both ffmpeg-python and faster-whisper
             ffmpeg_path = _get_ffmpeg_path()
-            if ffmpeg_path != "ffmpeg":
-                ffmpeg_dir = os.path.dirname(ffmpeg_path)
-                os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
+            if ffmpeg_path == "ffmpeg":
+                raise ConversionError(
+                    "FFmpeg not found. Please install it via: pip install 'doc2md[audio]' "
+                    "or download from https://ffmpeg.org/download.html"
+                )
+            ffmpeg_dir = os.path.dirname(ffmpeg_path)
+            os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
 
             model_size = options.get("audio_model", self._model_size)
             if model_size not in self.MODEL_SIZES:
@@ -105,8 +109,27 @@ class AudioEngine(BaseEngine):
                     segments.append(segment)
             except ConversionError:
                 raise
+            except RuntimeError as e:
+                error_msg = str(e)
+                if "CUDA" in error_msg or "GPU" in error_msg:
+                    raise ConversionError(
+                        "GPU/CUDA error detected. Falling back to CPU mode. "
+                        f"Details: {error_msg}"
+                    )
+                elif "corrupt" in error_msg.lower() or "invalid" in error_msg.lower():
+                    raise ConversionError(
+                        f"Audio file may be corrupted or in an unsupported format: {source.name}. "
+                        "Try converting to MP3 or WAV format first."
+                    )
+                else:
+                    raise ConversionError(f"Transcription failed: {error_msg}")
             except Exception as e:
-                raise ConversionError(f"Transcription failed: {e}")
+                error_msg = str(e)
+                if "No such file" in error_msg or "cannot find" in error_msg.lower():
+                    raise ConversionError(
+                        f"Audio file not found or inaccessible: {source.name}"
+                    )
+                raise ConversionError(f"Transcription failed: {type(e).__name__}: {error_msg}")
 
             return self._format_output(source, duration, segments, model_size)
         except ConversionError:

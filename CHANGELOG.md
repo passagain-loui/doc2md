@@ -93,6 +93,28 @@
 All notable changes to `doc2md` are documented here.
 Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
 
+## [1.0.0] - 2026-08-29
+
+### Major Release: Production-Ready Audio Converter
+
+**Overview:** v1.0.0 marks the first stable production release of doc2md. Comprehensive bug audit, race condition prevention, and clean error handling ensure robust, enterprise-grade reliability.
+
+### Added
+
+- **Thread-Safe Race Condition Prevention:** Explicit thread joining logic in `convert_files()` ensures previous worker thread is fully terminated before spawning new conversion. Previous thread checked via `is_alive()` and joined with 5-second timeout, preventing concurrent background thread collisions.
+- **Enhanced Audio Error Handling:** Specialized error parsing for FFmpeg missing binaries, GPU/CUDA fallback issues, and corrupt audio containers with friendly user-facing messages.
+
+### Enhanced
+
+- **Staged Files Lifecycle Management:** Added explicit `staged_files.clear()` in `_stop_conversion()` to prevent stale file re-processing.
+
+### Fixed
+
+- **Race Condition on Rapid Conversions:** Previous version could spawn multiple overlapping worker threads, leading to file duplication or data loss.
+- **Stale Staged Files After Cancellation:** Cancelling conversion now properly resets staged files.
+
+---
+
 ## [0.3.22] - 2026-08-27
 
 ### Added
