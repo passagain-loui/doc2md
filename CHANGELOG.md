@@ -114,6 +114,30 @@
 All notable changes to `doc2md` are documented here.
 Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
 
+## [1.0.6] - 2026-08-29
+
+### Fix: Decoupled Main-Thread Queue Polling Architecture
+
+**Overview:** v1.0.6 replaces the previous pattern of background worker threads directly mutating Tk widgets (`self.status_label.configure(...)`, `self.root.update()`, ad-hoc `self.root.after(0, ...)` calls scattered deep inside the audio engine's progress hook) with a proper producer/consumer queue architecture. The GUI main thread now only ever touches widgets from one place, polled on a fixed interval.
+
+### Added
+
+- **`task_queue` / `result_queue`:** A single persistent daemon worker thread (started once in `MainWindow.__init__`, replacing the old "spawn a new thread per conversion run" pattern) pulls file batches off `task_queue` and streams `("PROGRESS", pct)` and `("ALL_DONE", (results, errors))` messages onto `result_queue`.
+- **`_poll_result_queue()`:** Non-blocking `queue.get_nowait()` drain, rescheduled via `self.after(100, self._poll_result_queue)` while a conversion is active. This is now the *only* place Tk widgets are mutated in response to background work.
+- **`_queue_worker()` / `_process_files()`:** The former `_convert_worker()` body was split into a persistent consumer loop (`_queue_worker`, wrapped in a `BaseException` crash guard so one bad task never kills the worker) and a pure producer function (`_process_files`) that never touches GUI state directly.
+
+### Fixed
+
+- **Direct Widget Access From Background Threads:** `_start_conversion()` no longer calls the audio engine (via `Converter.convert_file()`) directly or blocks on `self.root.update()` from within a worker thread — it now only enqueues the job and starts the polling loop, matching Tkinter's documented main-thread-only widget access requirement.
+- **Progress Callback Streaming:** Audio/video progress callbacks now push `("PROGRESS", pct)` tuples onto `result_queue` instead of calling `self.root.after(0, ...)` from inside the audio engine's segment-processing loop.
+- **Simplified Thread Lifecycle:** Removed the old `self.convert_thread` + `is_alive()`/`join(timeout=5)` race-condition workaround from v1.0.0 — task serialization is now handled naturally by the single persistent worker consuming `task_queue` in order.
+
+### Notes
+
+- `AudioEngine.convert()` remains a synchronous, stateless method per the `BaseEngine` plugin contract (unchanged signature, still used directly by the CLI and process-isolated PDF/OCR engines) — the decoupling happens at the GUI orchestration layer, not inside the engine itself.
+
+---
+
 ## [1.0.5] - 2026-08-29
 
 ### Patch: Thread Starvation, Zombie Process & UI Polish Fixes

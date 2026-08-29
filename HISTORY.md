@@ -113,6 +113,20 @@
 
 This file records verification runs, timestamps, and quality metrics per release.
 
+## [1.0.6] - 2026-08-29
+
+- **Verification timestamp (UTC+7 local):** 2026-08-29, Gatekeeper Protocol v4.7 (Complete Master Specification)
+- **Verification Method:** `python -m pytest tests/ -v`
+- **Result:** `EXIT_CODE:0` — **VALIDATION PASSED**
+- **Loop iterations:** 1 (no fixes needed)
+- **Note:** `doc2md/gui/main_window.py` was found truncated to a 16-line raw-tkinter/asyncio stub on disk prior to this task, outside of any edit made in this session. Restored the full 776-line file from git (commit `4d5e505`) before applying this release's refactor, per explicit user confirmation.
+- **Features & Fixes:**
+ - Decoupled Queue Architecture: Replaced the per-run worker thread that directly mutated Tk widgets with a persistent daemon `task_queue`/`result_queue` consumer, polled non-blockingly via `self.after(100, self._poll_result_queue)` on the main thread only
+ - Progress Streaming: Audio/video progress callbacks now push `("PROGRESS", pct)` tuples onto `result_queue` instead of calling `self.root.after(0, ...)` from inside the engine's segment loop
+ - Removed the v1.0.0 `convert_thread.is_alive()`/`join(timeout=5)` workaround; task ordering is now guaranteed by the single persistent worker consuming `task_queue` in order
+ - `AudioEngine.convert()` signature and `BaseEngine` contract left unchanged (still used synchronously by the CLI and process-isolated PDF/OCR engines)
+- **GitHub Release:** https://github.com/passagain-loui/doc2md/releases/tag/v1.0.6
+
 ## [1.0.5] - 2026-08-29
 
 - **Verification timestamp (UTC+7 local):** 2026-08-29, Gatekeeper Protocol v4.7 (Complete Master Specification)

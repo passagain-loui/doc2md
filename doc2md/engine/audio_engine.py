@@ -82,6 +82,14 @@ class AudioEngine(BaseEngine):
             source: Path to audio/video file
             options: Conversion options dict (can include 'abort_event' key)
             abort_event: Optional threading.Event to signal cancellation during transcription
+
+        This method is synchronous and stateless per the BaseEngine contract
+        (it is invoked from a worker thread/process by Converter, never from
+        a caller's main thread). Callers that need non-blocking UI progress
+        should not call this directly from a GUI main thread; instead run it
+        from a background worker and supply options['progress_callback'] as
+        a queue-pushing function, e.g. `lambda pct: result_queue.put(("PROGRESS", pct))`,
+        so the worker never touches UI state directly.
         """
         try:
             try:

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import logging
 import os
+import queue
 import threading
 from pathlib import Path
-from typing import Optional
 
 try:
     import customtkinter as ctk
@@ -62,10 +62,18 @@ class MainWindow:
         self.abort_event = threading.Event()
         self.last_result = ""
         self.staged_files: list[str] = []
-        self.convert_thread: Optional[threading.Thread] = None
         self.spinner_frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
         self.spinner_index = 0
         self.spinner_id = None
+
+        # Decoupled dispatch (Protocol v4.7): the GUI never calls the audio
+        # engine directly. Jobs go onto task_queue; a single persistent
+        # daemon worker thread processes them and streams progress/result
+        # messages back onto result_queue, which the main thread drains via
+        # non-blocking self.after(100, self._poll_result_queue) polling.
+        self.task_queue: queue.Queue = queue.Queue()
+        self.result_queue: queue.Queue = queue.Queue()
+        threading.Thread(target=self._queue_worker, daemon=True).start()
 
         self._setup_ui()
         self._setup_dnd()
@@ -520,11 +528,25 @@ class MainWindow:
             self.convert_btn.configure(state="disabled")
 
     def _start_conversion(self):
-        """Start the conversion process using staged files."""
+        """Start the conversion process using staged files.
+
+        Decoupled dispatch (Protocol v4.7): the main thread never calls the
+        audio engine directly. The job is enqueued onto task_queue for the
+        persistent background worker, and progress/results are consumed back
+        via non-blocking self.after(100, self._poll_result_queue) polling -
+        the only place Tk widgets are touched from here on.
+        """
         if not self.staged_files:
             messagebox.showwarning("No Files", "Please select files to convert")
             return
+        if self.is_converting:
+            messagebox.showwarning("Busy", "Conversion already in progress")
+            return
+
         self.stop_requested = False
+        self.is_converting = True
+        self.abort_event.clear()
+
         # Update button to show "Stop Conversion" during conversion
         self.convert_btn.configure(
             text="🟥 Stop Conversion",
@@ -534,8 +556,14 @@ class MainWindow:
         )
         # Lock the model selector during conversion to prevent mid-run changes
         self.model_combo.configure(state="disabled")
+        self.status_label.configure(
+            text=f"Converting {len(self.staged_files)} file(s)...", text_color=CTK_TEAL_TEXT
+        )
+        self._update_progress_display(0)
         self.root.update_idletasks()
-        self.convert_files(self.staged_files)
+
+        self.task_queue.put(list(self.staged_files))
+        self.root.after(100, self._poll_result_queue)
 
     def _stop_conversion(self):
         """Request cancellation of the ongoing conversion and restore UI state immediately."""
@@ -553,7 +581,8 @@ class MainWindow:
         self.progress_var.set(0.0)
         self.progress_overlay.configure(text="0%")
 
-        # Restore button to Start Conversion immediately (don't wait for finally)
+        # Restore button to Start Conversion immediately (don't wait for the
+        # worker to notice the abort signal and drain its final message)
         self.convert_btn.configure(
             text="▶️  Start Conversion",
             command=self._start_conversion,
@@ -564,154 +593,171 @@ class MainWindow:
         self._update_staging_status()
         self.root.update_idletasks()
 
-    def convert_files(self, files: list[str]):
-        """Convert files in background thread."""
-        if self.is_converting:
-            messagebox.showwarning("Busy", "Conversion already in progress")
-            return
-
-        if not files:
-            messagebox.showwarning("No Files", "Please select files to convert")
-            return
-
-        # Ensure previous thread is fully terminated before starting new one
-        if self.convert_thread is not None and self.convert_thread.is_alive():
-            logger.warning("Previous conversion thread still running, waiting for termination...")
-            self.convert_thread.join(timeout=5)
-
-        self.is_converting = True
-        self.abort_event.clear()
-        self.convert_thread = threading.Thread(target=self._convert_worker, args=(files,), daemon=True)
-        self.convert_thread.start()
-
     def _update_progress_display(self, percent: int):
         """Update the progress bar fill and its centered numeric percentage label."""
         percent = max(0, min(100, percent))
         self.progress_var.set(percent / 100.0)
         self.progress_overlay.configure(text=f"{percent}%")
 
-    def _convert_worker(self, files: list[str]):
-        """Background worker for file conversion with bulletproof crash guard."""
-        try:
+    def _queue_worker(self):
+        """Persistent daemon worker loop (Protocol v4.7): pulls conversion
+        jobs off task_queue and streams progress/result messages onto
+        result_queue. Runs for the lifetime of the application and never
+        touches Tk widgets directly - all GUI mutation happens on the main
+        thread inside _poll_result_queue(), avoiding the thread-safety
+        hazards of calling widget methods from a background thread.
+        """
+        while True:
+            files = self.task_queue.get()
             try:
-                # Reset abort event at start of conversion
-                self.abort_event.clear()
-                self.stop_requested = False
+                self._process_files(files)
+            except BaseException as e:
+                # Bulletproof crash guard: the worker loop itself must never
+                # die, or every subsequent conversion request would hang
+                # forever waiting on a dead consumer.
+                logger.critical(
+                    f"BULLETPROOF CRASH GUARD: worker loop caught {type(e).__name__}: {e}",
+                    exc_info=True,
+                )
+                self.result_queue.put(("CRITICAL_ERROR", f"{type(e).__name__}: {str(e)[:200]}"))
 
-                total = len(files)
-                self.status_label.configure(text=f"Converting {total} file(s)...", text_color=CTK_TEAL_TEXT)
-                self._update_progress_display(0)
-                self.root.update()
+    def _process_files(self, files: list[str]):
+        """Convert each staged file, streaming ("PROGRESS", pct) and a final
+        ("ALL_DONE", (results, errors)) message onto result_queue. Runs
+        entirely on the background worker thread - no Tk widget access here.
+        """
+        total = len(files)
+        results: list[str] = []
+        errors: list[str] = []
 
-                results = []
-                errors = []
+        def make_progress_callback(file_index: int):
+            def _report(percent_in_file: int):
+                overall = int(((file_index + (percent_in_file / 100)) / total) * 100)
+                overall = max(0, min(99, overall))
+                self.result_queue.put(("PROGRESS", overall))
+            return _report
 
-                def make_progress_callback(file_index: int):
-                    def _report(percent_in_file: int):
-                        overall = int(((file_index + (percent_in_file / 100)) / total) * 100)
-                        overall = max(0, min(99, overall))
-                        self.root.after(0, lambda p=overall: self._update_progress_display(p))
-                    return _report
+        for i, file_path in enumerate(files):
+            # Allow user to stop conversion
+            if self.stop_requested or self.abort_event.is_set():
+                break
 
-                for i, file_path in enumerate(files):
-                    # Allow user to stop conversion
-                    if self.stop_requested or self.abort_event.is_set():
-                        break
+            self.result_queue.put(("PROGRESS", int((i / total) * 100)))
 
-                    # Numeric progress at the start of this file's slot
-                    self._update_progress_display(int((i / total) * 100))
-                    self.root.update()
-
-                    try:
-                        # Pass abort_event to converter for audio processing cancellation
-                        self.converter.options["abort_event"] = self.abort_event
-                        # Only attach the progress callback for audio/video files;
-                        # PDF/OCR engines run in a spawned process and cannot
-                        # pickle a local closure.
-                        detection = detect(Path(file_path))
-                        if detection.kind in (FileKind.AUDIO, FileKind.VIDEO):
-                            self.converter.options["progress_callback"] = make_progress_callback(i)
-                        else:
-                            self.converter.options.pop("progress_callback", None)
-
-                        result = self.converter.convert_file(Path(file_path))
-                        if result.success:
-                            results.append(result.markdown)
-                            logger.info(f"✅ Converted: {file_path}")
-                        else:
-                            error_msg = f"{Path(file_path).name}: {result.error}"
-                            errors.append(error_msg)
-                            logger.error(f"❌ Failed: {error_msg}")
-                    except Exception as exc:
-                        error_msg = f"{Path(file_path).name}: {type(exc).__name__}: {str(exc)}"
-                        errors.append(error_msg)
-                        logger.exception(f"❌ Error converting {file_path}: {exc}")
-
-                    # Mark this file's slot complete with a real numeric percentage
-                    self._update_progress_display(int(((i + 1) / total) * 100))
-
-                # Mark completion with full progress bar
-                self._update_progress_display(100)
-
-                if results:
-                    self.last_result = "\n\n---\n\n".join(results)
-                    status_msg = f"✅ Success: {len(results)} file(s) converted"
-                    if errors:
-                        status_msg += f" ({len(errors)} failed)"
-                    self.status_label.configure(text=status_msg, text_color=CTK_SUCCESS)
-                    self.analytics_text.configure(text=f"Files: {len(results)} | Ready to export")
-
-                    # Show errors if any
-                    if errors:
-                        error_summary = "\n".join(errors[:5])
-                        if len(errors) > 5:
-                            error_summary += f"\n... and {len(errors) - 5} more errors"
-                        messagebox.showwarning("Partial Conversion", f"Some files failed to convert:\n\n{error_summary}")
+            try:
+                # Pass abort_event to converter for audio processing cancellation
+                self.converter.options["abort_event"] = self.abort_event
+                # Only attach the progress callback for audio/video files;
+                # PDF/OCR engines run in a spawned process and cannot
+                # pickle a local closure.
+                detection = detect(Path(file_path))
+                if detection.kind in (FileKind.AUDIO, FileKind.VIDEO):
+                    self.converter.options["progress_callback"] = make_progress_callback(i)
                 else:
-                    self.status_label.configure(text="❌ No files converted", text_color=CTK_ERROR)
-                    if errors:
-                        error_summary = "\n".join(errors[:5])
-                        if len(errors) > 5:
-                            error_summary += f"\n... and {len(errors) - 5} more errors"
-                        messagebox.showerror("Conversion Failed", f"All files failed to convert:\n\n{error_summary}")
-                    else:
-                        messagebox.showerror("Conversion Failed", "No files were converted. Please check your files and try again.")
+                    self.converter.options.pop("progress_callback", None)
 
+                result = self.converter.convert_file(Path(file_path))
+                if result.success:
+                    results.append(result.markdown)
+                    logger.info(f"✅ Converted: {file_path}")
+                else:
+                    error_msg = f"{Path(file_path).name}: {result.error}"
+                    errors.append(error_msg)
+                    logger.error(f"❌ Failed: {error_msg}")
             except Exception as exc:
-                # Audio/Conversion Error Handler
-                logger.exception(f"Conversion worker error: {exc}")
-                self.status_label.configure(text=f"❌ Error: {type(exc).__name__}", text_color=CTK_ERROR)
-                error_detail = f"An unexpected error occurred during conversion:\n\n{type(exc).__name__}: {str(exc)}"
-                messagebox.showerror("Conversion Error", error_detail)
+                error_msg = f"{Path(file_path).name}: {type(exc).__name__}: {str(exc)}"
+                errors.append(error_msg)
+                logger.exception(f"❌ Error converting {file_path}: {exc}")
 
-        except BaseException as e:
-            # Bulletproof outer crash guard - catches CTranslate2, FFmpeg, Whisper crashes
-            logger.critical(f"BULLETPROOF CRASH GUARD: Caught critical exception - {type(e).__name__}: {str(e)}", exc_info=True)
-            self.status_label.configure(text="❌ Critical Error", text_color=CTK_ERROR)
-            error_msg = (
-                "A critical audio processing error occurred but the application is safe:\n\n"
-                f"{type(e).__name__}: {str(e)[:200]}\n\n"
-                "The application will continue normally. Please try again or check your audio files."
-            )
-            messagebox.showerror("Critical Audio Error", error_msg)
+            # Mark this file's slot complete with a real numeric percentage
+            self.result_queue.put(("PROGRESS", int(((i + 1) / total) * 100)))
 
-        finally:
-            # ALWAYS execute cleanup - guaranteed to run even on crash
-            self.is_converting = False
-            self.stop_requested = False
-            self.staged_files.clear()
-            self.converter.options.pop("progress_callback", None)
-            self._update_staging_status()
-            # Reset button to show "Start Conversion"
-            self.convert_btn.configure(
-                text="▶️  Start Conversion",
-                command=self._start_conversion,
-                fg_color="#059669",
-                hover_color="#047857"
-            )
-            self.model_combo.configure(state="normal")
-            self.root.update_idletasks()
-            logger.info("Conversion worker cleanup complete")
+        self.converter.options.pop("progress_callback", None)
+        self.result_queue.put(("ALL_DONE", (results, errors)))
+
+    def _poll_result_queue(self):
+        """Non-blocking drain of result_queue, rescheduled via
+        self.after(100, self._poll_result_queue). This is the single point
+        where the main thread mutates Tk widgets in response to the
+        background worker - it never blocks waiting on the queue.
+        """
+        try:
+            while True:
+                kind, payload = self.result_queue.get_nowait()
+                if kind == "PROGRESS":
+                    self._update_progress_display(payload)
+                elif kind == "ALL_DONE":
+                    results, errors = payload
+                    self._handle_conversion_done(results, errors)
+                elif kind == "CRITICAL_ERROR":
+                    self._handle_critical_error(payload)
+        except queue.Empty:
+            pass
+
+        if self.is_converting:
+            self.root.after(100, self._poll_result_queue)
+
+    def _handle_conversion_done(self, results: list[str], errors: list[str]):
+        """Main-thread handler for a completed batch (success and/or partial failures)."""
+        self._update_progress_display(100)
+
+        if results:
+            self.last_result = "\n\n---\n\n".join(results)
+            status_msg = f"✅ Success: {len(results)} file(s) converted"
+            if errors:
+                status_msg += f" ({len(errors)} failed)"
+            self.status_label.configure(text=status_msg, text_color=CTK_SUCCESS)
+            self.analytics_text.configure(text=f"Files: {len(results)} | Ready to export")
+
+            if errors:
+                error_summary = "\n".join(errors[:5])
+                if len(errors) > 5:
+                    error_summary += f"\n... and {len(errors) - 5} more errors"
+                messagebox.showwarning("Partial Conversion", f"Some files failed to convert:\n\n{error_summary}")
+        else:
+            self.status_label.configure(text="❌ No files converted", text_color=CTK_ERROR)
+            if errors:
+                error_summary = "\n".join(errors[:5])
+                if len(errors) > 5:
+                    error_summary += f"\n... and {len(errors) - 5} more errors"
+                messagebox.showerror("Conversion Failed", f"All files failed to convert:\n\n{error_summary}")
+            else:
+                messagebox.showerror("Conversion Failed", "No files were converted. Please check your files and try again.")
+
+        self._finish_conversion_ui()
+
+    def _handle_critical_error(self, message: str):
+        """Main-thread handler for an unrecoverable worker-loop exception
+        (CTranslate2/FFmpeg/Whisper crash) - the bulletproof crash guard."""
+        logger.critical(f"Critical conversion error surfaced to UI: {message}")
+        self.status_label.configure(text="❌ Critical Error", text_color=CTK_ERROR)
+        error_msg = (
+            "A critical audio processing error occurred but the application is safe:\n\n"
+            f"{message}\n\n"
+            "The application will continue normally. Please try again or check your audio files."
+        )
+        messagebox.showerror("Critical Audio Error", error_msg)
+        self._finish_conversion_ui()
+
+    def _finish_conversion_ui(self):
+        """Restore idle UI state after a batch completes, is cancelled, or
+        crashes. Always runs on the main thread (called only from
+        _poll_result_queue)."""
+        self.is_converting = False
+        self.stop_requested = False
+        self.staged_files.clear()
+        self.converter.options.pop("progress_callback", None)
+        self._update_staging_status()
+        # Reset button to show "Start Conversion"
+        self.convert_btn.configure(
+            text="▶️  Start Conversion",
+            command=self._start_conversion,
+            fg_color="#059669",
+            hover_color="#047857"
+        )
+        self.model_combo.configure(state="normal")
+        self.root.update_idletasks()
+        logger.info("Conversion worker cleanup complete")
 
     def copy_result(self):
         """Copy last conversion result to clipboard."""
