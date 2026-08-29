@@ -19,6 +19,7 @@ except ImportError:
 from doc2md import __version__
 from doc2md.core.converter import Converter
 from doc2md.core.exporter import export_markdown
+from doc2md.core.router import FileKind, detect
 from doc2md.engine.audio_engine import AudioEngine
 
 logger = logging.getLogger(__name__)
@@ -584,6 +585,12 @@ class MainWindow:
         self.convert_thread = threading.Thread(target=self._convert_worker, args=(files,), daemon=True)
         self.convert_thread.start()
 
+    def _update_progress_display(self, percent: int):
+        """Update the progress bar fill and its centered numeric percentage label."""
+        percent = max(0, min(100, percent))
+        self.progress_var.set(percent / 100.0)
+        self.progress_overlay.configure(text=f"{percent}%")
+
     def _convert_worker(self, files: list[str]):
         """Background worker for file conversion with bulletproof crash guard."""
         try:
@@ -594,31 +601,40 @@ class MainWindow:
 
                 total = len(files)
                 self.status_label.configure(text=f"Converting {total} file(s)...", text_color=CTK_TEAL_TEXT)
-                # Set progress to indeterminate (pulsing between 0.3 and 0.7)
-                self.progress_overlay.configure(text="Processing...")
+                self._update_progress_display(0)
                 self.root.update()
 
                 results = []
                 errors = []
-                pulse_direction = 1
-                pulse_value = 0.3
+
+                def make_progress_callback(file_index: int):
+                    def _report(percent_in_file: int):
+                        overall = int(((file_index + (percent_in_file / 100)) / total) * 100)
+                        overall = max(0, min(99, overall))
+                        self.root.after(0, lambda p=overall: self._update_progress_display(p))
+                    return _report
+
                 for i, file_path in enumerate(files):
                     # Allow user to stop conversion
                     if self.stop_requested or self.abort_event.is_set():
                         break
 
-                    # Simulate indeterminate progress by pulsing
-                    pulse_value += 0.05 * pulse_direction
-                    if pulse_value >= 0.7:
-                        pulse_direction = -1
-                    elif pulse_value <= 0.3:
-                        pulse_direction = 1
-                    self.progress_var.set(pulse_value)
+                    # Numeric progress at the start of this file's slot
+                    self._update_progress_display(int((i / total) * 100))
                     self.root.update()
 
                     try:
                         # Pass abort_event to converter for audio processing cancellation
                         self.converter.options["abort_event"] = self.abort_event
+                        # Only attach the progress callback for audio/video files;
+                        # PDF/OCR engines run in a spawned process and cannot
+                        # pickle a local closure.
+                        detection = detect(Path(file_path))
+                        if detection.kind in (FileKind.AUDIO, FileKind.VIDEO):
+                            self.converter.options["progress_callback"] = make_progress_callback(i)
+                        else:
+                            self.converter.options.pop("progress_callback", None)
+
                         result = self.converter.convert_file(Path(file_path))
                         if result.success:
                             results.append(result.markdown)
@@ -632,9 +648,11 @@ class MainWindow:
                         errors.append(error_msg)
                         logger.exception(f"❌ Error converting {file_path}: {exc}")
 
+                    # Mark this file's slot complete with a real numeric percentage
+                    self._update_progress_display(int(((i + 1) / total) * 100))
+
                 # Mark completion with full progress bar
-                self.progress_var.set(1.0)
-                self.progress_overlay.configure(text="100%")
+                self._update_progress_display(100)
 
                 if results:
                     self.last_result = "\n\n---\n\n".join(results)
@@ -683,6 +701,7 @@ class MainWindow:
             self.is_converting = False
             self.stop_requested = False
             self.staged_files.clear()
+            self.converter.options.pop("progress_callback", None)
             self._update_staging_status()
             # Reset button to show "Start Conversion"
             self.convert_btn.configure(
