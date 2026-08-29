@@ -16,6 +16,14 @@ $processInfo.RedirectStandardError = $true
 $processInfo.UseShellExecute = $false
 $processInfo.CreateNoWindow = $true
 
+# Prepare environment with Python paths for LocalCore subprocess
+$pythonExe = & python -c "import sys; print(sys.executable)" 2>$null
+if ($pythonExe) {
+    $pythonDir = Split-Path -Parent $pythonExe
+    $currentPath = $env:PATH
+    $processInfo.EnvironmentVariables["PATH"] = "$pythonDir$([System.IO.Path]::PathSeparator)$currentPath"
+}
+
 $process = [System.Diagnostics.Process]::Start($processInfo)
 $stdout = $process.StandardOutput.ReadToEnd()
 $stderr = $process.StandardError.ReadToEnd()
