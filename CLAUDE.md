@@ -116,13 +116,35 @@ powershell -ExecutionPolicy Bypass -File ./tools/verify.ps1
 - อ่าน EXIT_CODE จากผลลัพธ์โดยตรง
 - บันทึกผลการตรวจสอบ
 
-**Step 4 (Strict Re-Validation & Auto-Fix Loop):** 
-- **กรณี `EXIT_CODE: 0` (PASS):** อนุญาตให้ไปดำเนินการ Step 5 ต่อได้ทันที ✅
-- **กรณี `EXIT_CODE != 0` (FAIL/ERROR):**
-  - **HARD STOP:** ห้ามลักไก่ข้ามไป Step 5 (Build) หรือสรุปปิดงาน ❌
+**Step 4 (Strict Re-Validation, False-Positive Check & Auto-Fix Loop):**
+
+**Phase A: Read BOTH EXIT_CODE and Full Log Output**
+- อ่าน `EXIT_CODE` จาก PowerShell ผลลัพธ์
+- อ่าน **ทั้งหมด** Text Log ที่ LocalCore CLI พ่นออกมา (stdout + stderr)
+- สแกน Log เพื่อหา Keywords ที่บ่งบอก Internal Validation Failure:
+  - `VALIDATION FAILED`
+  - `No command given`
+  - `No project markers`
+  - `Internal Error`
+  - `Test failed`
+
+**Phase B: Decision Logic**
+- **กรณี `EXIT_CODE: 0` AND ไม่พบ Failure Keywords (TRUE PASS):** 
+  - อนุญาตให้ไปดำเนินการ Step 5 ต่อได้ทันที ✅
+  
+- **กรณี `EXIT_CODE: 0` BUT พบ Failure Keywords (FALSE POSITIVE):**
+  - **HARD STOP:** ห้ามลักไก่ข้ามไป Step 5 ❌ 
+  - LocalCore returned 0 but internal validation failed
+  - วนกลับ **Step 1** เพื่อแก้ไข
+  
+- **กรณี `EXIT_CODE != 0` (DIRECT FAILURE):**
+  - **HARD STOP:** ห้ามลักไก่ข้ามไป Step 5 ❌
   - อ่าน Error Log ที่ LocalCore CLI พ่นออกมาทันที
-  - วนกลับ **Step 1** (แก้ไขโค้ด) → **Step 2** (ล้างแคช) → **Step 3** (ตรวจซ้ำ)
-  - **วน Loop แก้ไขและส่งตรวจใหม่จนกว่าจะได้ `EXIT_CODE: 0` ของจริง** (ห้าม Mock/Assumption)
+  - วนกลับ **Step 1**
+
+**Phase C: Auto-Fix Loop**
+- วนกลับ **Step 1** (แก้ไขโค้ด) → **Step 2** (ล้างแคช) → **Step 3** (ตรวจซ้ำ)
+- **วน Loop แก้ไขและส่งตรวจใหม่จนกว่าจะได้ `EXIT_CODE: 0` ของจริง + ไม่มี Failure Keywords** (ห้าม Mock/Assumption)
 
 **Step 5 (Packaging & Build):** เมื่อผ่าน `EXIT_CODE: 0` แล้ว ให้ดำเนินการสร้าง Release Build
 - สร้าง executable/installer ตามที่กำหนด
@@ -140,13 +162,16 @@ powershell -ExecutionPolicy Bypass -File ./tools/verify.ps1
 - เขียนสคริปต์อื่นมาสวมรอยแทนการตรวจของ LocalCore CLI
 - ข้ามขั้นตอน Step 3 (Gatekeeper Verification) เด็ดขาด
 - ปล่อยให้ `EXIT_CODE != 0` แล้วไปทำ Step 5 (Build) ต่อ
+- **หรือปล่อยให้ `EXIT_CODE: 0` แต่มี Internal Failure Keywords ในLog (FALSE POSITIVE)** ⚠️
 - Mock ผลลัพธ์หรืออ้างว่าผ่านการตรวจโดยไม่มีหลักฐาน
+- เชื่อถือ PowerShell EXIT_CODE เพียงอย่างเดียว ต้องสแกน Log ด้วยเสมอ
 
 ✅ **บังคับต้อง:**
 - วนกลับ Step 1-3 ทุกครั้งที่มีการแก้ไขโค้ด
 - ใช้ LocalCore CLI เท่านั้นสำหรับการตรวจสอบ
-- บันทึกผลการตรวจสอบ EXIT_CODE ทุกครั้ง
-- ดำเนินการ Step 6 (Sync) หลังจากผ่าน EXIT_CODE: 0
+- บันทึกผลการตรวจสอบ EXIT_CODE **และ Full Log Output** ทุกครั้ง
+- สแกน Log เพื่อหา Keywords: `VALIDATION FAILED`, `No command given`, `No project markers`, etc.
+- ดำเนินการ Step 6 (Sync) หลังจากผ่าน `EXIT_CODE: 0` + ไม่มี Failure Keywords
 
 ---
 
