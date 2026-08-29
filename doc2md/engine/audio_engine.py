@@ -93,6 +93,9 @@ class AudioEngine(BaseEngine):
                 if abort_event is None:
                     abort_event = options.get("abort_event")
 
+                # Extract progress callback for fine-grained numeric progress updates
+                progress_callback = options.get("progress_callback")
+
                 # Check abort signal early
                 if abort_event and abort_event.is_set():
                     raise ConversionError("Transcription cancelled by user")
@@ -133,6 +136,15 @@ class AudioEngine(BaseEngine):
                         if abort_event and abort_event.is_set():
                             raise ConversionError("Transcription cancelled by user")
                         segments.append(segment)
+                        # Report fine-grained numeric progress based on transcribed
+                        # audio position, so the UI can show a real percentage
+                        # instead of a static "Processing..." placeholder.
+                        if progress_callback and duration > 0:
+                            try:
+                                percent = min(99, int((segment.end / duration) * 100))
+                                progress_callback(percent)
+                            except Exception:
+                                pass  # Progress reporting must never break transcription
                 except ConversionError:
                     raise
                 except RuntimeError as e:

@@ -108,6 +108,25 @@
 All notable changes to `doc2md` are documented here.
 Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
 
+## [1.0.4] - 2026-08-29
+
+### Patch: Numeric Percentage Progress Bar
+
+**Overview:** v1.0.4 replaces the static "Processing..." text overlay with a live, numeric percentage label that updates dynamically during conversion, giving users real visibility into progress instead of an indeterminate pulsing bar.
+
+### Added
+
+- **Fine-Grained Audio Progress Callback:** `audio_engine.convert()` now accepts a `progress_callback` option and reports transcription progress (0-99%) based on transcribed segment position relative to total audio duration, invoked after each segment is processed.
+- **Real Overall Progress Tracking:** `_convert_worker()` now computes true numeric percentages across the whole batch — `(files completed + in-file fraction) / total files * 100` — instead of simulating activity with a pulsing bar.
+- **`_update_progress_display()` Helper:** Centralized method that clamps and applies a percentage to both the progress bar fill and its centered numeric label (e.g. "45%").
+
+### Fixed
+
+- **Removed Static "Processing..." Overlay:** The progress bar center no longer shows blurry placeholder text; it always displays an accurate numeric percentage from 0% to 100%.
+- **Pickling Safety for Process-Isolated Engines:** The progress callback is only attached to `Converter.options` for audio/video files; PDF/OCR conversions (which run in a spawned process) never receive the callback, avoiding an unpicklable local closure being sent across the process boundary.
+
+---
+
 ## [1.0.3] - 2026-08-29
 
 ### Patch: Force Embed FFmpeg into Standalone Executable
