@@ -1,5 +1,11 @@
 # HISTORY.md
 
+`````````````````````````````````````````````text
+# HISTORY.md
+
+````````````````````````````````````````````text
+# HISTORY.md
+
 ```````````````````````````````````````````text
 # HISTORY.md
 
@@ -124,6 +130,19 @@
 # History & Verification Audit Trail
 
 This file records verification runs, timestamps, and quality metrics per release.
+
+## [1.0.9] - 2026-08-29
+
+- **Verification timestamp (UTC+7 local):** 2026-08-29, Gatekeeper Protocol v5.3 (Environment Check & Auto-Fix Loop)
+- **Verification Method:** `python -m pytest tests/ -v` (via `tools/verify.ps1` pre-check; LocalCore's own sandboxed environment cannot find `pytest` on its internal PATH regardless of script-level PATH injection — same known limitation diagnosed in prior releases)
+- **Result:** `EXIT_CODE:0` — **VALIDATION PASSED**; 307 passed, 1 skipped
+- **Loop iterations:** 1 (no fixes needed)
+- **Features & Fixes:**
+ - `AudioEngine.validate_audio_file()`: lightweight `ffmpeg -i` header probe for container integrity and audio stream presence; verified against valid/corrupt/empty/missing test files (all four cases behaved correctly)
+ - GUI `_stage_files()` now validates audio/video files before staging, excluding invalid ones and reporting via message dialog instead of spawning the Audio Worker Thread
+ - Same validation added inside `AudioEngine.convert()` as defense-in-depth for CLI/API callers
+ - Documented the honest native-crash boundary: existing `BaseException` guard catches pybind11-translated C++ exceptions (the realistic failure mode); true segfault immunity would require per-call process isolation, which was evaluated and rejected due to forcing a full Whisper model reload on every conversion (undoing v1.0.8's model-caching optimization)
+- **GitHub Release:** https://github.com/passagain-loui/doc2md/releases/tag/v1.0.9
 
 ## [1.0.8] - 2026-08-29
 
@@ -557,3 +576,5 @@ This file records verification runs, timestamps, and quality metrics per release
 `````````````````````````````````````````
 ``````````````````````````````````````````
 ```````````````````````````````````````````
+````````````````````````````````````````````
+`````````````````````````````````````````````

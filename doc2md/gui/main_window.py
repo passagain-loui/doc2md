@@ -507,10 +507,43 @@ class MainWindow:
             self._stage_files(list(files))
 
     def _stage_files(self, files: list[str]):
-        """Stage files for conversion (store them but don't start conversion yet)."""
+        """Stage files for conversion (store them but don't start conversion yet).
+
+        Audio/video files are pre-flight validated via
+        AudioEngine.validate_audio_file() before staging - an invalid file is
+        excluded and reported in a message dialog instead of being staged,
+        so the Audio Worker Thread is never spawned for a file that's
+        already known to be corrupt or unreadable.
+        """
         if not files:
             return
-        self.staged_files = files
+
+        valid_files: list[str] = []
+        invalid_entries: list[str] = []
+
+        for file_path in files:
+            path = Path(file_path)
+            detection = detect(path)
+            if detection.kind in (FileKind.AUDIO, FileKind.VIDEO):
+                is_valid, reason = self.audio_engine.validate_audio_file(path)
+                if not is_valid:
+                    invalid_entries.append(f"{path.name}: {reason}")
+                    continue
+            valid_files.append(file_path)
+
+        if invalid_entries:
+            summary = "\n".join(invalid_entries[:5])
+            if len(invalid_entries) > 5:
+                summary += f"\n... and {len(invalid_entries) - 5} more"
+            messagebox.showerror(
+                "Invalid or Unreadable Audio File",
+                f"The following file(s) could not be staged:\n\n{summary}",
+            )
+
+        if not valid_files:
+            return
+
+        self.staged_files = valid_files
         self._update_staging_status()
 
     def _update_staging_status(self):

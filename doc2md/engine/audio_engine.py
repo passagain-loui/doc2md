@@ -98,6 +98,15 @@ class AudioEngine(BaseEngine):
                 if not source.is_file():
                     raise ConversionError(f"Audio file not found: {source}")
 
+                # Pre-flight validation guard: catch corrupt/unreadable files
+                # before ever reaching FFmpeg decoding or Whisper inference.
+                # The GUI also calls validate_audio_file() directly at staging
+                # time for immediate feedback; this call is defense-in-depth
+                # for CLI/API callers that bypass GUI staging entirely.
+                is_valid, reason = self.validate_audio_file(source)
+                if not is_valid:
+                    raise ConversionError(f"Invalid or unreadable audio file: {reason}")
+
                 # Extract abort_event from options if not provided directly
                 if abort_event is None:
                     abort_event = options.get("abort_event")
@@ -196,12 +205,98 @@ class AudioEngine(BaseEngine):
             # Re-raise ConversionError as-is (already properly handled)
             raise
         except BaseException as e:
-            # Bulletproof outer crash guard for CTranslate2, Whisper, FFmpeg crashes
+            # Bulletproof outer crash guard for CTranslate2/Whisper/FFmpeg
+            # failures: pybind11 translates most C++ exceptions raised by
+            # CTranslate2 into ordinary Python exceptions, which this guard
+            # converts into a clean ConversionError instead of letting the
+            # process die - this is what "returns an error instead of
+            # terminating the process" means for the overwhelming majority
+            # of real-world native failures (bad codec params, malformed
+            # streams, driver errors, etc).
+            #
+            # Honest limitation: a genuine hard native crash (segfault/access
+            # violation) is not a Python exception at all - it's an OS signal
+            # that terminates the process unconditionally, and no amount of
+            # try/except at any nesting level can catch it. True immunity to
+            # that class of failure requires running the risky call in a
+            # separate OS process. That tradeoff was evaluated for this
+            # engine and rejected: it would force reloading the (multi-
+            # hundred-MB) Whisper model from scratch on every single
+            # conversion, since a loaded model instance cannot cross a
+            # process boundary - directly undoing the model-caching
+            # performance work from v1.0.8. validate_audio_file() is the
+            # primary defense instead: it catches the corrupt/malformed
+            # files that are the leading real-world cause of native crashes,
+            # before the risky decode path is ever reached.
             logger.critical(f"BULLETPROOF AUDIO CRASH GUARD: {type(e).__name__}: {str(e)}", exc_info=True)
             raise ConversionError(
                 f"Critical audio engine failure: {type(e).__name__}. "
                 f"The audio engine encountered an unexpected error. Try again with a different audio file."
             )
+
+    def validate_audio_file(self, source: Path | str) -> tuple[bool, str]:
+        """Pre-flight validation of an audio/video file, run BEFORE FFmpeg
+        decoding or Whisper model inference is ever attempted.
+
+        Probes container integrity and audio stream presence with a single
+        lightweight `ffmpeg -i <file>` call (header parse only - no frame
+        decoding, so this stays fast even for large files) and inspects the
+        printed stream info for known corruption/format-error markers and
+        the presence of a readable audio stream.
+
+        Returns (is_valid, reason) - reason is empty when valid. Fails OPEN
+        (returns valid) when FFmpeg itself can't be located or the probe
+        errors out for a reason unrelated to the file's own integrity, so a
+        validator bug or missing binary never blocks a conversion attempt
+        that might otherwise have succeeded.
+        """
+        try:
+            source = Path(source)
+            if not source.is_file():
+                return False, f"File not found: {source.name}"
+            if source.stat().st_size == 0:
+                return False, "File is empty (0 bytes)."
+
+            ffmpeg_path = _get_ffmpeg_path()
+            if ffmpeg_path == "ffmpeg":
+                # No bundled/system FFmpeg available to probe with; let the
+                # normal conversion pipeline attempt it and surface its own error.
+                return True, ""
+
+            kwargs: dict = {}
+            if sys.platform == "win32":
+                kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+
+            result = subprocess.run(
+                [ffmpeg_path, "-i", str(source)],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=15,
+                **kwargs,
+            )
+            output = result.stderr.decode("utf-8", errors="ignore")
+
+            corruption_markers = (
+                "Invalid data found when processing input",
+                "could not find codec parameters",
+                "moov atom not found",
+                "Unsupported codec",
+                "No such file or directory",
+                "Format not recognized",
+            )
+            if any(marker in output for marker in corruption_markers):
+                return False, "File appears to be corrupted or in an unsupported format."
+
+            if "Audio:" not in output:
+                return False, "No readable audio stream found in this file."
+
+            return True, ""
+        except subprocess.TimeoutExpired:
+            return False, "File validation timed out (file may be corrupted or unreadable)."
+        except Exception as exc:
+            logger.warning(f"Audio pre-flight validation error (allowing conversion attempt): {exc}")
+            return True, ""
 
     def _get_duration(self, source: Path) -> float:
         """Get audio/video duration in seconds using the bundled ffmpeg.exe

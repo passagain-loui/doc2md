@@ -1,5 +1,11 @@
 # CHANGELOG.md
 
+``````````````````````````````````````````````text
+# CHANGELOG.md
+
+`````````````````````````````````````````````text
+# CHANGELOG.md
+
 ````````````````````````````````````````````text
 # CHANGELOG.md
 
@@ -125,6 +131,24 @@
 
 All notable changes to `doc2md` are documented here.
 Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
+
+## [1.0.9] - 2026-08-29
+
+### Fix: Pre-flight Audio Validation Guard & Native Exception Hardening
+
+**Overview:** v1.0.9 adds a pre-flight validation step that catches corrupt or unreadable audio/video files before they ever reach FFmpeg decoding or Whisper inference, plus a documented review of the audio engine's crash-guard boundary.
+
+### Added
+
+- **`AudioEngine.validate_audio_file()`:** A single lightweight `ffmpeg -i <file>` probe (header parse only, no frame decoding) checks container integrity and audio stream presence before staging or transcription. Returns `(is_valid, reason)`; fails open (treats the file as valid) if FFmpeg can't be located, so a validator issue never blocks a conversion that might otherwise succeed.
+- **GUI Staging Guard:** `_stage_files()` now validates every audio/video file at staging time via `validate_audio_file()`. Invalid files are excluded and reported in a message dialog ("Invalid or Unreadable Audio File") instead of being staged — the Audio Worker Thread is never spawned for a file already known to be bad.
+- **Defense-in-depth in `convert()`:** The same validation now also runs automatically inside `AudioEngine.convert()` itself, so CLI/API callers that bypass GUI staging get the same protection.
+
+### Documented
+
+- **Native Crash Boundary (honest limitation):** The existing `except BaseException` outer guard in `convert()` (added v1.0.2) already converts the overwhelming majority of real-world CTranslate2/Whisper native failures — pybind11-translated C++ exceptions (bad codec params, malformed streams, driver errors) — into a clean `ConversionError` instead of crashing the process. A genuine hard native crash (segfault/access violation) is an OS signal, not a Python exception, and cannot be caught by any same-process guard at any nesting level; true immunity requires per-call OS process isolation. That approach was evaluated for this release and rejected: it would force reloading the multi-hundred-MB Whisper model from scratch on every single conversion (a loaded model instance cannot cross a process boundary), directly undoing the model-caching performance work from v1.0.8. `validate_audio_file()` is the primary defense instead, since malformed input files are the leading real-world trigger for native decode failures.
+
+---
 
 ## [1.0.8] - 2026-08-29
 
@@ -665,3 +689,5 @@ Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
 ``````````````````````````````````````````
 ```````````````````````````````````````````
 ````````````````````````````````````````````
+`````````````````````````````````````````````
+``````````````````````````````````````````````
