@@ -209,13 +209,13 @@ This document outlines the collaborative workflow between three AI agents and th
 เพื่อป้องกันไม่ให้หน้าต่าง LocalCore เด้งซ้อนทับหน้าต่าง Log หลัก Execution Engine ต้องรันคำสั่งผ่าน PowerShell แบบซ่อนหน้าต่างทุกครั้ง:
 
 ```powershell
-powershell -Command "$p = Start-Process -FilePath 'C:\Program Files\LocalCore\localcore.exe' -ArgumentList '--verify', '--model', 'Qwen-2.5-Coder-14B' -NoNewWindow -PassThru; $p.WaitForExit(); exit $p.ExitCode"
+powershell -Command "$p = Start-Process -FilePath 'C:\Program Files\LocalCore\localcore.exe' -ArgumentList '--verify', '--model', 'Qwen-2.5-Coder-7B' -NoNewWindow -PassThru; $p.WaitForExit(); exit $p.ExitCode"
 ```
 
 **หรือใช้ cmd with Delayed Expansion:**
 ```batch
 cd /d <PROJECT_ROOT>
-cmd /v:on /c "C:\PROGRA~1\LocalCore\localcore.exe --verify --model "Qwen-2.5-Coder-14B" & echo EXIT_CODE:!ERRORLEVEL!"
+cmd /v:on /c "C:\PROGRA~1\LocalCore\localcore.exe --verify --model "Qwen-2.5-Coder-7B" & echo EXIT_CODE:!ERRORLEVEL!"
 ```
 
 ---
@@ -276,7 +276,7 @@ cmd /v:on /c "C:\PROGRA~1\LocalCore\localcore.exe --verify --model "Qwen-2.5-Cod
 pytest tests/ --cov=doc2md --cov-fail-under=90 -v
 
 # Via LocalCore (recommended)
-cmd /v:on /c "localcore --verify "pytest tests/ --cov=doc2md --cov-fail-under=90 -v" --model "Qwen-2.5-Coder-14B" & echo EXIT_CODE:!ERRORLEVEL!"
+cmd /v:on /c "localcore --verify "pytest tests/ --cov=doc2md --cov-fail-under=90 -v" --model "Qwen-2.5-Coder-7B" & echo EXIT_CODE:!ERRORLEVEL!"
 
 # Quick sanity check
 pytest tests/ -x --timeout=10
