@@ -1,5 +1,11 @@
 # CHANGELOG.md
 
+`````````````````````````````````````text
+# CHANGELOG.md
+
+````````````````````````````````````text
+# CHANGELOG.md
+
 ```````````````````````````````````text
 # CHANGELOG.md
 
@@ -109,9 +115,9 @@ Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
 
 - **Developer Credit:** Added "Developed by Passagain P." footer credit in main application window for attribution.
 - **Bulletproof Audio Crash Guard:** Implemented dual-layer exception handling:
-  - Outer `BaseException` catch in `_convert_worker()` guards against CTranslate2, FFmpeg, and Whisper runtime crashes
-  - Inner `BaseException` catch in `audio_engine.convert()` ensures audio processing errors never crash the engine
-  - Both layers log full tracebacks and display user-friendly error messages
+ - Outer `BaseException` catch in `_convert_worker()` guards against CTranslate2, FFmpeg, and Whisper runtime crashes
+ - Inner `BaseException` catch in `audio_engine.convert()` ensures audio processing errors never crash the engine
+ - Both layers log full tracebacks and display user-friendly error messages
 
 ### Fixed
 
@@ -506,3 +512,5 @@ Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
 `````````````````````````````````
 ``````````````````````````````````
 ```````````````````````````````````
+````````````````````````````````````
+`````````````````````````````````````

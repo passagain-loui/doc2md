@@ -389,6 +389,20 @@ class MainWindow:
         )
         exit_btn.pack(side="right", padx=3)
 
+        # Developer Credit Footer
+        footer_frame = ctk.CTkFrame(root_frame, fg_color="transparent")
+        footer_frame.pack(fill="x", padx=12, pady=(5, 8))
+        footer_frame.grid_columnconfigure(0, weight=1)
+
+        developer_credit = ctk.CTkLabel(
+            footer_frame,
+            text="Developed by Passagain P.",
+            font=(UI_FONT, 9),
+            text_color=CTK_SECONDARY_TEXT,
+            anchor="e",
+        )
+        developer_credit.grid(row=0, column=0, sticky="e", padx=4, pady=2)
+
     def _on_model_change(self, selected_model: str):
         """Triggered when the user picks a different Whisper model size."""
         self.converter.options["audio_model"] = selected_model
@@ -571,89 +585,101 @@ class MainWindow:
         self.convert_thread.start()
 
     def _convert_worker(self, files: list[str]):
-        """Background worker for file conversion."""
+        """Background worker for file conversion with bulletproof crash guard."""
         try:
-            # Reset abort event at start of conversion
-            self.abort_event.clear()
-            self.stop_requested = False
+            try:
+                # Reset abort event at start of conversion
+                self.abort_event.clear()
+                self.stop_requested = False
 
-            total = len(files)
-            self.status_label.configure(text=f"Converting {total} file(s)...", text_color=CTK_TEAL_TEXT)
-            # Set progress to indeterminate (pulsing between 0.3 and 0.7)
-            self.progress_overlay.configure(text="Processing...")
-            self.root.update()
-
-            results = []
-            errors = []
-            pulse_direction = 1
-            pulse_value = 0.3
-            for i, file_path in enumerate(files):
-                # Allow user to stop conversion
-                if self.stop_requested or self.abort_event.is_set():
-                    break
-
-                # Simulate indeterminate progress by pulsing
-                pulse_value += 0.05 * pulse_direction
-                if pulse_value >= 0.7:
-                    pulse_direction = -1
-                elif pulse_value <= 0.3:
-                    pulse_direction = 1
-                self.progress_var.set(pulse_value)
+                total = len(files)
+                self.status_label.configure(text=f"Converting {total} file(s)...", text_color=CTK_TEAL_TEXT)
+                # Set progress to indeterminate (pulsing between 0.3 and 0.7)
+                self.progress_overlay.configure(text="Processing...")
                 self.root.update()
 
-                try:
-                    # Pass abort_event to converter for audio processing cancellation
-                    self.converter.options["abort_event"] = self.abort_event
-                    result = self.converter.convert_file(Path(file_path))
-                    if result.success:
-                        results.append(result.markdown)
-                        logger.info(f"✅ Converted: {file_path}")
-                    else:
-                        error_msg = f"{Path(file_path).name}: {result.error}"
+                results = []
+                errors = []
+                pulse_direction = 1
+                pulse_value = 0.3
+                for i, file_path in enumerate(files):
+                    # Allow user to stop conversion
+                    if self.stop_requested or self.abort_event.is_set():
+                        break
+
+                    # Simulate indeterminate progress by pulsing
+                    pulse_value += 0.05 * pulse_direction
+                    if pulse_value >= 0.7:
+                        pulse_direction = -1
+                    elif pulse_value <= 0.3:
+                        pulse_direction = 1
+                    self.progress_var.set(pulse_value)
+                    self.root.update()
+
+                    try:
+                        # Pass abort_event to converter for audio processing cancellation
+                        self.converter.options["abort_event"] = self.abort_event
+                        result = self.converter.convert_file(Path(file_path))
+                        if result.success:
+                            results.append(result.markdown)
+                            logger.info(f"✅ Converted: {file_path}")
+                        else:
+                            error_msg = f"{Path(file_path).name}: {result.error}"
+                            errors.append(error_msg)
+                            logger.error(f"❌ Failed: {error_msg}")
+                    except Exception as exc:
+                        error_msg = f"{Path(file_path).name}: {type(exc).__name__}: {str(exc)}"
                         errors.append(error_msg)
-                        logger.error(f"❌ Failed: {error_msg}")
-                except Exception as exc:
-                    error_msg = f"{Path(file_path).name}: {type(exc).__name__}: {str(exc)}"
-                    errors.append(error_msg)
-                    logger.exception(f"❌ Error converting {file_path}: {exc}")
+                        logger.exception(f"❌ Error converting {file_path}: {exc}")
 
-            # Mark completion with full progress bar
-            self.progress_var.set(1.0)
-            self.progress_overlay.configure(text="100%")
+                # Mark completion with full progress bar
+                self.progress_var.set(1.0)
+                self.progress_overlay.configure(text="100%")
 
-            if results:
-                self.last_result = "\n\n---\n\n".join(results)
-                status_msg = f"✅ Success: {len(results)} file(s) converted"
-                if errors:
-                    status_msg += f" ({len(errors)} failed)"
-                self.status_label.configure(text=status_msg, text_color=CTK_SUCCESS)
-                self.analytics_text.configure(text=f"Files: {len(results)} | Ready to export")
+                if results:
+                    self.last_result = "\n\n---\n\n".join(results)
+                    status_msg = f"✅ Success: {len(results)} file(s) converted"
+                    if errors:
+                        status_msg += f" ({len(errors)} failed)"
+                    self.status_label.configure(text=status_msg, text_color=CTK_SUCCESS)
+                    self.analytics_text.configure(text=f"Files: {len(results)} | Ready to export")
 
-                # Show errors if any
-                if errors:
-                    error_summary = "\n".join(errors[:5])
-                    if len(errors) > 5:
-                        error_summary += f"\n... and {len(errors) - 5} more errors"
-                    messagebox.showwarning("Partial Conversion", f"Some files failed to convert:\n\n{error_summary}")
-            else:
-                self.status_label.configure(text="❌ No files converted", text_color=CTK_ERROR)
-                if errors:
-                    error_summary = "\n".join(errors[:5])
-                    if len(errors) > 5:
-                        error_summary += f"\n... and {len(errors) - 5} more errors"
-                    messagebox.showerror("Conversion Failed", f"All files failed to convert:\n\n{error_summary}")
+                    # Show errors if any
+                    if errors:
+                        error_summary = "\n".join(errors[:5])
+                        if len(errors) > 5:
+                            error_summary += f"\n... and {len(errors) - 5} more errors"
+                        messagebox.showwarning("Partial Conversion", f"Some files failed to convert:\n\n{error_summary}")
                 else:
-                    messagebox.showerror("Conversion Failed", "No files were converted. Please check your files and try again.")
+                    self.status_label.configure(text="❌ No files converted", text_color=CTK_ERROR)
+                    if errors:
+                        error_summary = "\n".join(errors[:5])
+                        if len(errors) > 5:
+                            error_summary += f"\n... and {len(errors) - 5} more errors"
+                        messagebox.showerror("Conversion Failed", f"All files failed to convert:\n\n{error_summary}")
+                    else:
+                        messagebox.showerror("Conversion Failed", "No files were converted. Please check your files and try again.")
 
-        except Exception as exc:
-            logger.exception(f"Conversion worker error: {exc}")
-            self.status_label.configure(text=f"❌ Error: {type(exc).__name__}", text_color=CTK_ERROR)
-            messagebox.showerror("Conversion Error", f"An unexpected error occurred:\n\n{type(exc).__name__}: {str(exc)}")
+            except Exception as exc:
+                # Audio/Conversion Error Handler
+                logger.exception(f"Conversion worker error: {exc}")
+                self.status_label.configure(text=f"❌ Error: {type(exc).__name__}", text_color=CTK_ERROR)
+                error_detail = f"An unexpected error occurred during conversion:\n\n{type(exc).__name__}: {str(exc)}"
+                messagebox.showerror("Conversion Error", error_detail)
+
         except BaseException as e:
-            logger.critical(f"Critical conversion error (will not crash): {e}", exc_info=True)
+            # Bulletproof outer crash guard - catches CTranslate2, FFmpeg, Whisper crashes
+            logger.critical(f"BULLETPROOF CRASH GUARD: Caught critical exception - {type(e).__name__}: {str(e)}", exc_info=True)
             self.status_label.configure(text="❌ Critical Error", text_color=CTK_ERROR)
-            messagebox.showerror("Critical Error", f"A critical error occurred but the application continues:\n\n{type(e).__name__}: {str(e)}")
+            error_msg = (
+                "A critical audio processing error occurred but the application is safe:\n\n"
+                f"{type(e).__name__}: {str(e)[:200]}\n\n"
+                "The application will continue normally. Please try again or check your audio files."
+            )
+            messagebox.showerror("Critical Audio Error", error_msg)
+
         finally:
+            # ALWAYS execute cleanup - guaranteed to run even on crash
             self.is_converting = False
             self.stop_requested = False
             self.staged_files.clear()
@@ -665,6 +691,8 @@ class MainWindow:
                 fg_color="#059669",
                 hover_color="#047857"
             )
+            self.root.update_idletasks()
+            logger.info("Conversion worker cleanup complete")
 
     def copy_result(self):
         """Copy last conversion result to clipboard."""
