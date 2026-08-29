@@ -1,0 +1,11 @@
+# pytest.ini
+
+```ini
+[pytest]
+minversion = 6.0
+addopts = -ra -q --tb=short
+testpaths = tests
+python_files = test_*.py
+python_classes = Test*
+python_functions = test_*
+```

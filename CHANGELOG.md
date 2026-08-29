@@ -1,5 +1,8 @@
 # CHANGELOG.md
 
+``````````````````````````````````text
+# CHANGELOG.md
+
 `````````````````````````````````text
 # CHANGELOG.md
 
@@ -92,6 +95,33 @@
 
 All notable changes to `doc2md` are documented here.
 Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
+
+## [1.0.1] - 2026-08-29
+
+### Patch: FFmpeg Bundling & System Path Resolution
+
+**Overview:** v1.0.1 resolves the system FFmpeg dependency by bundling FFmpeg executables directly into the standalone distribution, eliminating the need for separate system installation while maintaining backward compatibility.
+
+### Added
+
+- **Bundled FFmpeg Executable:** PyInstaller now automatically bundles `ffmpeg.exe` and `ffprobe.exe` (if available) into the distribution, ensuring audio transcription works immediately on target systems without external FFmpeg installation.
+- **Enhanced FFmpeg Path Detection:** `_get_ffmpeg_path()` now implements a multi-priority search strategy:
+  1. PyInstaller `sys._MEIPASS` bundled FFmpeg
+  2. Python executable directory (portable installs)
+  3. Project root directory (local development)
+  4. System PATH lookup
+  5. `imageio_ffmpeg` package fallback
+
+### Fixed
+
+- **System FFmpeg Dependency:** Eliminated hard requirement for users to have FFmpeg installed on system PATH before using audio conversion features.
+- **Cross-Platform Portability:** Standalone `doc2md.exe` now works on systems without FFmpeg in PATH, improving distribution and user experience.
+
+### Enhanced
+
+- **Build Pipeline:** `build_exe.py` now includes intelligent FFmpeg detection and bundling with fallback to `imageio_ffmpeg` package when system FFmpeg unavailable.
+
+---
 
 ## [1.0.0] - 2026-08-29
 
@@ -449,3 +479,4 @@ Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
 ```````````````````````````````
 ````````````````````````````````
 `````````````````````````````````
+``````````````````````````````````

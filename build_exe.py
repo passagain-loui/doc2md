@@ -10,6 +10,7 @@ metadata-only output with an explanatory hint (verified by the test suite).
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -79,21 +80,42 @@ def ensure_audio_dependencies() -> None:
 
 
 def bundle_ffmpeg_binaries() -> list[str]:
-    """Bundle FFmpeg binaries if available on system PATH."""
+    """Bundle FFmpeg binaries from system PATH or imageio_ffmpeg package."""
     args: list[str] = []
+    ffmpeg_path = None
+    ffprobe_path = None
+
+    # Priority 1: Try system PATH first
     try:
         ffmpeg_path = shutil.which("ffmpeg")
         ffprobe_path = shutil.which("ffprobe")
+        if ffmpeg_path:
+            print(f"[build_exe] Found FFmpeg on system PATH: {ffmpeg_path}")
+    except Exception:
+        pass
 
-        if ffmpeg_path and ffprobe_path:
-            # Bundle both ffmpeg and ffprobe executables
-            args.extend(["--add-binary", f"{ffmpeg_path};."])
+    # Priority 2: Try imageio_ffmpeg package as fallback
+    if not ffmpeg_path:
+        try:
+            import imageio_ffmpeg
+            ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
+            ffprobe_exe = Path(ffmpeg_path).parent / "ffprobe.exe"
+            ffprobe_path = str(ffprobe_exe) if ffprobe_exe.exists() else None
+            if ffmpeg_path:
+                print(f"[build_exe] Found FFmpeg via imageio_ffmpeg: {ffmpeg_path}")
+        except (ImportError, Exception) as exc:
+            print(f"[build_exe] imageio_ffmpeg not available: {exc}")
+
+    # Bundle if found
+    if ffmpeg_path and os.path.exists(ffmpeg_path):
+        args.extend(["--add-binary", f"{ffmpeg_path};."])
+        print(f"[build_exe] ✓ Bundling FFmpeg: {ffmpeg_path}")
+        if ffprobe_path and os.path.exists(ffprobe_path):
             args.extend(["--add-binary", f"{ffprobe_path};."])
-            print(f"[build_exe] FFmpeg binaries bundled: {ffmpeg_path}")
-        else:
-            print("[build_exe] FFmpeg not found on PATH - audio conversion will require system FFmpeg")
-    except Exception as exc:
-        print(f"[build_exe] FFmpeg bundling skipped: {exc}")
+            print(f"[build_exe] ✓ Bundling ffprobe: {ffprobe_path}")
+    else:
+        print("[build_exe] ⚠️  FFmpeg not found - users must have FFmpeg installed on system PATH")
+
     return args
 
 

@@ -1,5 +1,8 @@
 # HISTORY.md
 
+`````````````````````````````````text
+# HISTORY.md
+
 ````````````````````````````````text
 # HISTORY.md
 
@@ -458,3 +461,4 @@ This file records verification runs, timestamps, and quality metrics per release
 ``````````````````````````````
 ```````````````````````````````
 ````````````````````````````````
+`````````````````````````````````
