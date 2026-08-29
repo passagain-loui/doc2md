@@ -86,35 +86,26 @@
 
 ---
 
-## EXECUTION GUIDELINES & WORKFLOW STANDARDS (v5.0)
+## EXECUTION GUIDELINES & WORKFLOW STANDARDS (v5.1)
 
-### 1. Role & Execution Standards
+### 1. Role & Execution Guidelines
 
-**Execution Engine Role:**
-- ทำหน้าที่คิดวิเคราะห์จุดแก้ไขและจุดเชื่อมโยงทั้งหมดอย่างรอบด้าน เพื่อแก้ไขโค้ดให้สมบูรณ์ครบจบในรอบเดียวและประหยัด Token
-- **UI Standard:** งานส่วน UI ทั้งหมดต้องใช้ Modern Styling/Modern SVG Icons เท่านั้น ห้ามปล่อย Native Windows Classic Style หรือ UI แบบดั้งเดิมที่ไม่ได้ปรับแต่ง
+- **Role:** คุณคือ Execution Engine ทำหน้าที่คิดวิเคราะห์จุดแก้ไขและจุดเชื่อมโยงทั้งหมดอย่างรอบด้าน เพื่อแก้ไขโค้ดให้สมบูรณ์ครบจบในรอบเดียวและประหยัด Token
+- **UI Standard:** งานส่วน UI ทั้งหมดต้องใช้ Modern Styling/Modern SVG Icons เท่านั้น ห้ามปล่อย Native Windows Classic Style หรือ UI แบบดั้งเดิมที่ไม่ได้ปรับแต่งเด็ดขาด
 - **Discretion Boundary:** หากพบจุดผิดพลาดเชิงสถาปัตยกรรม ความเสี่ยง หรือคำสั่งที่ไม่ชัดเจน สามารถทักท้วงและเสนอแนะทางเลือกที่เหมาะสมได้ทันที
 
-### 2. Deterministic Pipeline Execution Sequence
+### 2. Deterministic Pipeline Execution Sequence (Step 1 ➔ Step 6)
 
-เมื่อรับ Task พัฒนาหรือแก้ไขระบบ ให้ปฏิบัติตามลำดับขั้นตอน **Step 1 ➔ Step 6** ตามลำดับเสมอ:
+เมื่อรับ Task พัฒนาหรือแก้ไขระบบ ให้ปฏิบัติตามลำดับ Step 1 ➔ Step 6 ดังนี้:
 
 **Step 1 (Code Updates):** ดำเนินการแก้ไขโค้ดตามโจทย์งานให้ครบถ้วนทุกโมดูลที่เกี่ยวข้อง
-- วิเคราะห์ความเชื่อมโยงระหว่างโมดูล
-- แก้ไขสถาปัตยกรรมหากจำเป็น
-- บันทึกการเปลี่ยนแปลง
 
-**Step 2 (Cache Purge):** ล้างโฟลเดอร์แคชของโปรเจกต์ทุกแห่ง
-- `__pycache__/`, `bin/`, `obj/`, `build/`, `dist/`, `.cache/`
-- นี้เป็นขั้นตอนบังคับเพื่อป้องกัน stale artifacts
+**Step 2 (Cache Purge):** ล้างโฟลเดอร์แคชของโปรเจกต์ (`__pycache__`, `bin/`, `obj/`, `build/`, `dist/`, `.cache`)
 
-**Step 3 (QA & Gatekeeper Verification):** สั่งรันคำสั่ง PowerShell เพื่อตรวจสอบความถูกต้องผ่าน LocalCore CLI:
+**Step 3 (QA & Gatekeeper Verification):** สั่งรันคำสั่ง Terminal เพื่อตรวจสอบความถูกต้องผ่าน LocalCore CLI ดังนี้:
 ```powershell
 powershell -ExecutionPolicy Bypass -File ./tools/verify.ps1
 ```
-- ต้องดำเนินการรันสคริปต์ในรูปแบบ PowerShell native
-- อ่าน EXIT_CODE จากผลลัพธ์โดยตรง
-- บันทึกผลการตรวจสอบ
 
 **Step 4 (Strict Re-Validation, False-Positive Check & Auto-Fix Loop):**
 
@@ -129,49 +120,22 @@ powershell -ExecutionPolicy Bypass -File ./tools/verify.ps1
   - `Test failed`
 
 **Phase B: Decision Logic**
-- **กรณี `EXIT_CODE: 0` AND ไม่พบ Failure Keywords (TRUE PASS):** 
-  - อนุญาตให้ไปดำเนินการ Step 5 ต่อได้ทันที ✅
-  
-- **กรณี `EXIT_CODE: 0` BUT พบ Failure Keywords (FALSE POSITIVE):**
-  - **HARD STOP:** ห้ามลักไก่ข้ามไป Step 5 ❌ 
-  - LocalCore returned 0 but internal validation failed
-  - วนกลับ **Step 1** เพื่อแก้ไข
-  
-- **กรณี `EXIT_CODE != 0` (DIRECT FAILURE):**
-  - **HARD STOP:** ห้ามลักไก่ข้ามไป Step 5 ❌
-  - อ่าน Error Log ที่ LocalCore CLI พ่นออกมาทันที
-  - วนกลับ **Step 1**
+- **กรณี `EXIT_CODE: 0` AND ไม่พบ Failure Keywords (TRUE PASS):** อนุญาตให้ไปดำเนินการ Step 5 ต่อได้ทันที ✅
+- **กรณี `EXIT_CODE: 0` BUT พบ Failure Keywords (FALSE POSITIVE):** **HARD STOP** ห้ามลักไก่ข้ามไป Step 5 ❌ วนกลับ **Step 1**
+- **กรณี `EXIT_CODE != 0` (DIRECT FAILURE):** **HARD STOP** ห้ามลักไก่ข้ามไป Step 5 ❌ วนกลับ **Step 1**
 
 **Phase C: Auto-Fix Loop**
-- วนกลับ **Step 1** (แก้ไขโค้ด) → **Step 2** (ล้างแคช) → **Step 3** (ตรวจซ้ำ)
-- **วน Loop แก้ไขและส่งตรวจใหม่จนกว่าจะได้ `EXIT_CODE: 0` ของจริง + ไม่มี Failure Keywords** (ห้าม Mock/Assumption)
+- วน Loop แก้ไขและส่งตรวจใหม่ Step 1 ➔ Step 2 ➔ Step 3 ➔ Step 4 จนกว่าจะได้รับ `EXIT_CODE: 0` ของจริง + ไม่มี Failure Keywords
 
-**Step 5 (Packaging & Build):** เมื่อผ่าน `EXIT_CODE: 0` แล้ว ให้ดำเนินการสร้าง Release Build
-- สร้าง executable/installer ตามที่กำหนด
-- จำกัดการใช้ CPU/RAM ไม่เกิน 85%
-- บันทึก artifact metadata
+**Step 5 (Packaging & Build):** เมื่อผ่านการอนุมัติ `EXIT_CODE: 0` ของจริงจาก LocalCore CLI แล้ว ให้ดำเนินการสร้าง Release Build (จำกัดการใช้ CPU/RAM ไม่เกิน 85%)
 
-**Step 6 (Sync & Audit Trail):** อัปเดตเอกสารและเวอร์ชัน
-- Update `CHANGELOG.md` ด้วย feature/fix descriptions
-- Update `HISTORY.md` ด้วย verification audit trail
-- Sync version numbers (SemVer) ให้ตรงกันทุกจุด
+**Step 6 (Sync & Audit Trail):** อัปเดต `CHANGELOG.md`, `HISTORY.md` และปรับเลขเวอร์ชัน (SemVer) ให้ตรงกันทุกจุด
 
-### 3. Anti-Bypass Rules (ห้ามเบิกทั้งหมด)
+### 3. Anti-Bypass Rules
 
-❌ **ห้าม:**
-- เขียนสคริปต์อื่นมาสวมรอยแทนการตรวจของ LocalCore CLI
-- ข้ามขั้นตอน Step 3 (Gatekeeper Verification) เด็ดขาด
-- ปล่อยให้ `EXIT_CODE != 0` แล้วไปทำ Step 5 (Build) ต่อ
-- **หรือปล่อยให้ `EXIT_CODE: 0` แต่มี Internal Failure Keywords ในLog (FALSE POSITIVE)** ⚠️
-- Mock ผลลัพธ์หรืออ้างว่าผ่านการตรวจโดยไม่มีหลักฐาน
-- เชื่อถือ PowerShell EXIT_CODE เพียงอย่างเดียว ต้องสแกน Log ด้วยเสมอ
-
-✅ **บังคับต้อง:**
-- วนกลับ Step 1-3 ทุกครั้งที่มีการแก้ไขโค้ด
-- ใช้ LocalCore CLI เท่านั้นสำหรับการตรวจสอบ
-- บันทึกผลการตรวจสอบ EXIT_CODE **และ Full Log Output** ทุกครั้ง
-- สแกน Log เพื่อหา Keywords: `VALIDATION FAILED`, `No command given`, `No project markers`, etc.
-- ดำเนินการ Step 6 (Sync) หลังจากผ่าน `EXIT_CODE: 0` + ไม่มี Failure Keywords
+- ห้าม Claude เขียนสคริปต์อื่นมาสวมรอยแทนการตรวจของ LocalCore CLI
+- ห้ามเชื่อถือ Exit Code ของ PowerShell เพียงอย่างเดียว ต้องสแกนอ่าน Internal Verification Status ใน Log เสมอ
+- ทุกการแก้ไขโค้ดใน Step 1 บังคับต้องวนกลับมาส่งตรวจใน Step 3 ซ้ำทุกครั้ง
 
 ---
 

@@ -10,7 +10,7 @@ Write-Host "🛡️ [Gatekeeper] Executing Real LocalCore CLI Verification..." -
 
 $processInfo = New-Object System.Diagnostics.ProcessStartInfo
 $processInfo.FileName = $LocalCoreExe
-$processInfo.Arguments = "--verify --model Qwen-2.5-Coder-14B"
+$processInfo.Arguments = "--verify --model Qwen-2.5-Coder-7B"
 $processInfo.RedirectStandardOutput = $true
 $processInfo.RedirectStandardError = $true
 $processInfo.UseShellExecute = $false
