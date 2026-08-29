@@ -1,5 +1,8 @@
 # CLAUDE.md
 
+```````````````````````````````text
+# CLAUDE.md
+
 ``````````````````````````````text
 # CLAUDE.md
 
@@ -80,6 +83,72 @@
 
 ````text
 # CLAUDE.md — Project Development & Verification Protocol
+
+---
+
+## EXECUTION GUIDELINES & WORKFLOW STANDARDS (v5.0)
+
+### 1. Role & Execution Standards
+
+**Execution Engine Role:**
+- ทำหน้าที่คิดวิเคราะห์จุดแก้ไขและจุดเชื่อมโยงทั้งหมดอย่างรอบด้าน เพื่อแก้ไขโค้ดให้สมบูรณ์ครบจบในรอบเดียวและประหยัด Token
+- **UI Standard:** งานส่วน UI ทั้งหมดต้องใช้ Modern Styling/Modern SVG Icons เท่านั้น ห้ามปล่อย Native Windows Classic Style หรือ UI แบบดั้งเดิมที่ไม่ได้ปรับแต่ง
+- **Discretion Boundary:** หากพบจุดผิดพลาดเชิงสถาปัตยกรรม ความเสี่ยง หรือคำสั่งที่ไม่ชัดเจน สามารถทักท้วงและเสนอแนะทางเลือกที่เหมาะสมได้ทันที
+
+### 2. Deterministic Pipeline Execution Sequence
+
+เมื่อรับ Task พัฒนาหรือแก้ไขระบบ ให้ปฏิบัติตามลำดับขั้นตอน **Step 1 ➔ Step 6** ตามลำดับเสมอ:
+
+**Step 1 (Code Updates):** ดำเนินการแก้ไขโค้ดตามโจทย์งานให้ครบถ้วนทุกโมดูลที่เกี่ยวข้อง
+- วิเคราะห์ความเชื่อมโยงระหว่างโมดูล
+- แก้ไขสถาปัตยกรรมหากจำเป็น
+- บันทึกการเปลี่ยนแปลง
+
+**Step 2 (Cache Purge):** ล้างโฟลเดอร์แคชของโปรเจกต์ทุกแห่ง
+- `__pycache__/`, `bin/`, `obj/`, `build/`, `dist/`, `.cache/`
+- นี้เป็นขั้นตอนบังคับเพื่อป้องกัน stale artifacts
+
+**Step 3 (QA & Gatekeeper Verification):** สั่งรันคำสั่ง PowerShell เพื่อตรวจสอบความถูกต้องผ่าน LocalCore CLI:
+```powershell
+powershell -ExecutionPolicy Bypass -File ./tools/verify.ps1
+```
+- ต้องดำเนินการรันสคริปต์ในรูปแบบ PowerShell native
+- อ่าน EXIT_CODE จากผลลัพธ์โดยตรง
+- บันทึกผลการตรวจสอบ
+
+**Step 4 (Strict Re-Validation & Auto-Fix Loop):** 
+- **กรณี `EXIT_CODE: 0` (PASS):** อนุญาตให้ไปดำเนินการ Step 5 ต่อได้ทันที ✅
+- **กรณี `EXIT_CODE != 0` (FAIL/ERROR):**
+  - **HARD STOP:** ห้ามลักไก่ข้ามไป Step 5 (Build) หรือสรุปปิดงาน ❌
+  - อ่าน Error Log ที่ LocalCore CLI พ่นออกมาทันที
+  - วนกลับ **Step 1** (แก้ไขโค้ด) → **Step 2** (ล้างแคช) → **Step 3** (ตรวจซ้ำ)
+  - **วน Loop แก้ไขและส่งตรวจใหม่จนกว่าจะได้ `EXIT_CODE: 0` ของจริง** (ห้าม Mock/Assumption)
+
+**Step 5 (Packaging & Build):** เมื่อผ่าน `EXIT_CODE: 0` แล้ว ให้ดำเนินการสร้าง Release Build
+- สร้าง executable/installer ตามที่กำหนด
+- จำกัดการใช้ CPU/RAM ไม่เกิน 85%
+- บันทึก artifact metadata
+
+**Step 6 (Sync & Audit Trail):** อัปเดตเอกสารและเวอร์ชัน
+- Update `CHANGELOG.md` ด้วย feature/fix descriptions
+- Update `HISTORY.md` ด้วย verification audit trail
+- Sync version numbers (SemVer) ให้ตรงกันทุกจุด
+
+### 3. Anti-Bypass Rules (ห้ามเบิกทั้งหมด)
+
+❌ **ห้าม:**
+- เขียนสคริปต์อื่นมาสวมรอยแทนการตรวจของ LocalCore CLI
+- ข้ามขั้นตอน Step 3 (Gatekeeper Verification) เด็ดขาด
+- ปล่อยให้ `EXIT_CODE != 0` แล้วไปทำ Step 5 (Build) ต่อ
+- Mock ผลลัพธ์หรืออ้างว่าผ่านการตรวจโดยไม่มีหลักฐาน
+
+✅ **บังคับต้อง:**
+- วนกลับ Step 1-3 ทุกครั้งที่มีการแก้ไขโค้ด
+- ใช้ LocalCore CLI เท่านั้นสำหรับการตรวจสอบ
+- บันทึกผลการตรวจสอบ EXIT_CODE ทุกครั้ง
+- ดำเนินการ Step 6 (Sync) หลังจากผ่าน EXIT_CODE: 0
+
+---
 
 ## TRI-AGENT WORKFLOW PROTOCOL (v4.7 — COMPLETE MASTER SPECIFICATION)
 
@@ -343,3 +412,4 @@ Only proceed after EXIT_CODE: 0 confirmed:
 ````````````````````````````
 `````````````````````````````
 ``````````````````````````````
+```````````````````````````````
