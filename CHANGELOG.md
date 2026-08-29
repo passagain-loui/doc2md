@@ -1,5 +1,8 @@
 # CHANGELOG.md
 
+````````````````````````````````````````````````text
+# CHANGELOG.md
+
 ```````````````````````````````````````````````text
 # CHANGELOG.md
 
@@ -150,6 +153,12 @@ Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
 ### Documented
 
 - **Native Crash Boundary (honest limitation):** The existing `except BaseException` outer guard in `convert()` (added v1.0.2) already converts the overwhelming majority of real-world CTranslate2/Whisper native failures — pybind11-translated C++ exceptions (bad codec params, malformed streams, driver errors) — into a clean `ConversionError` instead of crashing the process. A genuine hard native crash (segfault/access violation) is an OS signal, not a Python exception, and cannot be caught by any same-process guard at any nesting level; true immunity requires per-call OS process isolation. That approach was evaluated for this release and rejected: it would force reloading the multi-hundred-MB Whisper model from scratch on every single conversion (a loaded model instance cannot cross a process boundary), directly undoing the model-caching performance work from v1.0.8. `validate_audio_file()` is the primary defense instead, since malformed input files are the leading real-world trigger for native decode failures.
+
+### Amended: Drag & Drop Exception Guard, Model Caching Singleton
+
+- **Robust Staging Guards:** `browse_files()`, `_on_windnd_drop()`, and `_stage_files()` are now each wrapped in their own top-level `try...except Exception` block. Any unexpected failure (bad path, probing crash, dialog failure) shows a friendly "Invalid or Unreadable Audio File" dialog and clears `staged_files` cleanly instead of leaving inconsistent state or letting an exception propagate silently out of a Tk callback.
+- **Model Caching Singleton:** `_load_model()` now enforces true singleton semantics — only one Whisper model instance is ever resident in memory at a time. Previously every model size the user ever selected accumulated in `_model_cache` indefinitely (each ranging ~75MB–3GB). Switching to a different `model_size` now evicts the previous instance and calls `gc.collect()` before loading the new one, actually releasing the old model's memory.
+- **Subprocess Audit:** Confirmed all 3 `subprocess.run()` call sites in the codebase (`validate_audio_file`, `_get_duration`, `kill_all_ffmpeg_processes`) already enforce `stdin=subprocess.DEVNULL`, `creationflags=subprocess.CREATE_NO_WINDOW` (Windows), and explicit timeouts — no gaps found. `main_window.py` contains zero subprocess calls.
 
 ---
 
@@ -695,3 +704,4 @@ Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
 `````````````````````````````````````````````
 ``````````````````````````````````````````````
 ```````````````````````````````````````````````
+````````````````````````````````````````````````

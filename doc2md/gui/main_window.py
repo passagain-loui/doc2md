@@ -488,23 +488,37 @@ class MainWindow:
             if decoded:
                 self._stage_files(decoded)
         except Exception as exc:
-            logger.error(f"Error processing dropped files: {exc}")
-            messagebox.showerror("Error", f"Error processing dropped files: {exc}")
+            logger.exception(f"Error processing dropped files: {exc}")
+            messagebox.showerror(
+                "Invalid or Unreadable Audio File",
+                f"Could not process the dropped file(s):\n\n{type(exc).__name__}: {exc}",
+            )
+            self.staged_files.clear()
+            self._update_staging_status()
 
     def browse_files(self):
         """Open file browser to select files."""
-        files = filedialog.askopenfilenames(
-            filetypes=[
-                ("All Supported", "*.pdf *.docx *.xlsx *.pptx *.png *.jpg *.mp3 *.wav *.mp4 *.mkv"),
-                ("Documents", "*.pdf *.docx *.xlsx *.pptx"),
-                ("Images", "*.png *.jpg *.jpeg *.tiff"),
-                ("Audio", "*.mp3 *.wav *.m4a *.aac *.flac"),
-                ("Video", "*.mp4 *.mkv *.avi *.mov"),
-                ("All Files", "*.*"),
-            ]
-        )
-        if files:
-            self._stage_files(list(files))
+        try:
+            files = filedialog.askopenfilenames(
+                filetypes=[
+                    ("All Supported", "*.pdf *.docx *.xlsx *.pptx *.png *.jpg *.mp3 *.wav *.mp4 *.mkv"),
+                    ("Documents", "*.pdf *.docx *.xlsx *.pptx"),
+                    ("Images", "*.png *.jpg *.jpeg *.tiff"),
+                    ("Audio", "*.mp3 *.wav *.m4a *.aac *.flac"),
+                    ("Video", "*.mp4 *.mkv *.avi *.mov"),
+                    ("All Files", "*.*"),
+                ]
+            )
+            if files:
+                self._stage_files(list(files))
+        except Exception as exc:
+            logger.exception(f"Error browsing files: {exc}")
+            messagebox.showerror(
+                "Invalid or Unreadable Audio File",
+                f"Could not open the file browser:\n\n{type(exc).__name__}: {exc}",
+            )
+            self.staged_files.clear()
+            self._update_staging_status()
 
     def _stage_files(self, files: list[str]):
         """Stage files for conversion (store them but don't start conversion yet).
@@ -513,38 +527,51 @@ class MainWindow:
         AudioEngine.validate_audio_file() before staging - an invalid file is
         excluded and reported in a message dialog instead of being staged,
         so the Audio Worker Thread is never spawned for a file that's
-        already known to be corrupt or unreadable.
+        already known to be corrupt or unreadable. The whole probing loop is
+        wrapped in a top-level guard so a completely unexpected error (a bad
+        path, a probing crash, etc.) shows a friendly dialog and clears
+        staging cleanly instead of letting the app vanish silently.
         """
         if not files:
             return
 
-        valid_files: list[str] = []
-        invalid_entries: list[str] = []
+        try:
+            valid_files: list[str] = []
+            invalid_entries: list[str] = []
 
-        for file_path in files:
-            path = Path(file_path)
-            detection = detect(path)
-            if detection.kind in (FileKind.AUDIO, FileKind.VIDEO):
-                is_valid, reason = self.audio_engine.validate_audio_file(path)
-                if not is_valid:
-                    invalid_entries.append(f"{path.name}: {reason}")
-                    continue
-            valid_files.append(file_path)
+            for file_path in files:
+                path = Path(file_path)
+                detection = detect(path)
+                if detection.kind in (FileKind.AUDIO, FileKind.VIDEO):
+                    is_valid, reason = self.audio_engine.validate_audio_file(path)
+                    if not is_valid:
+                        invalid_entries.append(f"{path.name}: {reason}")
+                        continue
+                valid_files.append(file_path)
 
-        if invalid_entries:
-            summary = "\n".join(invalid_entries[:5])
-            if len(invalid_entries) > 5:
-                summary += f"\n... and {len(invalid_entries) - 5} more"
+            if invalid_entries:
+                summary = "\n".join(invalid_entries[:5])
+                if len(invalid_entries) > 5:
+                    summary += f"\n... and {len(invalid_entries) - 5} more"
+                messagebox.showerror(
+                    "Invalid or Unreadable Audio File",
+                    f"The following file(s) could not be staged:\n\n{summary}",
+                )
+
+            if not valid_files:
+                return
+
+            self.staged_files = valid_files
+            self._update_staging_status()
+        except Exception as exc:
+            logger.exception(f"Error staging files: {exc}")
             messagebox.showerror(
                 "Invalid or Unreadable Audio File",
-                f"The following file(s) could not be staged:\n\n{summary}",
+                f"An unexpected error occurred while preparing files for conversion:\n\n"
+                f"{type(exc).__name__}: {exc}",
             )
-
-        if not valid_files:
-            return
-
-        self.staged_files = valid_files
-        self._update_staging_status()
+            self.staged_files.clear()
+            self._update_staging_status()
 
     def _update_staging_status(self):
         """Update the UI to show how many files are staged."""

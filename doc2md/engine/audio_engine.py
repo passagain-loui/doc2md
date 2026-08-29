@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import logging
 import os
 import re
@@ -341,12 +342,25 @@ class AudioEngine(BaseEngine):
             return 0.0
 
     def _load_model(self, model_size: str, progress_callback=None):
-        """Load or download faster-whisper model, reusing a cached instance
-        (e.g. one warmed up via `preload_model`) when available."""
+        """Lazily load a Whisper model as a singleton instance: only ONE
+        model is ever resident in memory at a time, keyed by model_size.
+
+        Switching to a different model_size evicts the previously cached
+        instance and runs gc.collect() to actually release its memory
+        (Whisper models range from ~75MB to ~3GB) before loading the new
+        one, instead of letting an instance for every size the user has
+        ever selected accumulate in `_model_cache` indefinitely.
+        """
         try:
             if model_size in self._model_cache:
-                logger.debug(f"Reusing preloaded model: {model_size}")
+                logger.debug(f"Reusing cached model instance: {model_size}")
                 return self._model_cache[model_size]
+
+            if self._model_cache:
+                evicted = list(self._model_cache.keys())
+                self._model_cache.clear()
+                gc.collect()
+                logger.info(f"Evicted cached model(s) {evicted} before loading '{model_size}'")
 
             try:
                 from faster_whisper import WhisperModel
@@ -357,8 +371,6 @@ class AudioEngine(BaseEngine):
 
             self.MODEL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
-            model_path = self.MODEL_CACHE_DIR / model_size
-
             # Auto Hardware Detection: prefer CUDA (float16) when available,
             # otherwise fall back to CPU (int8) using all available cores.
             device = "cuda" if self._has_gpu() else "cpu"
@@ -368,12 +380,7 @@ class AudioEngine(BaseEngine):
                 model_kwargs["cpu_threads"] = os.cpu_count() or 4
             logger.info(f"Loading '{model_size}' model with {model_kwargs}")
 
-            if not model_path.exists():
-                logger.info(f"Downloading {model_size} model to {model_path}...")
-                # WhisperModel auto-downloads to cache_dir
-                model = WhisperModel(model_size, **model_kwargs)
-            else:
-                model = WhisperModel(model_size, **model_kwargs)
+            model = WhisperModel(model_size, **model_kwargs)
 
             self._model_cache[model_size] = model
             return model
