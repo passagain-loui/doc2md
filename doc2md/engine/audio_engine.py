@@ -83,84 +83,92 @@ class AudioEngine(BaseEngine):
             abort_event: Optional threading.Event to signal cancellation during transcription
         """
         try:
-            source = Path(source)
-            if not source.is_file():
-                raise ConversionError(f"Audio file not found: {source}")
-
-            # Extract abort_event from options if not provided directly
-            if abort_event is None:
-                abort_event = options.get("abort_event")
-
-            # Check abort signal early
-            if abort_event and abort_event.is_set():
-                raise ConversionError("Transcription cancelled by user")
-
             try:
-                import ffmpeg
-            except ImportError:
-                raise ConversionError(
-                    "ffmpeg-python is required for audio processing. "
-                    "Install via: pip install 'doc2md[audio]'"
-                )
+                source = Path(source)
+                if not source.is_file():
+                    raise ConversionError(f"Audio file not found: {source}")
 
-            # Ensure bundled FFmpeg is available for both ffmpeg-python and faster-whisper
-            ffmpeg_path = _get_ffmpeg_path()
-            if ffmpeg_path == "ffmpeg":
-                raise ConversionError(
-                    "FFmpeg not found. Please install it via: pip install 'doc2md[audio]' "
-                    "or download from https://ffmpeg.org/download.html"
-                )
-            ffmpeg_dir = os.path.dirname(ffmpeg_path)
-            os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
+                # Extract abort_event from options if not provided directly
+                if abort_event is None:
+                    abort_event = options.get("abort_event")
 
-            model_size = options.get("audio_model", self._model_size)
-            if model_size not in self.MODEL_SIZES:
-                model_size = self._model_size
+                # Check abort signal early
+                if abort_event and abort_event.is_set():
+                    raise ConversionError("Transcription cancelled by user")
 
-            duration = self._get_duration(source)
-            model = self._load_model(model_size, options.get("download_progress"))
+                try:
+                    import ffmpeg
+                except ImportError:
+                    raise ConversionError(
+                        "ffmpeg-python is required for audio processing. "
+                        "Install via: pip install 'doc2md[audio]'"
+                    )
 
-            try:
-                segments_gen, info = model.transcribe(str(source), language="en")
-                # faster-whisper returns a lazy generator; consume it fully here
-                # so downstream formatting can iterate plain segment objects
-                # instead of accidentally iterating the (generator, info) tuple.
-                segments = []
-                for segment in segments_gen:
-                    # Check abort signal before processing each segment
-                    if abort_event and abort_event.is_set():
-                        raise ConversionError("Transcription cancelled by user")
-                    segments.append(segment)
+                # Ensure bundled FFmpeg is available for both ffmpeg-python and faster-whisper
+                ffmpeg_path = _get_ffmpeg_path()
+                if ffmpeg_path == "ffmpeg":
+                    raise ConversionError(
+                        "FFmpeg not found. Please install it via: pip install 'doc2md[audio]' "
+                        "or download from https://ffmpeg.org/download.html"
+                    )
+                ffmpeg_dir = os.path.dirname(ffmpeg_path)
+                os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
+
+                model_size = options.get("audio_model", self._model_size)
+                if model_size not in self.MODEL_SIZES:
+                    model_size = self._model_size
+
+                duration = self._get_duration(source)
+                model = self._load_model(model_size, options.get("download_progress"))
+
+                try:
+                    segments_gen, info = model.transcribe(str(source), language="en")
+                    # faster-whisper returns a lazy generator; consume it fully here
+                    # so downstream formatting can iterate plain segment objects
+                    # instead of accidentally iterating the (generator, info) tuple.
+                    segments = []
+                    for segment in segments_gen:
+                        # Check abort signal before processing each segment
+                        if abort_event and abort_event.is_set():
+                            raise ConversionError("Transcription cancelled by user")
+                        segments.append(segment)
+                except ConversionError:
+                    raise
+                except RuntimeError as e:
+                    error_msg = str(e)
+                    if "CUDA" in error_msg or "GPU" in error_msg:
+                        raise ConversionError(
+                            "GPU/CUDA error detected. Falling back to CPU mode. "
+                            f"Details: {error_msg}"
+                        )
+                    elif "corrupt" in error_msg.lower() or "invalid" in error_msg.lower():
+                        raise ConversionError(
+                            f"Audio file may be corrupted or in an unsupported format: {source.name}. "
+                            "Try converting to MP3 or WAV format first."
+                        )
+                    else:
+                        raise ConversionError(f"Transcription failed: {error_msg}")
+                except Exception as e:
+                    error_msg = str(e)
+                    if "No such file" in error_msg or "cannot find" in error_msg.lower():
+                        raise ConversionError(
+                            f"Audio file not found or inaccessible: {source.name}"
+                        )
+                    raise ConversionError(f"Transcription failed: {type(e).__name__}: {error_msg}")
+
+                return self._format_output(source, duration, segments, model_size)
             except ConversionError:
                 raise
-            except RuntimeError as e:
-                error_msg = str(e)
-                if "CUDA" in error_msg or "GPU" in error_msg:
-                    raise ConversionError(
-                        "GPU/CUDA error detected. Falling back to CPU mode. "
-                        f"Details: {error_msg}"
-                    )
-                elif "corrupt" in error_msg.lower() or "invalid" in error_msg.lower():
-                    raise ConversionError(
-                        f"Audio file may be corrupted or in an unsupported format: {source.name}. "
-                        "Try converting to MP3 or WAV format first."
-                    )
-                else:
-                    raise ConversionError(f"Transcription failed: {error_msg}")
             except Exception as e:
-                error_msg = str(e)
-                if "No such file" in error_msg or "cannot find" in error_msg.lower():
-                    raise ConversionError(
-                        f"Audio file not found or inaccessible: {source.name}"
-                    )
-                raise ConversionError(f"Transcription failed: {type(e).__name__}: {error_msg}")
-
-            return self._format_output(source, duration, segments, model_size)
-        except ConversionError:
-            raise
-        except Exception as e:
-            logger.exception(f"Audio conversion error: {e}")
-            raise ConversionError(f"Audio processing failed: {type(e).__name__}: {str(e)}")
+                logger.exception(f"Audio conversion error: {e}")
+                raise ConversionError(f"Audio processing failed: {type(e).__name__}: {str(e)}")
+        except BaseException as e:
+            # Bulletproof outer crash guard for CTranslate2, Whisper, FFmpeg crashes
+            logger.critical(f"BULLETPROOF AUDIO CRASH GUARD: {type(e).__name__}: {str(e)}", exc_info=True)
+            raise ConversionError(
+                f"Critical audio engine failure: {type(e).__name__}. "
+                f"The audio engine encountered an unexpected error. Try again with a different audio file."
+            )
 
     def _get_duration(self, source: Path) -> float:
         """Get audio/video duration in seconds."""

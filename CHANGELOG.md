@@ -99,6 +99,28 @@
 All notable changes to `doc2md` are documented here.
 Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
 
+## [1.0.2] - 2026-08-29
+
+### Patch: Bulletproof Audio Crash Guard & Developer Credit
+
+**Overview:** v1.0.2 implements a bulletproof exception handling layer around all audio/Whisper/CTranslate2 operations, preventing silent application crashes and providing graceful error recovery with developer attribution.
+
+### Added
+
+- **Developer Credit:** Added "Developed by Passagain P." footer credit in main application window for attribution.
+- **Bulletproof Audio Crash Guard:** Implemented dual-layer exception handling:
+  - Outer `BaseException` catch in `_convert_worker()` guards against CTranslate2, FFmpeg, and Whisper runtime crashes
+  - Inner `BaseException` catch in `audio_engine.convert()` ensures audio processing errors never crash the engine
+  - Both layers log full tracebacks and display user-friendly error messages
+
+### Fixed
+
+- **Silent Audio Crashes:** Prevented rare CTranslate2/Whisper library crashes from silently terminating the application
+- **Thread Cleanup Guarantee:** Added `root.update_idletasks()` in finally block to ensure UI state cleanup even during catastrophic errors
+- **Error Recovery:** Bulletproof handlers ensure clean error dialogs and proper button state restoration after any audio processing failure
+
+---
+
 ## [1.0.1] - 2026-08-29
 
 ### Patch: FFmpeg Bundling & System Path Resolution
