@@ -1,5 +1,8 @@
 # CLAUDE.md
 
+`````````````````````````````````````````text
+# CLAUDE.md
+
 ````````````````````````````````````````text
 # CLAUDE.md
 
@@ -113,7 +116,7 @@
 
 ---
 
-## EXECUTION GUIDELINES & WORKFLOW STANDARDS (v5.1)
+## EXECUTION GUIDELINES & WORKFLOW STANDARDS (v5.2)
 
 ### 1. Role & Execution Guidelines
 
@@ -134,25 +137,14 @@
 powershell -ExecutionPolicy Bypass -File ./tools/verify.ps1
 ```
 
-**Step 4 (Strict Re-Validation, False-Positive Check & Auto-Fix Loop):**
-
-**Phase A: Read BOTH EXIT_CODE and Full Log Output**
-- อ่าน `EXIT_CODE` จาก PowerShell ผลลัพธ์
-- อ่าน **ทั้งหมด** Text Log ที่ LocalCore CLI พ่นออกมา (stdout + stderr)
-- สแกน Log เพื่อหา Keywords ที่บ่งบอก Internal Validation Failure:
- - `VALIDATION FAILED`
- - `No command given`
- - `No project markers`
- - `Internal Error`
- - `Test failed`
-
-**Phase B: Decision Logic**
-- **กรณี `EXIT_CODE: 0` AND ไม่พบ Failure Keywords (TRUE PASS):** อนุญาตให้ไปดำเนินการ Step 5 ต่อได้ทันที ✅
-- **กรณี `EXIT_CODE: 0` BUT พบ Failure Keywords (FALSE POSITIVE):** **HARD STOP** ห้ามลักไก่ข้ามไป Step 5 ❌ วนกลับ **Step 1**
-- **กรณี `EXIT_CODE != 0` (DIRECT FAILURE):** **HARD STOP** ห้ามลักไก่ข้ามไป Step 5 ❌ วนกลับ **Step 1**
-
-**Phase C: Auto-Fix Loop**
-- วน Loop แก้ไขและส่งตรวจใหม่ Step 1 ➔ Step 2 ➔ Step 3 ➔ Step 4 จนกว่าจะได้รับ `EXIT_CODE: 0` ของจริง + ไม่มี Failure Keywords
+**Step 4 (Strict Re-Validation & Mandatory Auto-Fix Loop):**
+- อ่านทั้ง `EXIT_CODE` และ Text Log สดๆ จาก Terminal ใน Step 3
+- **กรณี `EXIT_CODE: 0` (PASS):** ตรวจสอบใน Log ต้องไม่มีคำว่า `VALIDATION FAILED`, `No command given` หรือ `is not recognized` หากสะอาด 100% จึงจะอนุญาตให้ไป Step 5 (Packaging & Build)
+- **กรณี `EXIT_CODE != 0` หรือพบ Failure Log (FAIL/ERROR):**
+ - **MANDATORY AUTO-EXECUTION:** ห้ามหยุดทำงาน ห้ามสรุปปิดงาน และห้ามข้ามไป Step 5 เด็ดขาด
+ - อ่าน Error Log ที่ LocalCore CLI พ่นออกมาทันที (เช่น ปัญหา command/pytest/syntax)
+ - **ดำเนินการทันทีอัตโนมัติ:** วนกลับไป **Step 1** เพื่อแก้ไขโค้ด/การตั้งค่า ➔ **Step 2** (Purge Cache) ➔ **Step 3** (รัน `./tools/verify.ps1` ตรวจซ้ำ)
+ - **ต้องส่งตรวจใหม่ซ้ำไปเรื่อยๆ จนกว่าจะได้รับ `EXIT_CODE: 0` ของจริงเท่านั้น** (No Mock/No Assumption)
 
 **Step 5 (Packaging & Build):** เมื่อผ่านการอนุมัติ `EXIT_CODE: 0` ของจริงจาก LocalCore CLI แล้ว ให้ดำเนินการสร้าง Release Build (จำกัดการใช้ CPU/RAM ไม่เกิน 85%)
 
@@ -162,7 +154,7 @@ powershell -ExecutionPolicy Bypass -File ./tools/verify.ps1
 
 - ห้าม Claude เขียนสคริปต์อื่นมาสวมรอยแทนการตรวจของ LocalCore CLI
 - ห้ามเชื่อถือ Exit Code ของ PowerShell เพียงอย่างเดียว ต้องสแกนอ่าน Internal Verification Status ใน Log เสมอ
-- ทุกการแก้ไขโค้ดใน Step 1 บังคับต้องวนกลับมาส่งตรวจใน Step 3 ซ้ำทุกครั้ง
+- ทุกการแก้ไขโค้ดใน Step 1 บังคับต้องวนกลับมาสั่งรัน Step 3 ตรวจซ้ำให้อัตโนมัติทันที ห้ามรอคำสั่งเพิ่มเติมจากผู้ใช้
 
 ---
 
@@ -444,3 +436,4 @@ Only proceed after EXIT_CODE: 0 confirmed:
 ``````````````````````````````````````
 ```````````````````````````````````````
 ````````````````````````````````````````
+`````````````````````````````````````````
