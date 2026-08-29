@@ -110,6 +110,21 @@
 
 This file records verification runs, timestamps, and quality metrics per release.
 
+## [1.0.5] - 2026-08-29
+
+- **Verification timestamp (UTC+7 local):** 2026-08-29, Gatekeeper Protocol v4.7 (Complete Master Specification)
+- **Verification Method:** `python -m pytest tests/ -v`
+- **Result:** `EXIT_CODE:0` — **VALIDATION PASSED**; 307 passed, 1 skipped
+- **Loop iterations:** 1 (no fixes needed)
+- **Features & Fixes:**
+ - Hard Exit Protocol: Overrode `WM_DELETE_WINDOW` and the Exit button so closing the app during an active conversion force-kills any spawned `ffmpeg.exe` processes (`taskkill /F /IM ffmpeg.exe /T`), deletes leftover temp `.wav` chunks from the system Temp folder, then calls `os._exit(0)` to guarantee instant termination even if the main thread is frozen inside a native transcription call
+ - Grid Geometry Fix: Removed the "Open Folder" button entirely; the remaining 5 action buttons (Browse, Start/Stop, Copy, Save, Exit) now share equal width via `grid_columnconfigure(weight=1)` instead of left/right-packed uneven spacing
+ - Combobox State Fix: Model selector now uses a dark `fg_color` and explicit `text_color_disabled` so it stays legible (no white-box artifact) when locked during an active conversion
+ - Progress Label Fix: Percentage overlay on the progress bar now uses an explicit `fg_color="transparent"` so it no longer shows a background box over the progress track
+- **Quality Metrics:** 307 tests passed (1 skipped), zero test failures
+- **Build:** PyInstaller with force-embedded FFmpeg binary (`--add-binary`), clean build pipeline
+- **GitHub Release:** https://github.com/passagain-loui/doc2md/releases/tag/v1.0.5
+
 ## [0.3.21] - 2026-08-27
 
 - **Verification timestamp (UTC+7 local):** 2026-08-27, Gatekeeper Protocol v4.7 (Complete Master Specification)

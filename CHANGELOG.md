@@ -111,6 +111,26 @@
 All notable changes to `doc2md` are documented here.
 Format based on Keep a Changelog; versioning follows SemVer 2.0.0.
 
+## [1.0.5] - 2026-08-29
+
+### Patch: Thread Starvation, Zombie Process & UI Polish Fixes
+
+**Overview:** v1.0.5 is a deep-architecture pass addressing what happens when the app is closed mid-conversion, plus three UI polish issues introduced by earlier releases (uneven button spacing, a disabled-combobox white-box artifact, and a progress label background box).
+
+### Added
+
+- **Hard Exit Protocol:** `WM_DELETE_WINDOW` and the Exit button now route through `_on_exit_request()`. If a conversion is active, it force-kills any spawned `ffmpeg.exe` processes via `taskkill /F /IM ffmpeg.exe /T`, deletes leftover temp `.wav` chunks from the system Temp folder, then calls `os._exit(0)` — guaranteeing instant shutdown even if the main thread is frozen inside a native transcription call.
+- **`AudioEngine.kill_all_ffmpeg_processes()` / `cleanup_temp_audio_chunks()`:** New static methods centralizing FFmpeg zombie-process and temp-file cleanup in the engine module, callable by the GUI without an engine instance.
+
+### Fixed
+
+- **Grid Geometry:** Removed the "Open Folder" button entirely; the remaining 5 buttons (Browse, Start/Stop, Copy, Save, Exit) now use `grid_columnconfigure(weight=1)` so they share equal width instead of left/right-packed uneven spacing.
+- **Combobox White-Box Artifact:** Model selector's `fg_color` changed from white to the dark card color, with an explicit `text_color_disabled` so the selected model name stays legible when the control is locked during conversion.
+- **Progress Label Background Box:** Percentage overlay on the progress bar now sets `fg_color="transparent"` explicitly, removing the background box over the progress track.
+- **Model Lock During Conversion:** The model combobox is now actually disabled while a conversion runs (previously never disabled) and re-enabled on completion, cancellation, or crash.
+
+---
+
 ## [1.0.4] - 2026-08-29
 
 ### Patch: Numeric Percentage Progress Bar

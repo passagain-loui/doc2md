@@ -247,6 +247,37 @@ class AudioEngine(BaseEngine):
             model_size = self._model_size
         self._load_model(model_size)
 
+    @staticmethod
+    def kill_all_ffmpeg_processes() -> None:
+        """Forcefully terminate any FFmpeg processes spawned during
+        transcription. Used by the GUI's Hard Exit Protocol to prevent
+        zombie ffmpeg.exe processes from lingering after a forced shutdown."""
+        if sys.platform != "win32":
+            return
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/IM", "ffmpeg.exe", "/T"],
+                capture_output=True,
+                timeout=5,
+            )
+        except Exception as exc:
+            logger.warning(f"Failed to kill FFmpeg processes: {exc}")
+
+    @staticmethod
+    def cleanup_temp_audio_chunks() -> None:
+        """Delete leftover temporary .wav chunk files from the system Temp
+        folder. Best-effort cleanup invoked during the GUI's Hard Exit
+        Protocol; failures are swallowed since this runs during shutdown."""
+        try:
+            temp_dir = Path(tempfile.gettempdir())
+            for wav_file in temp_dir.glob("*.wav"):
+                try:
+                    wav_file.unlink()
+                except Exception:
+                    pass
+        except Exception as exc:
+            logger.warning(f"Failed to clean up temp audio chunks: {exc}")
+
     def _has_gpu(self) -> bool:
         """Check if NVIDIA GPU is available."""
         try:

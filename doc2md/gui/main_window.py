@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from pathlib import Path
 from typing import Optional
@@ -68,6 +69,11 @@ class MainWindow:
 
         self._setup_ui()
         self._setup_dnd()
+
+        # Hard Exit Protocol: catch the window-close (X) button so an active
+        # conversion never leaves an orphaned FFmpeg process or a frozen
+        # main thread behind.
+        self.root.protocol("WM_DELETE_WINDOW", self._on_exit_request)
 
         # Warm up the default audio model in the background so the first
         # conversion doesn't pay the (multi-second) model-load cost lazily.
@@ -227,21 +233,22 @@ class MainWindow:
         model_label.grid(row=4, column=0, sticky="w", padx=12, pady=(10, 3))
 
         self.model_var = ctk.StringVar(value="small")
-        model_combo = ctk.CTkComboBox(
+        self.model_combo = ctk.CTkComboBox(
             options_card,
             values=["tiny", "base", "small", "medium", "large-v3"],
             variable=self.model_var,
             command=self._on_model_change,
-            fg_color="#ffffff",
+            fg_color=CTK_CARD,
             border_color=CTK_BORDER,
             button_color=CTK_ACCENT_BLUE,
             button_hover_color=CTK_ACCENT_BLUE_HOVER,
             text_color=CTK_TEXT,
+            text_color_disabled=CTK_TEXT,
             font=(UI_FONT, 11),
             width=120,
             justify="center",
         )
-        model_combo.grid(row=4, column=1, sticky="e", padx=12, pady=(10, 3))
+        self.model_combo.grid(row=4, column=1, sticky="e", padx=12, pady=(10, 3))
 
         # Model warm-up status indicator
         self.model_status_label = ctk.CTkLabel(
@@ -301,6 +308,7 @@ class MainWindow:
             text="0%",
             font=(UI_FONT, 11, "bold"),
             text_color=CTK_TEXT,
+            fg_color="transparent",
             anchor="center",
         )
         self.progress_overlay.place(relx=0.5, rely=0.5, anchor="center")
@@ -314,10 +322,11 @@ class MainWindow:
         )
         self.status_label.grid(row=1, column=0, sticky="w", padx=12, pady=(0, 8))
 
-        # Bottom Action Panel
+        # Bottom Action Panel - 5 buttons sharing equal grid width
         button_frame = ctk.CTkFrame(root_frame, fg_color="transparent")
         button_frame.pack(fill="x", padx=10, pady=(0, 10))
-        button_frame.grid_columnconfigure(0, weight=1)
+        for col in range(5):
+            button_frame.grid_columnconfigure(col, weight=1)
 
         btn_kwargs = dict(
             font=(UI_FONT, 12, "bold"),
@@ -335,7 +344,7 @@ class MainWindow:
             hover_color=CTK_ACCENT_BLUE_HOVER,
             **btn_kwargs,
         )
-        browse_btn.pack(side="left", padx=3)
+        browse_btn.grid(row=0, column=0, sticky="ew", padx=3)
 
         self.convert_btn = ctk.CTkButton(
             button_frame,
@@ -345,7 +354,7 @@ class MainWindow:
             hover_color="#047857",
             **btn_kwargs,
         )
-        self.convert_btn.pack(side="left", padx=3)
+        self.convert_btn.grid(row=0, column=1, sticky="ew", padx=3)
 
         copy_btn = ctk.CTkButton(
             button_frame,
@@ -355,7 +364,7 @@ class MainWindow:
             hover_color=CTK_ACCENT_BLUE_HOVER,
             **btn_kwargs,
         )
-        copy_btn.pack(side="left", padx=3)
+        copy_btn.grid(row=0, column=2, sticky="ew", padx=3)
 
         save_btn = ctk.CTkButton(
             button_frame,
@@ -365,27 +374,17 @@ class MainWindow:
             hover_color=CTK_ACCENT_CYAN_HOVER,
             **btn_kwargs,
         )
-        save_btn.pack(side="left", padx=3)
-
-        folder_btn = ctk.CTkButton(
-            button_frame,
-            text="🗂️  Open Folder",
-            command=self.open_folder,
-            fg_color=CTK_ACCENT_BLUE,
-            hover_color=CTK_ACCENT_BLUE_HOVER,
-            **btn_kwargs,
-        )
-        folder_btn.pack(side="left", padx=3)
+        save_btn.grid(row=0, column=3, sticky="ew", padx=3)
 
         exit_btn = ctk.CTkButton(
             button_frame,
             text="❌  Exit",
-            command=self.root.quit,
+            command=self._on_exit_request,
             fg_color=CTK_ACCENT_PINK,
             hover_color=CTK_ACCENT_PINK_HOVER,
             **btn_kwargs,
         )
-        exit_btn.pack(side="right", padx=3)
+        exit_btn.grid(row=0, column=4, sticky="ew", padx=3)
 
         # Developer Credit Footer
         footer_frame = ctk.CTkFrame(root_frame, fg_color="transparent")
@@ -533,6 +532,8 @@ class MainWindow:
             fg_color="#dc2626",
             hover_color="#b91c1c"
         )
+        # Lock the model selector during conversion to prevent mid-run changes
+        self.model_combo.configure(state="disabled")
         self.root.update_idletasks()
         self.convert_files(self.staged_files)
 
@@ -559,6 +560,7 @@ class MainWindow:
             fg_color="#059669",
             hover_color="#047857"
         )
+        self.model_combo.configure(state="normal")
         self._update_staging_status()
         self.root.update_idletasks()
 
@@ -707,6 +709,7 @@ class MainWindow:
                 fg_color="#059669",
                 hover_color="#047857"
             )
+            self.model_combo.configure(state="normal")
             self.root.update_idletasks()
             logger.info("Conversion worker cleanup complete")
 
@@ -760,12 +763,14 @@ class MainWindow:
         except Exception as exc:
             messagebox.showerror("Error", f"Export failed: {exc}")
 
-    def open_folder(self):
-        """Open file browser to show converted files."""
-        try:
-            import subprocess
-            import sys
-
-            subprocess.Popen(f'explorer /select,"{Path.home()}"')
-        except Exception as exc:
-            messagebox.showerror("Error", f"Failed to open folder: {exc}")
+    def _on_exit_request(self):
+        """Hard Exit Protocol: if a conversion is active, forcefully kill any
+        spawned FFmpeg processes and delete leftover temp audio chunks before
+        instantly terminating the process, so a frozen main thread (stuck in
+        a native transcription call) can never block application shutdown."""
+        if self.is_converting:
+            self.abort_event.set()
+            self.stop_requested = True
+            AudioEngine.kill_all_ffmpeg_processes()
+            AudioEngine.cleanup_temp_audio_chunks()
+        os._exit(0)
