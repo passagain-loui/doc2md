@@ -128,12 +128,23 @@ def bundle_ffmpeg_binaries() -> list[str]:
 
 
 def build() -> int:
-    # Clean stale build/dist directories to ensure fresh build with current version
-    for folder in ["build", "dist"]:
-        folder_path = ROOT / folder
-        if folder_path.exists():
-            print(f"[build_exe] Cleaning stale {folder}/ directory...")
-            shutil.rmtree(folder_path)
+    # Clean only this build's own outputs. Wiping all of dist/ and build/ would
+    # also destroy the GPU Pack artifacts (dist/doc2md_GPU_Pack_*.exe and its
+    # build/gpu_pack staging), which are produced by a separate, much slower
+    # build step that has no reason to be repeated for an exe rebuild.
+    stale = [
+        DIST_EXE,
+        ROOT / "dist" / "doc2md.pkg",
+        WORKPATH,
+        BUILD_DIR / "doc2md.spec",
+    ]
+    for path in stale:
+        if path.is_dir():
+            print(f"[build_exe] Cleaning stale {path.relative_to(ROOT)}/ ...")
+            shutil.rmtree(path, ignore_errors=True)
+        elif path.is_file():
+            print(f"[build_exe] Removing stale {path.relative_to(ROOT)} ...")
+            path.unlink()
 
     if shutil.which("python") is None and sys.executable == "":
         print("[build_exe] python interpreter not found")
