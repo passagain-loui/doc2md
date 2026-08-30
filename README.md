@@ -1,6 +1,6 @@
 # README.md
 
-````text
+```text
 # doc2md v1.1.0
 
 Drag a document in, get clean Markdown out. PDF, Word, Excel, PowerPoint, HTML,
@@ -292,4 +292,4 @@ GPU Pack to those users.
 - **Hardening**: Deep audit applied - subprocess zombie process prevention on Windows
 - **Hardening**: Singleton pattern for WhisperModel caching with memory release
 - **Hardening**: Bulletproof exception guards for native C-extension crashes
-````
+```
