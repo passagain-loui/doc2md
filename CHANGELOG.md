@@ -1,5 +1,8 @@
 # CHANGELOG.md
 
+`````````text
+# CHANGELOG.md
+
 ````````text
 # CHANGELOG.md
 
@@ -16,6 +19,16 @@
 # CHANGELOG.md
 
 ```text
+## [1.0.15] (2026-08-30)
+
+- **Fix**: Converter.convert_file() method signature - removed invalid positional `options` argument
+- **Feature**: Real-time progress bar with visual feedback during file conversion
+- **Feature**: Stop/Cancel button (red #DC2626) for immediate thread-safe conversion cancellation
+- **Feature**: Model readiness status indicator showing cache status
+- **Fix**: Drag & Drop re-implemented with proper event binding on entire drop frame
+- **Enhancement**: Modern UI redesign with rounded corners (radius=12), Dark Glass styling, and high-contrast typography
+- **Enhancement**: Threading Event-based cancellation system for graceful worker shutdown
+
 ## [1.0.14] (2026-08-30)
 
 - **Feature**: Restored full GUI control set - Model Size selector, Language dropdown, Output Format selector
@@ -62,3 +75,4 @@
 ``````
 ```````
 ````````
+`````````

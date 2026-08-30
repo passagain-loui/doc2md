@@ -9,7 +9,7 @@ import shlex
 import subprocess
 import sys
 import threading
-import traceback
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -36,7 +36,6 @@ logger = logging.getLogger(__name__)
 class MainWindow:
     """Full-featured CustomTkinter GUI for doc2md converter."""
 
-    # Audio model options
     AUDIO_MODELS = ["tiny", "base", "small", "medium", "large-v3"]
     LANGUAGES = ["Auto-detect", "English", "Thai", "Spanish", "French", "German", "Chinese", "Japanese"]
     OUTPUT_FORMATS = ["Markdown (.md)", "Plain Text (.txt)"]
@@ -45,7 +44,7 @@ class MainWindow:
         """Initialize the GUI window."""
         self.root = root
         self.root.title("doc2md - Document to Markdown Converter")
-        self.root.geometry("900x750")
+        self.root.geometry("950x800")
 
         # Theme setup
         try:
@@ -58,10 +57,11 @@ class MainWindow:
 
         self.converter = Converter()
         self.is_converting = False
+        self.cancel_event = threading.Event()
         self.conversion_thread: Optional[threading.Thread] = None
         self.selected_files: list[Path] = []
 
-        # UI control variables
+        # UI variables
         self.audio_model_var = ctk.StringVar(value="small")
         self.language_var = ctk.StringVar(value="Auto-detect")
         self.output_format_var = ctk.StringVar(value="Markdown (.md)")
@@ -80,31 +80,39 @@ class MainWindow:
 
         # Title
         title = ctk.CTkLabel(main_frame, text="doc2md - Document to Markdown Converter",
-                            font=("Arial", 20, "bold"))
+                            font=("Arial", 22, "bold"))
         title.pack(pady=(0, 20))
 
         # Settings panel
-        settings_frame = ctk.CTkFrame(main_frame)
-        settings_frame.pack(fill="x", padx=5, pady=(0, 15))
+        settings_frame = ctk.CTkFrame(main_frame, fg_color=("#f5f5f5", "#2a2a2a"))
+        settings_frame.pack(fill="x", padx=5, pady=(0, 15), corner_radius=12)
 
-        # Audio Model Selection
-        model_label = ctk.CTkLabel(settings_frame, text="Audio Model:", font=("Arial", 11))
+        # Model Selection with Status
+        model_frame = ctk.CTkFrame(settings_frame, fg_color="transparent")
+        model_frame.pack(side="left", fill="x", expand=True, padx=10, pady=10)
+
+        model_label = ctk.CTkLabel(model_frame, text="Audio Model:", font=("Arial", 11, "bold"))
         model_label.pack(side="left", padx=5)
 
-        model_combo = ctk.CTkComboBox(settings_frame, values=self.AUDIO_MODELS,
+        model_combo = ctk.CTkComboBox(model_frame, values=self.AUDIO_MODELS,
                                       variable=self.audio_model_var, width=100, state="readonly")
         model_combo.pack(side="left", padx=5)
 
+        # Model status indicator
+        self.model_status_label = ctk.CTkLabel(model_frame, text="Ready",
+                                              text_color=("#10b981", "#34d399"), font=("Arial", 10))
+        self.model_status_label.pack(side="left", padx=10)
+
         # Language Selection
-        lang_label = ctk.CTkLabel(settings_frame, text="Language:", font=("Arial", 11))
-        lang_label.pack(side="left", padx=5)
+        lang_label = ctk.CTkLabel(settings_frame, text="Language:", font=("Arial", 11, "bold"))
+        lang_label.pack(side="left", padx=5, pady=10)
 
         lang_combo = ctk.CTkComboBox(settings_frame, values=self.LANGUAGES,
                                      variable=self.language_var, width=120, state="readonly")
         lang_combo.pack(side="left", padx=5)
 
         # Output Format
-        format_label = ctk.CTkLabel(settings_frame, text="Format:", font=("Arial", 11))
+        format_label = ctk.CTkLabel(settings_frame, text="Format:", font=("Arial", 11, "bold"))
         format_label.pack(side="left", padx=5)
 
         format_combo = ctk.CTkComboBox(settings_frame, values=self.OUTPUT_FORMATS,
@@ -112,48 +120,65 @@ class MainWindow:
         format_combo.pack(side="left", padx=5)
 
         # Advanced settings frame
-        adv_frame = ctk.CTkFrame(main_frame)
-        adv_frame.pack(fill="x", padx=5, pady=(0, 15))
+        adv_frame = ctk.CTkFrame(main_frame, fg_color=("#f5f5f5", "#2a2a2a"))
+        adv_frame.pack(fill="x", padx=5, pady=(0, 15), corner_radius=12)
 
-        # Checkboxes
         ocr_check = ctk.CTkCheckBox(adv_frame, text="Enable PDF OCR (Slower)",
-                                   variable=self.ocr_enabled_var)
-        ocr_check.pack(side="left", padx=5)
+                                   variable=self.ocr_enabled_var, font=("Arial", 10))
+        ocr_check.pack(side="left", padx=10, pady=10)
 
         clip_check = ctk.CTkCheckBox(adv_frame, text="Copy to Clipboard",
-                                    variable=self.copy_clipboard_var)
+                                    variable=self.copy_clipboard_var, font=("Arial", 10))
         clip_check.pack(side="left", padx=5)
 
-        # Drop zone
+        # Drop zone with rounded corners
         drop_frame = ctk.CTkFrame(main_frame, fg_color=("#e8e8e8", "#2a2a2a"), border_width=2)
-        drop_frame.pack(fill="both", expand=True, padx=5, pady=(0, 15))
+        drop_frame.pack(fill="both", expand=True, padx=5, pady=(0, 15), corner_radius=12)
 
         drop_label = ctk.CTkLabel(drop_frame, text="📁 Drag & drop files here\nor click to browse",
-                                 font=("Arial", 14), text_color=("gray50", "gray70"))
-        drop_label.pack(expand=True, pady=20)
+                                 font=("Arial", 16, "bold"), text_color=("gray50", "gray70"))
+        drop_label.pack(expand=True, pady=30)
 
         self.drop_zone = drop_frame
         self.drop_label = drop_label
+
+        # Progress bar
+        progress_frame = ctk.CTkFrame(main_frame)
+        progress_frame.pack(fill="x", padx=5, pady=(0, 10))
+
+        progress_label = ctk.CTkLabel(progress_frame, text="Progress:", font=("Arial", 10))
+        progress_label.pack(anchor="w")
+
+        self.progress_bar = ctk.CTkProgressBar(progress_frame, height=24, corner_radius=8)
+        self.progress_bar.pack(fill="x", padx=0, pady=5)
+        self.progress_bar.set(0)
 
         # Button frame
         button_frame = ctk.CTkFrame(main_frame)
         button_frame.pack(fill="x", padx=5, pady=(0, 15))
 
         browse_btn = ctk.CTkButton(button_frame, text="Browse Files",
-                                  command=self._browse_files, width=120, height=35)
+                                  command=self._browse_files, width=120, height=38, font=("Arial", 11, "bold"))
         browse_btn.pack(side="left", padx=5)
 
         self.convert_button = ctk.CTkButton(button_frame, text="Convert",
                                            command=self._start_conversion, state="disabled",
-                                           width=120, height=35)
+                                           width=120, height=38, font=("Arial", 11, "bold"))
         self.convert_button.pack(side="left", padx=5)
+
+        # Cancel button (hidden by default, red)
+        self.cancel_button = ctk.CTkButton(button_frame, text="Stop/Cancel",
+                                          command=self._cancel_conversion, state="disabled",
+                                          width=120, height=38, fg_color="#DC2626", hover_color="#991b1b",
+                                          font=("Arial", 11, "bold"))
+        self.cancel_button.pack(side="left", padx=5)
 
         # Status log
         log_frame = ctk.CTkFrame(main_frame)
-        log_frame.pack(fill="both", expand=True, padx=5)
+        log_frame.pack(fill="both", expand=True, padx=5, corner_radius=12)
 
         log_label = ctk.CTkLabel(log_frame, text="Status Log:", font=("Arial", 12, "bold"))
-        log_label.pack(anchor="w")
+        log_label.pack(anchor="w", padx=10, pady=(10, 5))
 
         try:
             self.log_text = ctk.CTkTextbox(log_frame, height=150)
@@ -161,20 +186,22 @@ class MainWindow:
             import tkinter as tk
             self.log_text = tk.Text(log_frame, height=8, width=60, wrap="word")
 
-        self.log_text.pack(fill="both", expand=True, padx=5, pady=5)
+        self.log_text.pack(fill="both", expand=True, padx=10, pady=10)
         self.log_text.configure(state="disabled")
 
     def _setup_drag_drop(self) -> None:
-        """Setup DnD with proper event handling."""
+        """Setup DnD with proper event handling on entire drop frame."""
         if DND_FILES is None:
             logger.warning("TkinterDnD2 not available")
             return
 
         try:
+            # Register on the main drop frame
             self.drop_zone.drop_target_register(DND_FILES, DND_TEXT)
             self.drop_zone.dnd_bind('<<Drop>>', self._on_drop)
             self.drop_zone.dnd_bind('<<DragEnter>>', self._on_drag_enter)
             self.drop_zone.dnd_bind('<<DragLeave>>', self._on_drag_leave)
+            logger.info("DnD registered successfully on drop_zone frame")
         except Exception as exc:
             logger.warning(f"DnD setup failed: {exc}")
 
@@ -182,6 +209,7 @@ class MainWindow:
         """Visual feedback on drag enter."""
         try:
             self.drop_zone.configure(fg_color=("#d0d0d0", "#404040"))
+            self.drop_label.configure(text_color=("gray30", "gray90"))
         except Exception:
             pass
         return "copy"
@@ -190,6 +218,7 @@ class MainWindow:
         """Restore color on drag leave."""
         try:
             self.drop_zone.configure(fg_color=("#e8e8e8", "#2a2a2a"))
+            self.drop_label.configure(text_color=("gray50", "gray70"))
         except Exception:
             pass
         return "refuse"
@@ -198,10 +227,12 @@ class MainWindow:
         """Handle dropped files with robust parsing."""
         try:
             self.drop_zone.configure(fg_color=("#e8e8e8", "#2a2a2a"))
+            self.drop_label.configure(text_color=("gray50", "gray70"))
 
             raw_data = event.data if isinstance(event.data, str) else str(event.data)
+            logger.info(f"Drop event received: {raw_data[:100]}")
 
-            # Parse paths
+            # Parse paths robustly
             try:
                 paths = shlex.split(raw_data)
             except ValueError:
@@ -278,28 +309,45 @@ class MainWindow:
             return
 
         self.is_converting = True
+        self.cancel_event.clear()
         self.convert_button.configure(state="disabled")
+        self.cancel_button.configure(state="normal")
+        self.progress_bar.set(0)
+
         self.conversion_thread = threading.Thread(target=self._conversion_worker, daemon=True)
         self.conversion_thread.start()
+
+    def _cancel_conversion(self) -> None:
+        """Cancel the running conversion."""
+        self._log("⏹️ Cancellation requested...")
+        self.cancel_event.set()
+        self.is_converting = False
 
     def _conversion_worker(self) -> None:
         """Background conversion worker."""
         try:
             self._log("🔄 Starting conversion...")
 
-            # Gather options from UI
-            options = {
+            # Update converter options
+            self.converter.options.update({
                 "audio_model": self.audio_model_var.get(),
                 "pdf_ocr_fallback": self.ocr_enabled_var.get(),
-            }
+            })
 
-            for file_path in self.selected_files:
-                if not self.is_converting:
+            for idx, file_path in enumerate(self.selected_files):
+                if self.cancel_event.is_set():
+                    self._log("⏹️ Conversion cancelled by user")
                     break
 
                 try:
                     self._log(f"Processing: {file_path.name}...")
-                    result = self.converter.convert_file(file_path, options)
+
+                    # Update progress
+                    progress = (idx + 1) / len(self.selected_files)
+                    self.progress_bar.set(progress)
+
+                    # Call convert_file with correct signature (no options argument)
+                    result = self.converter.convert_file(file_path)
 
                     if result.success:
                         # Determine output format
@@ -326,8 +374,11 @@ class MainWindow:
                     self._log(f"❌ {file_path.name}: {str(exc)}")
                 except Exception as exc:
                     self._log(f"❌ {file_path.name}: {type(exc).__name__}: {str(exc)}")
+                    logger.exception(f"Conversion error: {exc}")
 
-            self._log("✅ Conversion complete")
+            if not self.cancel_event.is_set():
+                self._log("✅ All conversions complete")
+                self.progress_bar.set(1.0)
 
         except Exception as exc:
             self._log(f"❌ Fatal error: {exc}")
@@ -336,6 +387,7 @@ class MainWindow:
         finally:
             self.is_converting = False
             self.convert_button.configure(state="normal")
+            self.cancel_button.configure(state="disabled")
             gc.collect()
 
     def _log(self, message: str) -> None:
@@ -370,6 +422,7 @@ class MainWindow:
             if self.is_converting:
                 if not messagebox.askyesno("Confirm", "Conversion in progress. Cancel and exit?"):
                     return
+                self.cancel_event.set()
                 self.is_converting = False
                 if self.conversion_thread and self.conversion_thread.is_alive():
                     self.conversion_thread.join(timeout=5)
