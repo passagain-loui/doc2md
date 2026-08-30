@@ -1,5 +1,8 @@
 # README.md
 
+`````````````````````````````text
+# README.md
+
 ````````````````````````````text
 # README.md
 
@@ -77,6 +80,57 @@
 
 ```text
 # doc2md v1.0.27
+
+## Performance (measured, not estimated)
+
+Measured on an RTX 4060 Laptop GPU with the `small` model, transcribing a real
+27-minute Thai meeting recording (38 MB MP3):
+
+| Mode | Time for 27 min of audio | Throughput |
+|---|---|---|
+| GPU (CUDA, float16) | **10.7 min** | ~2.5x realtime |
+| CPU (int8, 20 threads) | ~2 hours | ~0.4x realtime |
+
+Speech is much heavier than tone-based synthetic benchmarks: the same GPU hits
+10.65x on synthetic audio but ~2.5x on real speech, because every spoken segment
+must actually be decoded. Plan for roughly **40% of the recording's length** on GPU.
+
+Progress is reported as position plus an estimate, so a long job is legible from
+the start:
+
+```
+Audio length: 27:01 - transcribing...
+21% (5:40 / 27:01) ~9:12 left
+```
+
+### Checking whether the GPU is really being used
+
+Task Manager's default GPU panes (3D, Copy, Video Encode, Video Decode) **do not
+show CUDA compute**, so an active transcription looks idle at ~1%. Either:
+
+- switch a pane's dropdown to **Cuda**, or
+- run `nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv`
+
+A healthy run on this hardware shows 26-71% GPU utilisation and 1.5-1.8 GB of
+VRAM in use. The status log also states the active mode on every conversion:
+
+```
+Acceleration: GPU/CUDA (1 device, float16)
+```
+
+### Known speed levers (under evaluation, not yet enabled)
+
+Two options are available in the installed faster-whisper 1.2.1 but are not used
+by doc2md yet, pending measurement on real recordings:
+
+- **`vad_filter`** - currently off, so silence in a recording is transcribed like
+  speech. Meeting audio contains a lot of it.
+- **`BatchedInferencePipeline`** - processes several chunks per GPU pass. GPU
+  utilisation during transcription peaks around 71%, so there is headroom.
+
+Neither is enabled until the speed gain and any effect on transcript
+completeness have been measured side by side. See CHANGELOG for status.
+
 
 ## Version 1.0.27 (2026-08-30) - PROGRESS DISPLAY & FFMPEG BUNDLING
 
@@ -289,3 +343,4 @@ GPU Pack to those users.
 ``````````````````````````
 ```````````````````````````
 ````````````````````````````
+`````````````````````````````

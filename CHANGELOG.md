@@ -1,5 +1,8 @@
 # CHANGELOG.md
 
+`````````````````````````````text
+# CHANGELOG.md
+
 ````````````````````````````text
 # CHANGELOG.md
 
@@ -103,6 +106,24 @@
 Task Manager's default GPU panes (3D, Copy, Video Encode, Video Decode) do not show CUDA compute,
 so an active transcription can appear to sit near 0%. Switch a pane's dropdown to **Cuda**, or
 run `nvidia-smi`, to see the real load.
+
+### In progress: transcription speed
+
+Verified baseline: 27 minutes of real Thai meeting audio transcribes in 639s
+(10.7 min) on an RTX 4060 Laptop with the `small` model - about 2.5x realtime.
+GPU utilisation during the run held at 26-71%, so the card is not saturated.
+
+Two levers exist in the installed faster-whisper 1.2.1 and are **not yet enabled**:
+
+- `vad_filter` (currently `False`) - silence is transcribed like speech, and
+  meeting recordings contain a lot of it.
+- `BatchedInferencePipeline` - batches chunks per GPU pass, targeting the
+  utilisation headroom above.
+
+Both are being benchmarked against a 5-minute slice of the same real recording,
+measuring wall time **and** transcript character count together, so a speedup
+that silently drops content is not mistaken for a win. Nothing ships until those
+numbers exist; defaults are unchanged in this release.
 
 ## [1.0.26] (2026-08-30) - GPU ACCELERATION ACTUALLY WORKS
 
@@ -336,3 +357,4 @@ not a configuration change.
 ``````````````````````````
 ```````````````````````````
 ````````````````````````````
+`````````````````````````````
