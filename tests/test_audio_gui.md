@@ -71,13 +71,20 @@ class TestAudioEngineStructure:
         assert FileKind.AUDIO in engine.supported_kinds
         assert FileKind.VIDEO in engine.supported_kinds
 
-    def test_audio_model_cache_dir(self):
+    def test_model_cache_is_left_to_huggingface(self):
+        """doc2md must not override download_root.
+
+        A private cache directory would force every user who already has these
+        models locally to re-download hundreds of megabytes. The previous test
+        here only asserted that a MODEL_CACHE_DIR constant existed - it was
+        never passed to WhisperModel, so it verified nothing.
+        """
+        import inspect
+
         from doc2md.engine.audio_engine import AudioEngine
 
-        engine = AudioEngine()
-        cache_dir = engine.MODEL_CACHE_DIR
-        assert "doc2md" in str(cache_dir).lower()
-        assert "models" in str(cache_dir).lower()
+        source = inspect.getsource(AudioEngine._load_model)
+        assert "download_root" not in source
 
     def test_audio_model_sizes_available(self):
         from doc2md.engine.audio_engine import AudioEngine

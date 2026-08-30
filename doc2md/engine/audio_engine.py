@@ -25,11 +25,20 @@ def _get_ffmpeg_path() -> str:
     """Resolve FFmpeg executable path with preference for bundled PyInstaller version."""
     # Priority 1: PyInstaller bundle (_MEIPASS) - HIGHEST PRIORITY FOR STANDALONE
     if getattr(sys, 'frozen', False):
-        base_path = sys._MEIPASS
-        ffmpeg_exe = os.path.join(base_path, "ffmpeg.exe")
-        if os.path.exists(ffmpeg_exe):
+        base_path = Path(sys._MEIPASS)
+        ffmpeg_exe = base_path / "ffmpeg.exe"
+        if ffmpeg_exe.exists():
             logger.info(f"✓ Using EMBEDDED FFmpeg from PyInstaller bundle: {ffmpeg_exe}")
-            return ffmpeg_exe
+            return str(ffmpeg_exe)
+
+        # Tolerate a differently-named bundled binary. imageio_ffmpeg ships
+        # "ffmpeg-win-x86_64-v7.1.exe" and PyInstaller preserves basenames, so a
+        # build that forgets to stage it as ffmpeg.exe would otherwise fall all
+        # the way through to a system lookup that may not exist on the target.
+        for candidate in sorted(base_path.glob("ffmpeg*.exe")):
+            logger.info(f"✓ Using EMBEDDED FFmpeg from PyInstaller bundle: {candidate}")
+            return str(candidate)
+
         logger.warning(f"PyInstaller bundle path checked but FFmpeg not found: {base_path}")
 
     # Priority 2: Current execution directory (fallback for standalone)
@@ -170,7 +179,10 @@ class AudioEngine(BaseEngine):
     _model_cache: dict[str, Any] = {}
     _model_size = "small"
     MODEL_SIZES = ("tiny", "base", "small", "medium", "large-v3")
-    MODEL_CACHE_DIR = Path.home() / ".cache" / "doc2md" / "models"
+    # Models are cached by huggingface_hub in its own standard location
+    # (~/.cache/huggingface/hub). doc2md deliberately does not override
+    # download_root: a private cache would force a fresh multi-hundred-MB
+    # download for every user who already has these models locally.
 
     # Language mapping from GUI labels to ISO 639-1 codes
     LANGUAGE_CODES = {
@@ -249,6 +261,19 @@ class AudioEngine(BaseEngine):
                     model_size = self._model_size
 
                 duration = self._get_duration(source)
+
+                # Report the media length before the slow part starts. A long
+                # recording otherwise sits at "0%" for minutes - the progress
+                # percentage alone cannot distinguish "27 minutes of audio,
+                # working normally" from "hung", which is exactly how it reads
+                # to a user watching the bar.
+                duration_callback = options.get("duration_callback")
+                if duration_callback and duration > 0:
+                    try:
+                        duration_callback(duration)
+                    except Exception:
+                        pass
+
                 model = self._load_model(model_size, options.get("download_progress"))
 
                 # Speed optimization: faster-whisper defaults beam_size to 5,
@@ -486,8 +511,6 @@ class AudioEngine(BaseEngine):
                 raise ConversionError(
                     "faster-whisper is required. Install via: pip install 'doc2md[audio]'"
                 )
-
-            self.MODEL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
             # Auto hardware detection: prefer CUDA (float16) when CTranslate2
             # reports a usable device, otherwise CPU (int8) across all cores.

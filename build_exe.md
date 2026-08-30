@@ -24,6 +24,7 @@ ENTRY = ROOT / "doc2md_exe_entry.py"
 DIST_EXE = ROOT / "dist" / "doc2md.exe"
 BUILD_DIR = ROOT / "build"
 WORKPATH = ROOT / "build" / "pyinstaller"
+STAGING_DIR = ROOT / "build" / "staging"
 
 HIDDEN_IMPORTS = [
     "pymupdf",
@@ -64,7 +65,7 @@ def collect_tkinter_resources() -> list[str]:
             for hidden in hiddenimports:
                 args.extend(["--hidden-import", hidden])
 
-        print("[build_exe] ✓ tkinterdnd2 native binaries and data files collected")
+        print("[build_exe] OK: tkinterdnd2 native binaries and data files collected")
 
     except Exception as exc:
         print(f"[build_exe] resource collection skipped: {exc}")
@@ -97,7 +98,7 @@ def bundle_ffmpeg_binaries() -> list[str]:
         ffprobe_exe = Path(ffmpeg_path).parent / "ffprobe.exe"
         ffprobe_path = str(ffprobe_exe) if ffprobe_exe.exists() else None
         if ffmpeg_path and os.path.exists(ffmpeg_path):
-            print(f"[build_exe] ✓ FORCE EMBED FFmpeg via imageio_ffmpeg: {ffmpeg_path}")
+            print(f"[build_exe] OK: FORCE EMBED FFmpeg via imageio_ffmpeg: {ffmpeg_path}")
         else:
             ffmpeg_path = None
     except (ImportError, Exception) as exc:
@@ -109,7 +110,7 @@ def bundle_ffmpeg_binaries() -> list[str]:
             ffmpeg_path = shutil.which("ffmpeg")
             ffprobe_path = shutil.which("ffprobe")
             if ffmpeg_path and os.path.exists(ffmpeg_path):
-                print(f"[build_exe] ✓ FORCE EMBED FFmpeg from system PATH: {ffmpeg_path}")
+                print(f"[build_exe] OK: FORCE EMBED FFmpeg from system PATH: {ffmpeg_path}")
             else:
                 ffmpeg_path = None
         except Exception:
@@ -117,13 +118,26 @@ def bundle_ffmpeg_binaries() -> list[str]:
 
     # Mandatory bundling - error if not found
     if ffmpeg_path and os.path.exists(ffmpeg_path):
-        args.extend(["--add-binary", f"{ffmpeg_path};."])
-        print(f"[build_exe] 🎯 Bundled FFmpeg executable ({os.path.getsize(ffmpeg_path) / 1024 / 1024:.1f} MB)")
+        # Stage under the exact names the runtime looks for. imageio_ffmpeg
+        # ships its binary as "ffmpeg-win-x86_64-v7.1.exe", and --add-binary
+        # preserves the basename, so bundling it directly left _MEIPASS without
+        # an "ffmpeg.exe" - the runtime's highest-priority lookup always missed
+        # and silently fell through to slower fallbacks.
+        staged = STAGING_DIR
+        staged.mkdir(parents=True, exist_ok=True)
+
+        staged_ffmpeg = staged / "ffmpeg.exe"
+        shutil.copy2(ffmpeg_path, staged_ffmpeg)
+        args.extend(["--add-binary", f"{staged_ffmpeg};."])
+        print(f"[build_exe] Bundled FFmpeg as ffmpeg.exe ({staged_ffmpeg.stat().st_size / 1024 / 1024:.1f} MB)")
+
         if ffprobe_path and os.path.exists(ffprobe_path):
-            args.extend(["--add-binary", f"{ffprobe_path};."])
-            print(f"[build_exe] 🎯 Bundled ffprobe executable ({os.path.getsize(ffprobe_path) / 1024 / 1024:.1f} MB)")
+            staged_ffprobe = staged / "ffprobe.exe"
+            shutil.copy2(ffprobe_path, staged_ffprobe)
+            args.extend(["--add-binary", f"{staged_ffprobe};."])
+            print(f"[build_exe] Bundled ffprobe as ffprobe.exe ({staged_ffprobe.stat().st_size / 1024 / 1024:.1f} MB)")
     else:
-        print("[build_exe] ❌ CRITICAL: FFmpeg not found!")
+        print("[build_exe] ERROR: CRITICAL: FFmpeg not found!")
         print("[build_exe] Install with: pip install imageio-ffmpeg")
         raise RuntimeError("FFmpeg binary is required for bundle but not found")
 
@@ -139,6 +153,7 @@ def build() -> int:
         DIST_EXE,
         ROOT / "dist" / "doc2md.pkg",
         WORKPATH,
+        STAGING_DIR,
         BUILD_DIR / "doc2md.spec",
     ]
     for path in stale:

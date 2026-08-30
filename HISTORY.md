@@ -1,5 +1,11 @@
 # HISTORY.md
 
+````````````````````````````text
+# HISTORY.md
+
+```````````````````````````text
+# HISTORY.md
+
 ``````````````````````````text
 # HISTORY.md
 
@@ -70,6 +76,34 @@
 # HISTORY.md
 
 ```text
+## [1.0.27] (2026-08-30) - LONG-RECORDING PROGRESS AND FFMPEG BUNDLING
+
+- **UX FIX**: A long recording looked frozen. Transcribing a 27-minute file showed "0%" for the
+ first half-minute and "1%" for a while after, because one percent of that file is 16 seconds
+ of audio - the display could not distinguish "working normally" from "hung". Verified on a
+ real 27-minute meeting recording: GPU utilisation held at 26-71% with 1.5-1.8 GB of VRAM in
+ use the whole time, so the run was healthy; only the readout was uninformative.
+ Progress now shows position and an estimate - `21% (5:40 / 27:01) ~9:12 left` - and the
+ media length is logged before transcription starts.
+- **BUILD FIX**: The bundled FFmpeg was never found inside the packaged exe. `--add-binary`
+ preserves the source basename, so imageio_ffmpeg's `ffmpeg-win-x86_64-v7.1.exe` landed in
+ `_MEIPASS` under that name while the runtime looked for `ffmpeg.exe`; the highest-priority
+ lookup always missed and fell through to slower fallbacks that may not exist on a user's
+ machine at all. It is now staged as `ffmpeg.exe` (and `ffprobe.exe`), and the runtime also
+ tolerates a differently-named `ffmpeg*.exe` in the bundle.
+- **Cleanup**: Removed `MODEL_CACHE_DIR`, which was created on every model load but never
+ passed to `WhisperModel` - models have always been cached by huggingface_hub. Overriding
+ `download_root` is deliberately avoided so users are not forced to re-download models they
+ already have.
+- **Tests**: Replaced two tests that only asserted the unused `MODEL_CACHE_DIR` constant existed
+ with ones that check real behaviour (cache reuse, and that `download_root` stays unset), plus
+ coverage for the new time formatting.
+
+### Note on reading GPU usage in Task Manager
+Task Manager's default GPU panes (3D, Copy, Video Encode, Video Decode) do not show CUDA compute,
+so an active transcription can appear to sit near 0%. Switch a pane's dropdown to **Cuda**, or
+run `nvidia-smi`, to see the real load.
+
 ## [1.0.26] (2026-08-30)
 
 - **CRITICAL**: GPU acceleration never actually engaged - `_has_gpu()` asked PyTorch, but
@@ -251,3 +285,5 @@
 ````````````````````````
 `````````````````````````
 ``````````````````````````
+```````````````````````````
+````````````````````````````

@@ -121,17 +121,22 @@ class TestAudioEngineResilience:
             # Expected for corrupted files
             pass
 
-    def test_audio_model_cache_directory_creation(self, tmp_path, monkeypatch):
-        """Verify model cache directory is created atomically."""
+    def test_model_load_reuses_cached_instance(self):
+        """A second request for the same size must not rebuild the model.
+
+        Replaces a test that asserted an unused MODEL_CACHE_DIR constant was
+        not None - it exercised no behaviour at all.
+        """
         from doc2md.engine.audio_engine import AudioEngine
 
-        # Temporary cache dir
-        fake_cache = tmp_path / "models"
-        monkeypatch.setattr(AudioEngine, "MODEL_CACHE_DIR", fake_cache)
-
         engine = AudioEngine()
-        # Creating engine should not fail even if cache dir doesn't exist
-        assert engine.MODEL_CACHE_DIR is not None
+        sentinel = object()
+        AudioEngine._model_cache.clear()
+        AudioEngine._model_cache["small"] = sentinel
+        try:
+            assert engine._load_model("small") is sentinel
+        finally:
+            AudioEngine._model_cache.clear()
 
     def test_audio_engine_memory_cleanup_after_conversion(self):
         """Verify memory buffers are freed after transcription."""

@@ -105,4 +105,21 @@ def test_picklable_options_strips_unpicklable_values():
         "pdf_ocr_fallback": True,
     }
     pickle.dumps(safe)  # must not raise
+
+
+@pytest.mark.parametrize(
+    "seconds,expected",
+    [
+        (0, "0:00"),
+        (5, "0:05"),
+        (65, "1:05"),
+        (1621.7, "27:01"),
+        (3600, "1:00:00"),
+        (3725, "1:02:05"),
+        (-10, "0:00"),
+    ],
+)
+def test_format_clock(seconds, expected):
+    """Long recordings must read as time, not a percentage that barely moves."""
+    assert MainWindow._format_clock(seconds) == expected
 ```

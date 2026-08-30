@@ -1,5 +1,11 @@
 # README.md
 
+````````````````````````````text
+# README.md
+
+```````````````````````````text
+# README.md
+
 ``````````````````````````text
 # README.md
 
@@ -70,7 +76,27 @@
 # README.md
 
 ```text
-# doc2md v1.0.26
+# doc2md v1.0.27
+
+## Version 1.0.27 (2026-08-30) - PROGRESS DISPLAY & FFMPEG BUNDLING
+
+### Long recordings no longer look frozen
+One percent of a 27-minute recording is 16 seconds of audio, so the bar sat on "0%" and then
+"1%" for a long time while the GPU was working normally. Progress now reads
+`21% (5:40 / 27:01) ~9:12 left`, and the media length is logged before transcription starts.
+
+Expect roughly **2x realtime on GPU** for speech with the `small` model - a 27-minute meeting
+takes about 12 minutes.
+
+### Reading GPU usage correctly
+Task Manager's default GPU panes (3D, Copy, Video Encode, Video Decode) **do not show CUDA
+compute**, so an active transcription can look idle at ~1%. Switch a pane's dropdown to **Cuda**,
+or run `nvidia-smi`, to see the real load.
+
+### Fixed
+- Bundled FFmpeg was never found inside the packaged exe (`--add-binary` kept imageio_ffmpeg's
+ original filename, so the runtime's `ffmpeg.exe` lookup always missed)
+- Removed a model-cache constant that was created on every load but never used
 
 ## Version 1.0.26 (2026-08-30) - GPU ACCELERATION
 
@@ -85,8 +111,8 @@ installer** so the main download stays at 233 MB:
 
 | Download | Size | Needed for |
 |---|---|---|
-| `doc2md_Setup_v1.0.26.exe` | 233 MB | Everyone |
-| `doc2md_GPU_Pack_v1.0.26.exe` | 758 MB | NVIDIA GPU acceleration only |
+| `doc2md_Setup_v1.0.27.exe` | 233 MB | Everyone |
+| `doc2md_GPU_Pack_v1.0.27.exe` | 758 MB | NVIDIA GPU acceleration only |
 
 Install the GPU Pack and doc2md picks it up automatically - no configuration. The status log
 tells you which mode is active on every conversion.
@@ -261,3 +287,5 @@ GPU Pack to those users.
 ````````````````````````
 `````````````````````````
 ``````````````````````````
+```````````````````````````
+````````````````````````````

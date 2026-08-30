@@ -2,5 +2,5 @@
 
 ```toml
 [tool.poetry]
-version = "1.0.26"
+version = "1.0.27"
 ```

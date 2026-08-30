@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import threading
+import time
 import traceback
 from pathlib import Path
 from typing import Optional
@@ -72,6 +73,8 @@ class MainWindow:
         self.cancel_event = threading.Event()
         self.conversion_thread: Optional[threading.Thread] = None
         self.selected_files: list[Path] = []
+        self._media_duration: float = 0.0
+        self._stage_started: float = 0.0
 
         # UI variables
         self.audio_model_var = ctk.StringVar(value="small")
@@ -480,6 +483,12 @@ class MainWindow:
         except Exception as exc:
             logger.warning(f"UI update skipped: {exc}")
 
+    def _on_duration(self, seconds: float) -> None:
+        """Record media length so progress can be shown as time, not just a %."""
+        self._media_duration = seconds
+        self._stage_started = time.monotonic()
+        self._log(f"🎵 Audio length: {self._format_clock(seconds)} - transcribing...")
+
     def _update_progress(self, percent: int) -> None:
         """Update progress bar with percentage from audio transcription callback."""
         try:
@@ -487,11 +496,35 @@ class MainWindow:
         except (TypeError, ValueError):
             return
 
+        label = f"{pct}%"
+
+        # For long recordings the percentage crawls: a 27-minute file sits on
+        # "0%" for the first half-minute of work. Showing transcribed position
+        # against total length, plus an ETA, makes it obvious the run is alive.
+        duration = self._media_duration
+        if duration > 0:
+            position = duration * pct / 100.0
+            label = f"{pct}%  ({self._format_clock(position)} / {self._format_clock(duration)})"
+
+            elapsed = time.monotonic() - self._stage_started
+            if pct >= 1 and elapsed > 5:
+                remaining = elapsed * (100 - pct) / pct
+                label += f"  ~{self._format_clock(remaining)} left"
+
         def apply() -> None:
             self.progress_bar.set(pct / 100.0)
-            self.progress_percent_label.configure(text=f"{pct}%")
+            self.progress_percent_label.configure(text=label)
 
         self._ui(apply)
+
+    @staticmethod
+    def _format_clock(seconds: float) -> str:
+        seconds = max(0, int(seconds))
+        hours, rest = divmod(seconds, 3600)
+        minutes, secs = divmod(rest, 60)
+        if hours:
+            return f"{hours}:{minutes:02d}:{secs:02d}"
+        return f"{minutes}:{secs:02d}"
 
     def _conversion_worker(self) -> None:
         """Background conversion worker."""
@@ -518,6 +551,7 @@ class MainWindow:
                 "language": self.language_var.get(),
                 "pdf_ocr_fallback": self.ocr_enabled_var.get(),
                 "progress_callback": self._update_progress,
+                "duration_callback": self._on_duration,
                 "abort_event": self.cancel_event,
             })
 
@@ -527,6 +561,8 @@ class MainWindow:
                     break
 
                 try:
+                    self._media_duration = 0.0
+                    self._stage_started = time.monotonic()
                     self._log(f"📄 File: {file_path.name}")
                     self._log(f"Processing: {file_path.name}...")
 
