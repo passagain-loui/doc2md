@@ -70,6 +70,7 @@ class MainWindow:
         self.output_format_var = ctk.StringVar(value="Markdown (.md)")
         self.ocr_enabled_var = ctk.BooleanVar(value=False)
         self.copy_clipboard_var = ctk.BooleanVar(value=True)
+        self.output_dir_var = ctk.StringVar(value=str(Path.home() / "Documents"))
 
         self._setup_ui()
         self._setup_drag_drop()
@@ -86,41 +87,51 @@ class MainWindow:
                             font=("Arial", 22, "bold"))
         title.pack(pady=(0, 20))
 
-        # Settings panel
+        # Settings panel - Grid-based layout to prevent text overlap
         settings_frame = ctk.CTkFrame(main_frame, fg_color=("#f5f5f5", "#2a2a2a"))
         settings_frame.pack(fill="x", padx=5, pady=(0, 15))
 
-        # Model Selection with Status
-        model_frame = ctk.CTkFrame(settings_frame, fg_color="transparent")
-        model_frame.pack(side="left", fill="x", expand=True, padx=10, pady=10)
+        # Row 1: Model, Language, Format
+        row1_frame = ctk.CTkFrame(settings_frame, fg_color="transparent")
+        row1_frame.pack(fill="x", padx=10, pady=(10, 5))
 
-        model_label = ctk.CTkLabel(model_frame, text="Audio Model:", font=("Arial", 11, "bold"))
+        model_label = ctk.CTkLabel(row1_frame, text="Audio Model:", font=("Arial", 11, "bold"))
         model_label.pack(side="left", padx=5)
 
-        model_combo = ctk.CTkComboBox(model_frame, values=self.AUDIO_MODELS,
+        model_combo = ctk.CTkComboBox(row1_frame, values=self.AUDIO_MODELS,
                                       variable=self.audio_model_var, width=100, state="readonly")
         model_combo.pack(side="left", padx=5)
 
-        # Model status indicator
-        self.model_status_label = ctk.CTkLabel(model_frame, text="Ready",
+        self.model_status_label = ctk.CTkLabel(row1_frame, text="Ready",
                                               text_color=("#10b981", "#34d399"), font=("Arial", 10))
-        self.model_status_label.pack(side="left", padx=10)
+        self.model_status_label.pack(side="left", padx=15)
 
-        # Language Selection
-        lang_label = ctk.CTkLabel(settings_frame, text="Language:", font=("Arial", 11, "bold"))
-        lang_label.pack(side="left", padx=5, pady=10)
+        lang_label = ctk.CTkLabel(row1_frame, text="Language:", font=("Arial", 11, "bold"))
+        lang_label.pack(side="left", padx=5)
 
-        lang_combo = ctk.CTkComboBox(settings_frame, values=self.LANGUAGES,
+        lang_combo = ctk.CTkComboBox(row1_frame, values=self.LANGUAGES,
                                      variable=self.language_var, width=120, state="readonly")
         lang_combo.pack(side="left", padx=5)
 
-        # Output Format
-        format_label = ctk.CTkLabel(settings_frame, text="Format:", font=("Arial", 11, "bold"))
+        format_label = ctk.CTkLabel(row1_frame, text="Format:", font=("Arial", 11, "bold"))
         format_label.pack(side="left", padx=5)
 
-        format_combo = ctk.CTkComboBox(settings_frame, values=self.OUTPUT_FORMATS,
+        format_combo = ctk.CTkComboBox(row1_frame, values=self.OUTPUT_FORMATS,
                                        variable=self.output_format_var, width=120, state="readonly")
         format_combo.pack(side="left", padx=5)
+
+        # Row 2: Output Directory
+        row2_frame = ctk.CTkFrame(settings_frame, fg_color="transparent")
+        row2_frame.pack(fill="x", padx=10, pady=(5, 10))
+
+        output_label = ctk.CTkLabel(row2_frame, text="Output Folder:", font=("Arial", 11, "bold"))
+        output_label.pack(side="left", padx=5)
+
+        self.output_dir_entry = ctk.CTkEntry(row2_frame, textvariable=self.output_dir_var, width=350)
+        self.output_dir_entry.pack(side="left", padx=5, fill="x", expand=True)
+
+        browse_output_btn = ctk.CTkButton(row2_frame, text="Browse", command=self._browse_output_dir, width=80)
+        browse_output_btn.pack(side="left", padx=5)
 
         # Advanced settings frame
         adv_frame = ctk.CTkFrame(main_frame, fg_color=("#f5f5f5", "#2a2a2a"))
@@ -132,7 +143,7 @@ class MainWindow:
 
         clip_check = ctk.CTkCheckBox(adv_frame, text="Copy to Clipboard",
                                     variable=self.copy_clipboard_var, font=("Arial", 10))
-        clip_check.pack(side="left", padx=5)
+        clip_check.pack(side="left", padx=15)
 
         # Drop zone with rounded corners
         drop_frame = ctk.CTkFrame(main_frame, fg_color=("#e8e8e8", "#2a2a2a"), border_width=2)
@@ -170,7 +181,7 @@ class MainWindow:
         self.convert_button.pack(side="left", padx=5)
 
         # Cancel button (hidden by default, red)
-        self.cancel_button = ctk.CTkButton(button_frame, text="Stop/Cancel",
+        self.cancel_button = ctk.CTkButton(button_frame, text="Cancel",
                                           command=self._cancel_conversion, state="disabled",
                                           width=120, height=38, fg_color="#DC2626", hover_color="#991b1b",
                                           font=("Arial", 11, "bold"))
@@ -193,18 +204,25 @@ class MainWindow:
         self.log_text.configure(state="disabled")
 
     def _setup_drag_drop(self) -> None:
-        """Setup DnD with proper event handling on entire drop frame."""
+        """Setup DnD with robust event handling on entire drop frame and label."""
         if DND_FILES is None:
             logger.warning("TkinterDnD2 not available")
             return
 
         try:
-            # Register on the main drop frame
+            # Register on the main drop frame and its label for complete coverage
             self.drop_zone.drop_target_register(DND_FILES, DND_TEXT)
             self.drop_zone.dnd_bind('<<Drop>>', self._on_drop)
             self.drop_zone.dnd_bind('<<DragEnter>>', self._on_drag_enter)
             self.drop_zone.dnd_bind('<<DragLeave>>', self._on_drag_leave)
-            logger.info("DnD registered successfully on drop_zone frame")
+
+            # Also bind to the label to catch drops on the label itself
+            self.drop_label.drop_target_register(DND_FILES, DND_TEXT)
+            self.drop_label.dnd_bind('<<Drop>>', self._on_drop)
+            self.drop_label.dnd_bind('<<DragEnter>>', self._on_drag_enter)
+            self.drop_label.dnd_bind('<<DragLeave>>', self._on_drag_leave)
+
+            logger.info("DnD registered successfully on drop_zone frame and label")
         except Exception as exc:
             logger.warning(f"DnD setup failed: {exc}")
 
@@ -306,6 +324,17 @@ class MainWindow:
         except Exception as exc:
             self._show_error_dialog("Browse Error", str(exc))
 
+    def _browse_output_dir(self) -> None:
+        """Browse for output directory."""
+        try:
+            current_dir = self.output_dir_var.get()
+            selected_dir = filedialog.askdirectory(title="Select Output Folder", initialdir=current_dir)
+            if selected_dir:
+                self.output_dir_var.set(selected_dir)
+                self._log(f"📁 Output folder: {selected_dir}")
+        except Exception as exc:
+            self._show_error_dialog("Browse Error", str(exc))
+
     def _start_conversion(self) -> None:
         """Start conversion in background thread."""
         if not self.selected_files or self.is_converting:
@@ -353,11 +382,14 @@ class MainWindow:
                     result = self.converter.convert_file(file_path)
 
                     if result.success:
-                        # Determine output format
+                        # Determine output format and directory
+                        output_dir = Path(self.output_dir_var.get())
+                        output_dir.mkdir(parents=True, exist_ok=True)
+
                         if self.output_format_var.get() == "Plain Text (.txt)":
-                            output_path = file_path.with_suffix(".txt")
+                            output_path = output_dir / file_path.with_suffix(".txt").name
                         else:
-                            output_path = file_path.with_suffix(".md")
+                            output_path = output_dir / file_path.with_suffix(".md").name
 
                         output_path.write_text(result.markdown, encoding="utf-8")
                         self._log(f"✅ {file_path.name} → {output_path.name}")

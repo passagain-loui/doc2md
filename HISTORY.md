@@ -1,5 +1,8 @@
 # HISTORY.md
 
+```````````text
+# HISTORY.md
+
 ``````````text
 # HISTORY.md
 
@@ -22,6 +25,15 @@
 # HISTORY.md
 
 ```text
+## [1.0.17] (2026-08-30)
+
+- **Fix**: Drag & Drop re-implemented with dual binding (drop_zone frame + label) for complete coverage
+- **Feature**: Output Directory Selector - users can now explicitly choose where converted files are saved
+- **Feature**: Browse Output Folder button for easy directory selection
+- **Fix**: Text overlap in settings panel - restructured UI layout from side-packing to row-based frames with proper spacing
+- **Enhancement**: Improved padding and visual separation between UI controls (padx increased from 5 to 15)
+- **Enhancement**: Cancel button label simplified from "Stop/Cancel" to "Cancel" for clarity
+
 ## [1.0.16] (2026-08-30)
 
 - **Fix**: Remove invalid `corner_radius` parameter from `.pack()` geometry manager calls
@@ -86,3 +98,4 @@
 ````````
 `````````
 ``````````
+```````````
