@@ -85,7 +85,7 @@ class MainWindow:
 
         # Settings panel
         settings_frame = ctk.CTkFrame(main_frame, fg_color=("#f5f5f5", "#2a2a2a"))
-        settings_frame.pack(fill="x", padx=5, pady=(0, 15), corner_radius=12)
+        settings_frame.pack(fill="x", padx=5, pady=(0, 15))
 
         # Model Selection with Status
         model_frame = ctk.CTkFrame(settings_frame, fg_color="transparent")
@@ -121,7 +121,7 @@ class MainWindow:
 
         # Advanced settings frame
         adv_frame = ctk.CTkFrame(main_frame, fg_color=("#f5f5f5", "#2a2a2a"))
-        adv_frame.pack(fill="x", padx=5, pady=(0, 15), corner_radius=12)
+        adv_frame.pack(fill="x", padx=5, pady=(0, 15))
 
         ocr_check = ctk.CTkCheckBox(adv_frame, text="Enable PDF OCR (Slower)",
                                    variable=self.ocr_enabled_var, font=("Arial", 10))
@@ -133,7 +133,7 @@ class MainWindow:
 
         # Drop zone with rounded corners
         drop_frame = ctk.CTkFrame(main_frame, fg_color=("#e8e8e8", "#2a2a2a"), border_width=2)
-        drop_frame.pack(fill="both", expand=True, padx=5, pady=(0, 15), corner_radius=12)
+        drop_frame.pack(fill="both", expand=True, padx=5, pady=(0, 15))
 
         drop_label = ctk.CTkLabel(drop_frame, text="📁 Drag & drop files here\nor click to browse",
                                  font=("Arial", 16, "bold"), text_color=("gray50", "gray70"))
@@ -175,7 +175,7 @@ class MainWindow:
 
         # Status log
         log_frame = ctk.CTkFrame(main_frame)
-        log_frame.pack(fill="both", expand=True, padx=5, corner_radius=12)
+        log_frame.pack(fill="both", expand=True, padx=5)
 
         log_label = ctk.CTkLabel(log_frame, text="Status Log:", font=("Arial", 12, "bold"))
         log_label.pack(anchor="w", padx=10, pady=(10, 5))

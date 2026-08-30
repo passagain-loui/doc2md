@@ -1,5 +1,8 @@
 # HISTORY.md
 
+``````````text
+# HISTORY.md
+
 `````````text
 # HISTORY.md
 
@@ -19,6 +22,12 @@
 # HISTORY.md
 
 ```text
+## [1.0.16] (2026-08-30)
+
+- **Fix**: Remove invalid `corner_radius` parameter from `.pack()` geometry manager calls
+- **Fix**: CustomTkinter `corner_radius` only valid in widget constructors, not layout methods
+- **Robustness**: GUI now displays without layout parameter errors
+
 ## [1.0.15] (2026-08-30)
 
 - **Fix**: Converter.convert_file() method signature - removed invalid positional `options` argument
@@ -76,3 +85,4 @@
 ```````
 ````````
 `````````
+``````````
