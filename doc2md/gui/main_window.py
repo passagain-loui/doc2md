@@ -498,17 +498,17 @@ class MainWindow:
         try:
             self._log("🔄 Starting conversion...")
 
-            # Check GPU availability
+            # Report the acceleration the audio engine will actually use. Asked
+            # of the engine itself so the log can never disagree with reality.
             try:
-                import torch
-                if torch.cuda.is_available():
-                    self._log(f"🚀 GPU Acceleration: CUDA enabled ({torch.cuda.get_device_name(0)})")
-                else:
-                    self._log(f"🔧 GPU not available - using CPU ({os.cpu_count() or 4} threads)")
-            except ImportError:
-                self._log(f"🔧 GPU support not installed - using CPU ({os.cpu_count() or 4} threads)")
+                from doc2md.engine.audio_engine import AudioEngine
+
+                self._log(f"⚙️ Acceleration: {AudioEngine.describe_device()}")
+                hint = AudioEngine.acceleration_hint()
+                if hint:
+                    self._log(f"💡 {hint}")
             except Exception as e:
-                self._log(f"⚠️ GPU check skipped: {type(e).__name__}: {e}")
+                self._log(f"⚠️ Acceleration check skipped: {type(e).__name__}: {e}")
 
             # Update converter options with language selection and progress callback
             # for audio transcription. abort_event lets the engine stop mid-file

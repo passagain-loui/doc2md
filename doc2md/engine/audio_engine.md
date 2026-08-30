@@ -69,6 +69,101 @@ def _get_ffmpeg_path() -> str:
     return "ffmpeg"  # Last resort - let ffmpeg-python try to find it
 
 
+_CUDA_DLL_DIRS_REGISTERED = False
+
+# Components the GPU pack ships, in the layout both the pack and the
+# ``nvidia-*-cu12`` wheels use: <root>/<component>/bin/*.dll
+CUDA_COMPONENTS = ("cublas", "cudnn", "cuda_runtime", "cuda_nvrtc")
+
+GPU_PACK_HINT = (
+    "GPU acceleration is available for NVIDIA cards but the CUDA runtime is not "
+    "installed. Install the doc2md GPU Pack to enable it."
+)
+
+
+def cuda_search_roots() -> list[Path]:
+    """Directories that may contain a CUDA runtime, most specific first.
+
+    The runtime is deliberately not bundled in the main installer: it is ~2 GB
+    and only benefits NVIDIA users, so it ships as a separate optional GPU pack
+    that lands in one of these locations.
+    """
+    roots: list[Path] = []
+
+    override = os.environ.get("DOC2MD_CUDA_DIR")
+    if override:
+        roots.append(Path(override))
+
+    # GPU pack install location (per-user, matches the main app's install root).
+    local_appdata = os.environ.get("LOCALAPPDATA")
+    if local_appdata:
+        roots.append(Path(local_appdata) / "doc2md" / "cuda")
+
+    # Portable layout: a "cuda" folder sitting next to doc2md.exe.
+    try:
+        roots.append(Path(sys.executable).parent / "cuda")
+    except Exception:
+        pass
+
+    # PyInstaller bundle, for builds that do embed the runtime.
+    if getattr(sys, "frozen", False):
+        roots.append(Path(getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))) / "nvidia")
+
+    # Development environment: the nvidia-*-cu12 wheels.
+    try:
+        import sysconfig
+
+        roots.append(Path(sysconfig.get_paths()["purelib"]) / "nvidia")
+    except Exception:
+        pass
+
+    return roots
+
+
+def _register_cuda_dll_dirs() -> list[str]:
+    """Make the NVIDIA CUDA runtime DLLs discoverable, returning the dirs used.
+
+    CTranslate2's native library loads cuBLAS/cuDNN itself via the ordinary
+    Windows DLL search order, which does not consult ``os.add_dll_directory``
+    for such transitive loads - only PATH. Neither the GPU pack's install
+    directory nor the ``nvidia-*-cu12`` wheel layout
+    (``site-packages/nvidia/<component>/bin``) is on either list, so CUDA
+    initialisation fails with "Library cublas64_12.dll is not found or cannot
+    be loaded" even when the GPU and driver are perfectly healthy.
+
+    Idempotent, and a no-op when no runtime is present (the caller then falls
+    back to CPU).
+    """
+    global _CUDA_DLL_DIRS_REGISTERED
+    if _CUDA_DLL_DIRS_REGISTERED or sys.platform != "win32":
+        return []
+
+    found: list[str] = []
+    for root in cuda_search_roots():
+        for component in CUDA_COMPONENTS:
+            candidate = root / component / "bin"
+            if candidate.is_dir():
+                found.append(str(candidate))
+        if found:
+            # First root that supplies anything wins; mixing runtimes from
+            # different sources risks version skew between cuBLAS and cuDNN.
+            break
+
+    if found:
+        os.environ["PATH"] = os.pathsep.join(found) + os.pathsep + os.environ.get("PATH", "")
+        for directory in found:
+            try:
+                os.add_dll_directory(directory)
+            except (OSError, AttributeError):
+                pass
+        logger.info(f"Registered CUDA runtime from: {Path(found[0]).parent.parent}")
+    else:
+        logger.info("No CUDA runtime found; transcription will use CPU. %s", GPU_PACK_HINT)
+
+    _CUDA_DLL_DIRS_REGISTERED = True
+    return found
+
+
 class AudioEngine(BaseEngine):
     """Transcribe audio/video using faster-whisper with on-demand model downloading."""
 
@@ -397,22 +492,46 @@ class AudioEngine(BaseEngine):
 
             self.MODEL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
-            # Auto Hardware Detection: prefer CUDA (float16) when available,
-            # otherwise fall back to CPU (int8) using all available cores.
-            device = "cuda" if self._has_gpu() else "cpu"
-            compute_type = "float16" if device == "cuda" else "int8"
-            model_kwargs: dict = {"device": device, "compute_type": compute_type}
-            if device == "cpu":
-                model_kwargs["cpu_threads"] = os.cpu_count() or 4
-                logger.info(f"🔧 GPU not available, using CPU with {model_kwargs['cpu_threads']} threads")
-            else:
-                logger.info(f"🚀 GPU/CUDA acceleration enabled - device: {device}, compute_type: {compute_type}")
-            logger.info(f"Loading '{model_size}' model with {model_kwargs}")
+            # Auto hardware detection: prefer CUDA (float16) when CTranslate2
+            # reports a usable device, otherwise CPU (int8) across all cores.
+            # Device availability and successful model construction are two
+            # different things - a driver/cuDNN mismatch only surfaces when the
+            # model is actually built - so a CUDA failure falls back to CPU
+            # instead of failing the whole conversion.
+            attempts: list[dict] = []
+            if self._has_gpu():
+                attempts.append({"device": "cuda", "compute_type": "float16"})
+            attempts.append({
+                "device": "cpu",
+                "compute_type": "int8",
+                "cpu_threads": self._cpu_threads(),
+            })
 
-            model = WhisperModel(model_size, **model_kwargs)
+            last_error: Exception | None = None
+            for model_kwargs in attempts:
+                try:
+                    logger.info(f"Loading '{model_size}' model with {model_kwargs}")
+                    model = WhisperModel(model_size, **model_kwargs)
+                except Exception as exc:
+                    last_error = exc
+                    if model_kwargs["device"] == "cuda":
+                        logger.warning(
+                            f"CUDA model load failed ({type(exc).__name__}: {exc}); "
+                            "falling back to CPU"
+                        )
+                        continue
+                    raise
 
-            self._model_cache[model_size] = model
-            return model
+                if model_kwargs["device"] == "cuda":
+                    logger.info("🚀 GPU/CUDA acceleration active (float16)")
+                else:
+                    logger.info(
+                        f"🔧 Using CPU with {model_kwargs['cpu_threads']} threads (int8)"
+                    )
+                self._model_cache[model_size] = model
+                return model
+
+            raise last_error or RuntimeError("no model backend available")
         except ConversionError:
             raise
         except Exception as e:
@@ -469,18 +588,78 @@ class AudioEngine(BaseEngine):
         except Exception as exc:
             logger.warning(f"Failed to clean up temp audio chunks: {exc}")
 
-    def _has_gpu(self) -> bool:
-        """Check if NVIDIA GPU/CUDA is available for hardware acceleration."""
-        try:
-            import torch
+    @staticmethod
+    def _has_gpu() -> bool:
+        """Report whether CTranslate2 can run this model on a CUDA device.
 
-            return torch.cuda.is_available()
+        Must be asked of CTranslate2, not PyTorch: faster-whisper runs on
+        CTranslate2 and never imports torch. Earlier releases probed
+        ``torch.cuda.is_available()``, but torch is not a dependency of this
+        project and is not installed, so the probe raised ModuleNotFoundError,
+        got swallowed, and pinned every transcription to CPU on machines with
+        a perfectly usable GPU - which is why "GPU Acceleration enabled" never
+        actually took effect.
+        """
+        try:
+            _register_cuda_dll_dirs()
+            import ctranslate2
+
+            if ctranslate2.get_cuda_device_count() <= 0:
+                return False
+            # A visible device is not the same as a loadable backend: without
+            # the cuBLAS/cuDNN runtime the device query still reports 1 and the
+            # failure only appears later, at model construction.
+            return "float16" in ctranslate2.get_supported_compute_types("cuda")
         except Exception as exc:
-            # Broader than ImportError: a present-but-broken CUDA driver can
-            # raise other exceptions from torch.cuda.is_available(); treat
-            # any failure here as "no usable GPU" and fall back to CPU.
-            logger.debug(f"GPU detection failed, falling back to CPU: {exc}")
+            # A present-but-broken CUDA driver can raise from the device query
+            # itself; treat any failure as "no usable GPU".
+            logger.debug(f"CUDA detection failed, using CPU: {exc}")
             return False
+
+    @classmethod
+    def describe_device(cls) -> str:
+        """Human-readable acceleration status for the GUI status log."""
+        if cls._has_gpu():
+            try:
+                import ctranslate2
+
+                count = ctranslate2.get_cuda_device_count()
+                return f"GPU/CUDA ({count} device{'s' if count != 1 else ''}, float16)"
+            except Exception:
+                return "GPU/CUDA (float16)"
+        return f"CPU ({cls._cpu_threads()} threads, int8)"
+
+    @staticmethod
+    def _cpu_threads() -> int:
+        return os.cpu_count() or 4
+
+    @classmethod
+    def acceleration_hint(cls) -> str:
+        """Advice shown when transcription is about to run on CPU.
+
+        Distinguishes the two very different CPU-only cases: an NVIDIA card
+        that merely lacks the CUDA runtime (fixable by installing the GPU pack)
+        versus hardware CTranslate2 cannot use at all. CTranslate2 4.x exposes
+        only `cpu` and `cuda` devices - there is no ROCm, HIP, DirectML or
+        Vulkan backend - so AMD and Intel GPUs are permanently CPU-only and
+        telling those users to install anything would be misleading.
+        """
+        if cls._has_gpu():
+            return ""
+
+        try:
+            import ctranslate2
+
+            if ctranslate2.get_cuda_device_count() > 0:
+                # Driver and device are visible; only the runtime is missing.
+                return GPU_PACK_HINT
+        except Exception:
+            pass
+
+        return (
+            "Running on CPU. GPU acceleration requires an NVIDIA card - "
+            "AMD and Intel GPUs are not supported for transcription."
+        )
 
     def _format_output(
         self, source: Path, duration: float, segments: list, model_size: str,

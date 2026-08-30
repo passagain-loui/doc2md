@@ -1,5 +1,14 @@
 # HISTORY.md
 
+`````````````````````````text
+# HISTORY.md
+
+````````````````````````text
+# HISTORY.md
+
+```````````````````````text
+# HISTORY.md
+
 ``````````````````````text
 # HISTORY.md
 
@@ -58,6 +67,19 @@
 # HISTORY.md
 
 ```text
+## [1.0.26] (2026-08-30)
+
+- **CRITICAL**: GPU acceleration never actually engaged - `_has_gpu()` asked PyTorch, but
+ faster-whisper runs on CTranslate2 and torch was never installed, so the check always
+ returned False. Now asks CTranslate2. Measured 10.65x speedup on an RTX 4060 Laptop.
+- **CRITICAL**: CUDA failed with "cublas64_12.dll not found" even on healthy systems - the
+ `nvidia-*-cu12` wheel DLL directories were never registered for the Windows DLL search order.
+- **Fix**: Detection verifies the float16 backend is loadable, not just that a device exists
+- **Fix**: CUDA -> CPU fallback when model construction fails, instead of failing the conversion
+- **Fix**: GUI acceleration status now sourced from the engine itself
+- **Known limitation**: CTranslate2 supports only `cpu` and `cuda`; AMD and Intel GPUs always
+ run on CPU and would need a different inference engine to accelerate.
+
 ## [1.0.25] (2026-08-30)
 
 - **CRITICAL**: Drag & drop was broken for every file type, not just MP3 - `shlex.split()`
@@ -222,3 +244,6 @@
 ````````````````````
 `````````````````````
 ``````````````````````
+```````````````````````
+````````````````````````
+`````````````````````````

@@ -1,5 +1,14 @@
 # README.md
 
+`````````````````````````text
+# README.md
+
+````````````````````````text
+# README.md
+
+```````````````````````text
+# README.md
+
 ``````````````````````text
 # README.md
 
@@ -58,7 +67,40 @@
 # README.md
 
 ```text
-# doc2md v1.0.25
+# doc2md v1.0.26
+
+## Version 1.0.26 (2026-08-30) - GPU ACCELERATION
+
+### GPU acceleration now actually works
+GPU support never engaged in any previous release: the check asked PyTorch, but transcription
+runs on CTranslate2 and PyTorch was never installed, so the probe failed silently and every
+conversion ran on CPU. Measured **10.65x speedup** on an RTX 4060 Laptop after the fix.
+
+### Optional GPU Pack
+GPU acceleration needs the NVIDIA CUDA runtime (~1.5 GB), which ships as a **separate optional
+installer** so the main download stays at 233 MB:
+
+| Download | Size | Needed for |
+|---|---|---|
+| `doc2md_Setup_v1.0.26.exe` | 233 MB | Everyone |
+| `doc2md_GPU_Pack_v1.0.26.exe` | 758 MB | NVIDIA GPU acceleration only |
+
+Install the GPU Pack and doc2md picks it up automatically - no configuration. The status log
+tells you which mode is active on every conversion.
+
+### GPU support by vendor
+
+| GPU | Supported |
+|---|---|
+| NVIDIA | Yes, with the GPU Pack |
+| AMD | **No** - CPU only |
+| Intel | **No** - CPU only |
+
+CTranslate2 exposes only `cpu` and `cuda` devices; there is no ROCm, DirectML, or Vulkan
+backend. AMD and Intel GPUs cannot be used for transcription and doc2md will not suggest the
+GPU Pack to those users.
+
+## Version 1.0.25
 
 ## Version 1.0.25 (2026-08-30) - DEEP AUDIT
 
@@ -212,3 +254,6 @@
 ````````````````````
 `````````````````````
 ``````````````````````
+```````````````````````
+````````````````````````
+`````````````````````````

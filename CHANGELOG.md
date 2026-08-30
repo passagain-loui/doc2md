@@ -1,5 +1,14 @@
 # CHANGELOG.md
 
+`````````````````````````text
+# CHANGELOG.md
+
+````````````````````````text
+# CHANGELOG.md
+
+```````````````````````text
+# CHANGELOG.md
+
 ``````````````````````text
 # CHANGELOG.md
 
@@ -58,6 +67,52 @@
 # CHANGELOG.md
 
 ```text
+## [1.0.26] (2026-08-30) - GPU ACCELERATION ACTUALLY WORKS
+
+- **CRITICAL FIX**: GPU acceleration never engaged on any machine. `_has_gpu()` probed
+ `torch.cuda.is_available()`, but faster-whisper runs on **CTranslate2** and torch is not a
+ dependency of this project - so the probe raised `ModuleNotFoundError`, was swallowed by a
+ bare `except`, and every transcription silently ran on CPU. Detection now asks CTranslate2
+ (`get_cuda_device_count()`), which is the library that actually does the work.
+ Measured on an RTX 4060 Laptop: **10.65x faster** (703s CPU -> 66s CUDA for the same clip).
+- **CRITICAL FIX**: Even with a healthy GPU and driver, CUDA failed with
+ "Library cublas64_12.dll is not found or cannot be loaded". The `nvidia-*-cu12` wheels place
+ their DLLs in `site-packages/nvidia/<component>/bin`, which is on neither PATH nor the
+ `add_dll_directory` list, and CTranslate2's native library resolves cuBLAS/cuDNN through the
+ plain Windows search order. Those directories are now registered before CUDA initialises.
+- **Fix**: A visible CUDA device no longer implies a usable one - detection also confirms the
+ float16 backend is loadable, so a missing cuBLAS/cuDNN runtime is caught during detection
+ instead of failing later at model construction.
+- **Robustness**: Model loading now falls back from CUDA to CPU when construction fails
+ (driver/cuDNN mismatch), instead of failing the whole conversion.
+- **Fix**: The GUI reported acceleration status through the same broken torch probe. It now
+ asks the audio engine directly, so the status log can never disagree with what actually runs.
+- **Tests**: Added device-detection coverage, including the "device visible but CUDA runtime
+ missing" case and a guard asserting the engine never imports torch.
+
+### New: optional GPU Pack
+The CUDA runtime ships as a **separate optional installer** rather than being bundled, keeping
+the main installer at 233 MB. `build_gpu_pack.py` stages the runtime, proves it can complete a
+real GPU transcription with `site-packages` hidden (so it cannot quietly borrow DLLs), then
+builds `doc2md_GPU_Pack_v<version>.exe` (758 MB) which installs to `%LOCALAPPDATA%\doc2md\cuda`.
+doc2md finds it automatically - no configuration. `DOC2MD_CUDA_DIR` overrides the location.
+
+`cuda_nvrtc` and `cudnn_adv` are excluded (257 MB saved): CTranslate2 never JITs kernels and
+implements attention itself. cuDNN's engine libraries are deliberately kept even though this
+machine transcribes without them - they are its kernel store, and dropping them shifts kernel
+selection onto fallback paths that could fail on GPU architectures unavailable for testing.
+
+The status log now distinguishes "NVIDIA card present, runtime missing" (install the GPU Pack)
+from "no CUDA device" (AMD/Intel - nothing to install), so no user is told to download 758 MB
+that cannot help them.
+
+### Known limitation: AMD and Intel GPUs
+CTranslate2 4.8.1 exposes exactly two devices - `cpu` and `cuda` (verified:
+`Device.__members__ == `). There is no ROCm, HIP, DirectML, or Vulkan backend,
+so **AMD and Intel GPUs cannot be used for transcription** and will always run on CPU.
+Supporting them would require replacing the inference engine (e.g. whisper.cpp with Vulkan),
+not a configuration change.
+
 ## [1.0.25] (2026-08-30) - DEEP AUDIT: DRAG & DROP, PDF, AND QA GATE
 
 - **CRITICAL FIX**: Drag & drop failed for every file type - `shlex.split()` treated Windows
@@ -238,3 +293,6 @@
 ````````````````````
 `````````````````````
 ``````````````````````
+```````````````````````
+````````````````````````
+`````````````````````````
