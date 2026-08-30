@@ -1,5 +1,8 @@
 # CHANGELOG.md
 
+````````````text
+# CHANGELOG.md
+
 ```````````text
 # CHANGELOG.md
 
@@ -25,6 +28,16 @@
 # CHANGELOG.md
 
 ```text
+## [1.0.18] (2026-08-30)
+
+- **Feature**: GPU Acceleration enabled - auto-detects CUDA and falls back to CPU (int8 compute)
+- **Feature**: Real-time Percentage Progress Labels (0-100%) on progress bar during conversions
+- **Enhancement**: Tech Dark Mode UI theme - #0F172A background, #1E293B cards, #06B6D4 cyan accents
+- **Fix**: ComboBox text clipping - expanded column widths (130-160px) to prevent text truncation
+- **Enhancement**: Rounded card frames (12px corner_radius) for modern sleek design
+- **Enhancement**: Cyan accent colors on all labels, buttons, and interactive elements
+- **Enhancement**: Improved drag & drop visual feedback with bright cyan highlight
+
 ## [1.0.17] (2026-08-30)
 
 - **Fix**: Drag & Drop re-implemented with dual binding (drop_zone frame + label) for complete coverage
@@ -99,3 +112,4 @@
 `````````
 ``````````
 ```````````
+````````````

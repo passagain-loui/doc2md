@@ -1,5 +1,8 @@
 # README.md
 
+````````````text
+# README.md
+
 ```````````text
 # README.md
 
@@ -25,7 +28,16 @@
 # README.md
 
 ```text
-# doc2md v1.0.17
+# doc2md v1.0.18
+
+## Version 1.0.18 (2026-08-30) - PERFORMANCE & TECH UI OVERHAUL
+
+### Enhancements & Fixes
+- **Feature**: GPU Acceleration enabled - auto-detects CUDA and falls back to CPU (int8 compute)
+- **Feature**: Real-time Percentage Progress Labels (0-100%) on progress bar
+- **Enhancement**: Tech Dark Mode UI theme with #06B6D4 cyan accents
+- **Fix**: ComboBox text clipping - expanded column widths to prevent truncation
+- **Enhancement**: Rounded card frames and modern sleek design
 
 ## Version 1.0.17 (2026-08-30) - ULTIMATE REPAIR
 
@@ -100,3 +112,4 @@
 `````````
 ``````````
 ```````````
+````````````

@@ -74,122 +74,137 @@ class MainWindow:
         self._setup_cleanup()
 
     def _setup_ui(self) -> None:
-        """Set up complete UI layout with all controls."""
-        # Main container
-        main_frame = ctk.CTkFrame(self.root)
+        """Set up complete UI layout with all controls (Tech Dark Mode theme)."""
+        # Tech Dark Mode colors
+        bg_dark = "#0F172A"
+        card_dark = "#1E293B"
+        accent_cyan = "#06B6D4"
+
+        # Main container (Tech Dark background)
+        main_frame = ctk.CTkFrame(self.root, fg_color=bg_dark)
         main_frame.pack(fill="both", expand=True, padx=15, pady=15)
 
-        # Title
+        # Title (Cyan accent)
         title = ctk.CTkLabel(main_frame, text="doc2md - Document to Markdown Converter",
-                            font=("Arial", 22, "bold"))
+                            font=("Arial", 22, "bold"), text_color=accent_cyan)
         title.pack(pady=(0, 20))
 
-        # Settings panel - Grid-based layout to prevent text overlap
-        settings_frame = ctk.CTkFrame(main_frame, fg_color=("#f5f5f5", "#2a2a2a"))
+        # Settings panel - Grid-based layout with Tech Dark theme
+        settings_frame = ctk.CTkFrame(main_frame, fg_color=card_dark, corner_radius=12)
         settings_frame.pack(fill="x", padx=5, pady=(0, 15))
 
-        # Row 1: Model, Language, Format
+        # Row 1: Model, Language, Format (expanded widths to prevent ComboBox text clipping)
         row1_frame = ctk.CTkFrame(settings_frame, fg_color="transparent")
-        row1_frame.pack(fill="x", padx=10, pady=(10, 5))
+        row1_frame.pack(fill="x", padx=15, pady=(12, 8))
 
-        model_label = ctk.CTkLabel(row1_frame, text="Audio Model:", font=("Arial", 11, "bold"))
+        model_label = ctk.CTkLabel(row1_frame, text="Audio Model:", font=("Arial", 11, "bold"), text_color=accent_cyan)
         model_label.pack(side="left", padx=5)
 
         model_combo = ctk.CTkComboBox(row1_frame, values=self.AUDIO_MODELS,
-                                      variable=self.audio_model_var, width=100, state="readonly")
-        model_combo.pack(side="left", padx=5)
+                                      variable=self.audio_model_var, width=130, state="readonly", font=("Arial", 10))
+        model_combo.pack(side="left", padx=8)
 
         self.model_status_label = ctk.CTkLabel(row1_frame, text="Ready",
                                               text_color=("#10b981", "#34d399"), font=("Arial", 10))
-        self.model_status_label.pack(side="left", padx=15)
+        self.model_status_label.pack(side="left", padx=20)
 
-        lang_label = ctk.CTkLabel(row1_frame, text="Language:", font=("Arial", 11, "bold"))
+        lang_label = ctk.CTkLabel(row1_frame, text="Language:", font=("Arial", 11, "bold"), text_color=accent_cyan)
         lang_label.pack(side="left", padx=5)
 
         lang_combo = ctk.CTkComboBox(row1_frame, values=self.LANGUAGES,
-                                     variable=self.language_var, width=120, state="readonly")
-        lang_combo.pack(side="left", padx=5)
+                                     variable=self.language_var, width=150, state="readonly", font=("Arial", 10))
+        lang_combo.pack(side="left", padx=8)
 
-        format_label = ctk.CTkLabel(row1_frame, text="Format:", font=("Arial", 11, "bold"))
+        format_label = ctk.CTkLabel(row1_frame, text="Format:", font=("Arial", 11, "bold"), text_color=accent_cyan)
         format_label.pack(side="left", padx=5)
 
         format_combo = ctk.CTkComboBox(row1_frame, values=self.OUTPUT_FORMATS,
-                                       variable=self.output_format_var, width=120, state="readonly")
-        format_combo.pack(side="left", padx=5)
+                                       variable=self.output_format_var, width=160, state="readonly", font=("Arial", 10))
+        format_combo.pack(side="left", padx=8)
 
-        # Row 2: Output Directory
+        # Row 2: Output Directory (with tech dark styling)
         row2_frame = ctk.CTkFrame(settings_frame, fg_color="transparent")
-        row2_frame.pack(fill="x", padx=10, pady=(5, 10))
+        row2_frame.pack(fill="x", padx=15, pady=(8, 12))
 
-        output_label = ctk.CTkLabel(row2_frame, text="Output Folder:", font=("Arial", 11, "bold"))
+        output_label = ctk.CTkLabel(row2_frame, text="Output Folder:", font=("Arial", 11, "bold"), text_color=accent_cyan)
         output_label.pack(side="left", padx=5)
 
-        self.output_dir_entry = ctk.CTkEntry(row2_frame, textvariable=self.output_dir_var, width=350)
-        self.output_dir_entry.pack(side="left", padx=5, fill="x", expand=True)
+        self.output_dir_entry = ctk.CTkEntry(row2_frame, textvariable=self.output_dir_var, width=350, font=("Arial", 10))
+        self.output_dir_entry.pack(side="left", padx=8, fill="x", expand=True)
 
-        browse_output_btn = ctk.CTkButton(row2_frame, text="Browse", command=self._browse_output_dir, width=80)
-        browse_output_btn.pack(side="left", padx=5)
+        browse_output_btn = ctk.CTkButton(row2_frame, text="Browse", command=self._browse_output_dir, width=90,
+                                         fg_color=accent_cyan, hover_color="#0891B2", font=("Arial", 10, "bold"))
+        browse_output_btn.pack(side="left", padx=8)
 
-        # Advanced settings frame
-        adv_frame = ctk.CTkFrame(main_frame, fg_color=("#f5f5f5", "#2a2a2a"))
+        # Advanced settings frame (Tech Dark)
+        adv_frame = ctk.CTkFrame(main_frame, fg_color=card_dark, corner_radius=12)
         adv_frame.pack(fill="x", padx=5, pady=(0, 15))
 
         ocr_check = ctk.CTkCheckBox(adv_frame, text="Enable PDF OCR (Slower)",
-                                   variable=self.ocr_enabled_var, font=("Arial", 10))
-        ocr_check.pack(side="left", padx=10, pady=10)
+                                   variable=self.ocr_enabled_var, font=("Arial", 10), text_color=accent_cyan)
+        ocr_check.pack(side="left", padx=15, pady=12)
 
         clip_check = ctk.CTkCheckBox(adv_frame, text="Copy to Clipboard",
-                                    variable=self.copy_clipboard_var, font=("Arial", 10))
-        clip_check.pack(side="left", padx=15)
+                                    variable=self.copy_clipboard_var, font=("Arial", 10), text_color=accent_cyan)
+        clip_check.pack(side="left", padx=20)
 
-        # Drop zone with rounded corners
-        drop_frame = ctk.CTkFrame(main_frame, fg_color=("#e8e8e8", "#2a2a2a"), border_width=2)
+        # Drop zone (Tech Dark with cyan border)
+        drop_frame = ctk.CTkFrame(main_frame, fg_color=card_dark, border_width=2, border_color=accent_cyan, corner_radius=12)
         drop_frame.pack(fill="both", expand=True, padx=5, pady=(0, 15))
 
         drop_label = ctk.CTkLabel(drop_frame, text="📁 Drag & drop files here\nor click to browse",
-                                 font=("Arial", 16, "bold"), text_color=("gray50", "gray70"))
+                                 font=("Arial", 16, "bold"), text_color=accent_cyan)
         drop_label.pack(expand=True, pady=30)
 
         self.drop_zone = drop_frame
         self.drop_label = drop_label
 
-        # Progress bar
-        progress_frame = ctk.CTkFrame(main_frame)
+        # Progress bar with percentage label (Tech Dark)
+        progress_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
         progress_frame.pack(fill="x", padx=5, pady=(0, 10))
 
-        progress_label = ctk.CTkLabel(progress_frame, text="Progress:", font=("Arial", 10))
-        progress_label.pack(anchor="w")
+        progress_header_frame = ctk.CTkFrame(progress_frame, fg_color="transparent")
+        progress_header_frame.pack(fill="x", padx=0, pady=(0, 5))
 
-        self.progress_bar = ctk.CTkProgressBar(progress_frame, height=24, corner_radius=8)
-        self.progress_bar.pack(fill="x", padx=0, pady=5)
+        progress_label = ctk.CTkLabel(progress_header_frame, text="Progress:", font=("Arial", 10, "bold"), text_color=accent_cyan)
+        progress_label.pack(side="left", anchor="w")
+
+        self.progress_percent_label = ctk.CTkLabel(progress_header_frame, text="0%", font=("Arial", 10, "bold"),
+                                                    text_color=accent_cyan)
+        self.progress_percent_label.pack(side="right", anchor="e")
+
+        self.progress_bar = ctk.CTkProgressBar(progress_frame, height=24, corner_radius=8, progress_color=accent_cyan)
+        self.progress_bar.pack(fill="x", padx=0, pady=0)
         self.progress_bar.set(0)
 
-        # Button frame
-        button_frame = ctk.CTkFrame(main_frame)
+        # Button frame (Tech Dark)
+        button_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
         button_frame.pack(fill="x", padx=5, pady=(0, 15))
 
         browse_btn = ctk.CTkButton(button_frame, text="Browse Files",
-                                  command=self._browse_files, width=120, height=38, font=("Arial", 11, "bold"))
+                                  command=self._browse_files, width=130, height=38, font=("Arial", 11, "bold"),
+                                  fg_color=accent_cyan, hover_color="#0891B2")
         browse_btn.pack(side="left", padx=5)
 
         self.convert_button = ctk.CTkButton(button_frame, text="Convert",
                                            command=self._start_conversion, state="disabled",
-                                           width=120, height=38, font=("Arial", 11, "bold"))
+                                           width=130, height=38, font=("Arial", 11, "bold"),
+                                           fg_color=accent_cyan, hover_color="#0891B2")
         self.convert_button.pack(side="left", padx=5)
 
-        # Cancel button (hidden by default, red)
+        # Cancel button (red)
         self.cancel_button = ctk.CTkButton(button_frame, text="Cancel",
                                           command=self._cancel_conversion, state="disabled",
-                                          width=120, height=38, fg_color="#DC2626", hover_color="#991b1b",
+                                          width=130, height=38, fg_color="#DC2626", hover_color="#991b1b",
                                           font=("Arial", 11, "bold"))
         self.cancel_button.pack(side="left", padx=5)
 
-        # Status log
-        log_frame = ctk.CTkFrame(main_frame)
+        # Status log (Tech Dark)
+        log_frame = ctk.CTkFrame(main_frame, fg_color=card_dark, corner_radius=12)
         log_frame.pack(fill="both", expand=True, padx=5)
 
-        log_label = ctk.CTkLabel(log_frame, text="Status Log:", font=("Arial", 12, "bold"))
-        log_label.pack(anchor="w", padx=10, pady=(10, 5))
+        log_label = ctk.CTkLabel(log_frame, text="Status Log:", font=("Arial", 12, "bold"), text_color=accent_cyan)
+        log_label.pack(anchor="w", padx=15, pady=(12, 5))
 
         try:
             self.log_text = ctk.CTkTextbox(log_frame, height=150)
@@ -197,7 +212,7 @@ class MainWindow:
             import tkinter as tk
             self.log_text = tk.Text(log_frame, height=8, width=60, wrap="word")
 
-        self.log_text.pack(fill="both", expand=True, padx=10, pady=10)
+        self.log_text.pack(fill="both", expand=True, padx=15, pady=15)
         self.log_text.configure(state="disabled")
 
     def _setup_drag_drop(self) -> None:
@@ -224,10 +239,10 @@ class MainWindow:
             logger.warning(f"DnD setup failed: {exc}")
 
     def _on_drag_enter(self, event) -> str:
-        """Visual feedback on drag enter."""
+        """Visual feedback on drag enter (highlight with bright cyan)."""
         try:
-            self.drop_zone.configure(fg_color=("#d0d0d0", "#404040"))
-            self.drop_label.configure(text_color=("gray30", "gray90"))
+            self.drop_zone.configure(fg_color="#0891B2")  # Brighter cyan
+            self.drop_label.configure(text_color="#FFFFFF")
         except Exception:
             pass
         return "copy"
@@ -235,8 +250,8 @@ class MainWindow:
     def _on_drag_leave(self, event) -> str:
         """Restore color on drag leave."""
         try:
-            self.drop_zone.configure(fg_color=("#e8e8e8", "#2a2a2a"))
-            self.drop_label.configure(text_color=("gray50", "gray70"))
+            self.drop_zone.configure(fg_color="#1E293B")  # Back to card dark
+            self.drop_label.configure(text_color="#06B6D4")  # Back to cyan
         except Exception:
             pass
         return "refuse"
@@ -244,8 +259,8 @@ class MainWindow:
     def _on_drop(self, event) -> str:
         """Handle dropped files with robust parsing."""
         try:
-            self.drop_zone.configure(fg_color=("#e8e8e8", "#2a2a2a"))
-            self.drop_label.configure(text_color=("gray50", "gray70"))
+            self.drop_zone.configure(fg_color="#1E293B")  # Back to card dark
+            self.drop_label.configure(text_color="#06B6D4")  # Back to cyan
 
             raw_data = event.data if isinstance(event.data, str) else str(event.data)
             logger.info(f"Drop event received: {raw_data[:100]}")
@@ -371,9 +386,11 @@ class MainWindow:
                 try:
                     self._log(f"Processing: {file_path.name}...")
 
-                    # Update progress
+                    # Update progress with percentage label
                     progress = (idx + 1) / len(self.selected_files)
+                    percent = int(progress * 100)
                     self.progress_bar.set(progress)
+                    self.root.after(0, lambda p=percent: self.progress_percent_label.configure(text=f"{p}%"))
 
                     # Call convert_file with correct signature (no options argument)
                     result = self.converter.convert_file(file_path)
@@ -411,6 +428,7 @@ class MainWindow:
             if not self.cancel_event.is_set():
                 self._log("✅ All conversions complete")
                 self.progress_bar.set(1.0)
+                self.root.after(0, lambda: self.progress_percent_label.configure(text="100%"))
 
         except Exception as exc:
             self._log(f"❌ Fatal error: {exc}")
