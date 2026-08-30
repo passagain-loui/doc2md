@@ -1,0 +1,143 @@
+================================================================================
+doc2md v1.1.0 REFACTORING - COMPLETION STATUS (2026-08-31)
+================================================================================
+
+PROJECT STATUS: ✅ COMPLETE
+All 6-step deterministic pipeline finished. Production ready.
+
+================================================================================
+WHAT WAS ACCOMPLISHED
+================================================================================
+
+📊 SCOPE
+  - Comprehensive refactor from "audio tool" to "document converter"
+  - Removed: 400+ MB audio/video stack (Whisper, FFmpeg, Torch, etc.)
+  - Removed: CustomTkinter GUI (replaced with modern PyQt6)
+  - Added: 4 comprehensive test suites (1000+ lines)
+  - Added: Integration bridge for Mediplex AI Sandbox
+
+🎨 GUI REWRITE (PyQt6)
+  - Dark theme with embedded SVG icons
+  - Drag-and-drop batch processing
+  - Per-file status tracking (Queued/Converting/Success/Error)
+  - Markdown preview pane
+  - Copy-to-clipboard button
+  - Send-to-Sandbox bridge button
+  - QThread worker with signal-based communication
+
+📄 DOCUMENT ENGINE IMPROVEMENTS
+  - Tables: Shared renderer fixes Thai column drift, ragged rows, unescaped pipes
+  - PDF: Automatic text-vs-scanned detection
+  - DOCX: Order-aware blocks, proper emphasis handling
+  - XLSX: Streaming with row limits, phantom column removal
+  - PPTX: Shape recursion for grouped text boxes
+  - OCR: Tesseract + RapidOCR fallback, language fallback
+  - Sanitizer: CSS-residue regex now safe for JSON/Thai/set notation
+
+✅ QUALITY ASSURANCE
+  - 307 tests passed, 4 expected skips
+  - EXIT_CODE: 0 from QA gate
+  - All version numbers consistent
+  - Changelog/History comprehensive
+
+📦 RELEASE ARTIFACTS BUILT
+  - dist/doc2md/doc2md.exe       (11 MB, 373ms startup)
+  - dist/doc2md.exe              (94 MB, 1569ms startup)
+  - dist/doc2md_Setup_v1.1.0.exe (44 MB installer)
+
+📝 DOCUMENTATION
+  - CHANGELOG.md: v1.1.0 release notes (breaking/added/improved)
+  - HISTORY.md: architectural rationale
+  - README.md: rewritten for document converter
+  - Code: comprehensive docstrings and comments
+
+================================================================================
+GIT COMMITS (10 total on this branch)
+================================================================================
+
+e84f97e - docs: remove mirror-generator wrapper from README.md
+fad1556 - refactor: v1.1.0 remove audio stack, rewrite GUI in PyQt6, improve Thai table extraction
+b4b178f - Ignore auto-generated .md mirror files to prevent git clutter
+a6c3a4c - docs: record measured performance and the open speed investigation
+fcab1a0 - fix: v1.0.27 show real progress on long recordings, fix ffmpeg bundling
+[+ 5 earlier commits]
+
+STATUS: Clean working tree, 10 commits ahead of origin/main
+
+================================================================================
+NEXT STEPS (WHEN SWITCHING MACHINES)
+================================================================================
+
+1. Pull latest commits
+   git pull origin main
+
+2. Set up environment
+   pip install -r requirements.txt
+
+3. Verify everything still works
+   ./tools/verify.ps1
+
+4. Rebuild binaries if needed
+   python build.py
+
+5. For OCR support (optional):
+   - Option A: Install Tesseract binary (~300 MB with Thai language pack)
+   - Option B: pip install rapidocr-onnxruntime (~200-400 MB)
+   - Both optional; system gracefully degrades without them
+
+================================================================================
+FILES CREATED/MODIFIED (42 in main refactoring commit)
+================================================================================
+
+NEW MODULES:
+  ✓ doc2md/core/tables.py        (shared Markdown table builder)
+  ✓ doc2md/core/bridge.py        (Mediplex AI Sandbox bridge)
+  ✓ doc2md/gui/theme.py          (PyQt6 dark theme)
+  ✓ doc2md/gui/main_window.py    (GUI implementation, 1000+ lines)
+
+NEW TEST SUITES:
+  ✓ tests/test_tables.py         (250+ lines, table builder tests)
+  ✓ tests/test_thai_documents.py (330+ lines, end-to-end Thai tests)
+  ✓ tests/test_bridge.py         (180+ lines, integration bridge tests)
+  ✓ tests/test_gui_qt.py         (394+ lines, PyQt6 behavioral tests)
+
+NEW CONFIG:
+  ✓ requirements.txt             (runtime dependencies, no audio/GPU packages)
+  ✓ requirements-dev.txt         (development dependencies)
+
+MODIFIED:
+  ✓ 30+ other files (engines, CLI, config, workflows, etc.)
+
+================================================================================
+KNOWN ISSUES / BY DESIGN
+================================================================================
+
+✓ Tesseract not bundled
+  → Saves 250-300 MB
+  → User installs if needed (Thai pack ~50-80 MB)
+  → System gracefully degrades with helpful error message
+
+✓ RapidOCR not bundled
+  → Optional pip install (~200-400 MB)
+  → Not a default dependency
+  → Automatic fallback if Tesseract not available
+
+✓ No audio/video support
+  → Intentional removal (was source of silent failures)
+  → When model/ffmpeg missing, now shows explicit error instead of empty file
+
+================================================================================
+MEMORY SYSTEM UPDATED
+================================================================================
+
+New memory file created:
+  - v1-1-0-refactoring-complete.md
+    (Comprehensive status, next steps, bug fixes, limitations)
+
+Existing memory:
+  - bash-heredoc-eats-backslashes.md (Bash escaping quirk on this setup)
+  - md-mirror-generator-rewraps-docs.md (Auto-mirror tool wrapping issue)
+
+================================================================================
+READY FOR: Release, deployment, GitHub tagging, user distribution
+================================================================================
