@@ -1,5 +1,8 @@
 # CHANGELOG.md
 
+````````text
+# CHANGELOG.md
+
 ```````text
 # CHANGELOG.md
 
@@ -13,6 +16,15 @@
 # CHANGELOG.md
 
 ```text
+## [1.0.14] (2026-08-30)
+
+- **Feature**: Restored full GUI control set - Model Size selector, Language dropdown, Output Format selector
+- **Feature**: Advanced settings panel with OCR toggle and clipboard copy option
+- **Fix**: Drag & Drop re-implemented with proper TkinterDnD2 event handling for robust file ingestion
+- **Fix**: Audio/video timeout increased from 60s to 1800s (30 minutes) for large files and meeting recordings
+- **Fix**: Dynamic timeout calculation - audio files use extended timeout automatically
+- **Robustness**: Complete GUI restoration with all user-facing controls for flexible document conversion
+
 ## [1.0.13] (2026-08-30)
 
 - **Fix**: Brute-force process termination - installer now uses `taskkill /F /IM doc2md.exe /T` for forceful closure
@@ -49,3 +61,4 @@
 `````
 ``````
 ```````
+````````

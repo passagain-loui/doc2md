@@ -32,6 +32,7 @@ from doc2md.core.router import Detection, FileKind, detect
 from doc2md.engine import get_engine, get_engine_by_name
 
 DEFAULT_TIMEOUT_S = 60.0
+AUDIO_TIMEOUT_S = 1800.0  # 30 minutes for audio/video transcription
 
 
 @dataclass
@@ -204,10 +205,15 @@ class Converter:
         }
 
         try:
+            # Use longer timeout for audio/video files
+            effective_timeout = self.timeout
+            if detection.kind in (FileKind.AUDIO, FileKind.VIDEO):
+                effective_timeout = max(self.timeout, AUDIO_TIMEOUT_S)
+
             if engine.requires_process_isolation:
-                raw_markdown = _run_in_process(payload, self.timeout)
+                raw_markdown = _run_in_process(payload, effective_timeout)
             else:
-                raw_markdown = _run_in_thread(payload, self.timeout)
+                raw_markdown = _run_in_thread(payload, effective_timeout)
             optimized = cleaner.optimize(raw_markdown)
             return ConversionResult(
                 source=source,
