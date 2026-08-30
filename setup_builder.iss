@@ -1,4 +1,4 @@
-[Setup]
+﻿[Setup]
 AppName=doc2md
 AppVersion={#Version}
 VersionInfoVersion={#Version}
@@ -20,7 +20,13 @@ CloseApplications=yes
 RestartApplications=yes
 
 [Files]
-Source: "dist\doc2md.exe"; DestDir: "{app}"; Flags: ignoreversion
+; The installer ships the FOLDER build, not the single-file one. A --onefile
+; executable unpacks its whole archive into a temp directory on every launch,
+; which measured at ~1.7 s to first window against ~0.15 s for the folder
+; build. The single-file exe is still published as a separate download for
+; people who want one portable file.
+Source: "dist\doc2md\doc2md.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "dist\doc2md\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
@@ -45,9 +51,6 @@ begin
     // /IM = Image name (executable filename)
     // /T = Terminate entire process tree (children included)
     Exec('taskkill.exe', '/F /IM doc2md.exe /T', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-
-    // Forcefully terminate all background ffmpeg.exe instances
-    Exec('taskkill.exe', '/F /IM ffmpeg.exe /T', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
     // Small delay to ensure processes are fully terminated
     Sleep(500);

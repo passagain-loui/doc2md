@@ -1,121 +1,155 @@
-"""Regression tests for the GUI drop-path parser and converter option safety.
+"""Drag-and-drop path handling for the PyQt6 interface.
 
-These cover the two defects that made v1.0.20-v1.0.24 unusable in practice:
-
-* ``shlex.split`` silently ate every backslash in a Windows path, so every
-  drag & drop reported "No supported files".
-* The GUI put a bound method (``progress_callback``) into converter options,
-  which cannot be pickled, so every process-isolated conversion (PDF, OCR)
-  failed at ``Process.start()``.
+The Tk implementation received one flat, brace-delimited string and had to
+re-tokenize it; that parser ate backslashes and mangled Thai names, so every
+drop reported "No supported files". Qt hands over a list of ``QUrl`` objects
+instead, so these tests pin the property that matters now: whatever the file
+is called - Thai, spaces, ``#``/``&``/``%``, a very long name - the path that
+comes back out of the drop handler is byte-for-byte the path that went in.
 """
 
 from __future__ import annotations
 
 import pickle
 import threading
+from pathlib import Path
 
 import pytest
 
 from doc2md.core.converter import _picklable_options
-from doc2md.gui.main_window import MainWindow
+
+pytest.importorskip("PyQt6.QtCore")
+
+from PyQt6.QtCore import QUrl  # noqa: E402
+
+from doc2md.gui.main_window import DropZone, collect_files  # noqa: E402
 
 
-parse = MainWindow._parse_drop_paths
+AWKWARD_NAMES = [
+    "รายงานประจำปี 2567.pdf",
+    "report with spaces.pdf",
+    "budget#1 &final (100%).pdf",
+    "ใบเสนอราคา - ฉบับแก้ไข.pdf",
+    "a'quote-mix (v2).pdf",
+    "ผลตรวจ_ผู้ป่วย+เพิ่มเติม.pdf",
+]
 
 
-def test_windows_backslash_path_survives_parsing():
-    raw = r"C:\Users\Passagain\Documents\test.mp3"
-    assert parse(raw) == [raw]
+def _make(tmp_path: Path, name: str) -> Path:
+    path = tmp_path / name
+    path.write_bytes(b"%PDF-1.4\n%stub\n")
+    return path
 
 
-def test_path_with_spaces_stays_one_entry():
-    raw = r"{C:\Users\Passagain\Documents\my recording.mp3}"
-    assert parse(raw) == [r"C:\Users\Passagain\Documents\my recording.mp3"]
+@pytest.mark.parametrize("name", AWKWARD_NAMES)
+def test_qurl_round_trip_preserves_exact_path(tmp_path, name):
+    source = _make(tmp_path, name)
+    url = QUrl.fromLocalFile(str(source))
+
+    recovered = DropZone.paths_from_urls([url])
+
+    assert recovered == [source]
+    assert recovered[0].name == name
+    assert recovered[0].is_file()
 
 
-def test_thai_filename_survives_parsing():
-    raw = "C:\\Users\\Passagain\\Documents\\ประชุม.mp3"
-    assert parse(raw) == [raw]
+def test_backslashes_survive_a_windows_style_path(tmp_path):
+    """``C:\\a\\one.pdf`` must not become ``C:\\x07ne.pdf``.
+
+    Both splitters the Tk version tried applied escape processing: shlex ate
+    the backslashes outright, and Tcl's ``splitlist`` expanded ``\\a`` into the
+    bell character. Qt performs no escape processing at all.
+    """
+    nested = tmp_path / "a" / "one.pdf"
+    nested.parent.mkdir()
+    nested.write_bytes(b"%PDF-1.4\n")
+
+    recovered = DropZone.paths_from_urls([QUrl.fromLocalFile(str(nested))])
+
+    assert recovered == [nested]
+    assert "\a" not in str(recovered[0])
+    assert recovered[0].read_bytes().startswith(b"%PDF")
 
 
-def test_multiple_paths_split_correctly():
-    raw = r"C:\a\one.pdf {C:\b\two file.docx} C:\c\three.mp3"
-    assert parse(raw) == [
-        r"C:\a\one.pdf",
-        r"C:\b\two file.docx",
-        r"C:\c\three.mp3",
+def test_multiple_files_dropped_together_are_all_kept(tmp_path):
+    sources = [_make(tmp_path, name) for name in AWKWARD_NAMES]
+    urls = [QUrl.fromLocalFile(str(p)) for p in sources]
+
+    recovered = DropZone.paths_from_urls(urls)
+
+    assert recovered == sources
+
+
+def test_remote_urls_are_ignored(tmp_path):
+    local = _make(tmp_path, "local.pdf")
+    urls = [
+        QUrl("https://example.invalid/remote.pdf"),
+        QUrl.fromLocalFile(str(local)),
     ]
 
-
-@pytest.mark.parametrize(
-    "raw",
-    [
-        r"C:\a\one.pdf",          # \a would become the bell character
-        r"C:\b\two.pdf",          # \b would become backspace
-        r"C:\temp\notes.pdf",     # \t would become a tab
-        r"C:\new\report.pdf",     # \n would become a newline
-        r"C:\report\v1.pdf",      # \v would become a vertical tab
-    ],
-)
-def test_escape_like_sequences_are_not_substituted(raw):
-    """Backslash sequences that Tcl/shlex would substitute must stay literal."""
-    assert parse(raw) == [raw]
+    assert DropZone.paths_from_urls(urls) == [local]
 
 
-def test_unbraced_path_with_spaces_is_kept_whole(tmp_path):
-    target = tmp_path / "meeting notes 2026.mp3"
-    target.write_bytes(b"")
-    assert parse(str(target)) == [str(target)]
+def test_collect_files_walks_folders_and_reports_rejects(tmp_path):
+    folder = tmp_path / "เอกสาร"
+    folder.mkdir()
+    good = _make(folder, "งบประมาณ.pdf")
+    (folder / "recording.mp3").write_bytes(b"ID3\x03\x00\x00\x00")
+
+    accepted, rejected = collect_files([folder])
+
+    assert accepted == [good]
+    assert rejected == []  # unsupported children are filtered, not reported
 
 
-def test_empty_payload_yields_nothing():
-    assert parse("") == []
-    assert parse("   ") == []
+def test_collect_files_reports_dropped_media_explicitly(tmp_path):
+    media = tmp_path / "meeting.mp3"
+    media.write_bytes(b"ID3\x03\x00\x00\x00")
+
+    accepted, rejected = collect_files([media])
+
+    assert accepted == []
+    assert len(rejected) == 1
+    path, reason = rejected[0]
+    assert path == media
+    assert "removed" in reason
 
 
-def test_unique_output_path_avoids_collision(tmp_path):
-    (tmp_path / "report.md").write_text("first", encoding="utf-8")
+def test_collect_files_deduplicates_the_same_file(tmp_path):
+    source = _make(tmp_path, "same.pdf")
 
-    second = MainWindow._unique_output_path(tmp_path, "report", ".md")
+    accepted, _rejected = collect_files([source, source, tmp_path / "same.pdf"])
 
-    assert second == tmp_path / "report-1.md"
-    assert (tmp_path / "report.md").read_text(encoding="utf-8") == "first"
+    assert accepted == [source]
 
 
-def test_picklable_options_strips_unpicklable_values():
-    def callback(percent):  # a local function is unpicklable, like a bound method
-        return percent
+def test_collect_files_reports_missing_paths(tmp_path):
+    ghost = tmp_path / "ไม่มีจริง.pdf"
 
+    accepted, rejected = collect_files([ghost])
+
+    assert accepted == []
+    assert rejected == [(ghost, "not found")]
+
+
+# --- converter option safety -------------------------------------------------
+
+
+def test_unpicklable_options_are_stripped_for_isolated_engines():
+    """Options crossing a spawn boundary must survive pickling.
+
+    The GUI legitimately holds live objects; anything that cannot cross a
+    process boundary has to be filtered before Process.start(), or every
+    PDF/OCR conversion started from the GUI dies at launch.
+    """
     options = {
-        "audio_model": "small",
-        "language": "Thai",
-        "pdf_ocr_fallback": True,
-        "progress_callback": callback,
-        "abort_event": threading.Event(),
+        "max_rows": 10,
+        "ocr_lang": "tha+eng",
+        "event": threading.Event(),
+        "callback": (lambda value: value),
     }
 
     safe = _picklable_options(options)
 
-    assert safe == {
-        "audio_model": "small",
-        "language": "Thai",
-        "pdf_ocr_fallback": True,
-    }
-    pickle.dumps(safe)  # must not raise
-
-
-@pytest.mark.parametrize(
-    "seconds,expected",
-    [
-        (0, "0:00"),
-        (5, "0:05"),
-        (65, "1:05"),
-        (1621.7, "27:01"),
-        (3600, "1:00:00"),
-        (3725, "1:02:05"),
-        (-10, "0:00"),
-    ],
-)
-def test_format_clock(seconds, expected):
-    """Long recordings must read as time, not a percentage that barely moves."""
-    assert MainWindow._format_clock(seconds) == expected
+    assert safe == {"max_rows": 10, "ocr_lang": "tha+eng"}
+    pickle.dumps(safe)

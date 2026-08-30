@@ -14,15 +14,45 @@ from doc2md.core.config import load_config
 from doc2md.core.converter import Converter, ConversionResult
 from doc2md.core.router import CODE_EXTENSIONS, EXTENSION_KINDS, IMAGE_EXTENSIONS
 from doc2md.core.stats import build_rows, render_table
+from doc2md.engine.ocr_engine import DEFAULT_OCR_LANG
 
 app = typer.Typer(
     name="doc2md",
-    help="Convert documents (PDF/DOCX/XLSX/PPTX/HTML/EML/images/code) to token-optimized Markdown.",
+    help="Convert documents (PDF/DOCX/XLSX/PPTX/HTML/EML/images/code) to clean Markdown.",
     no_args_is_help=False,
     add_completion=False,
 )
 
 SUPPORTED_SUFFIXES = frozenset(EXTENSION_KINDS) | frozenset(IMAGE_EXTENSIONS) | frozenset(CODE_EXTENSIONS)
+
+
+def configure_stdio() -> None:
+    """Force UTF-8 on stdout/stderr so Thai filenames can be printed.
+
+    A Windows console defaults to a legacy code page (cp874/cp1252), and
+    printing a Thai filename to it raises UnicodeEncodeError *from inside the
+    progress line*, which aborted the whole run after the files had already
+    been converted. Reconfiguring with errors="replace" means the worst case is
+    a few replacement characters in the log rather than a failed command.
+
+    Streams are None in a --windowed frozen build, and reconfigure() does not
+    exist on a replaced stream (pytest's capture object), so both are guarded.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        if stream is None:
+            continue
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        if (getattr(stream, "encoding", "") or "").lower().replace("-", "") == "utf8":
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass
+
+
+configure_stdio()
 
 
 def _version_callback(value: bool) -> None:
@@ -82,7 +112,7 @@ def _chunk_outputs(
         stem = result.source.stem
         for index, piece in enumerate(pieces, start=1):
             part_path = base_dir / f"{stem}.part{index:03d}.md"
-            part_path.write_text(piece + "\n", encoding="utf-8")
+            part_path.write_text(piece + "\n", encoding="utf-8", newline="\n")
             written_parts += 1
     return written_parts
 
@@ -112,6 +142,13 @@ def convert(
         None, "--chunk", min=1,
         help="Split output into semantic chunks of at most this many tokens.",
     ),
+    ocr_lang: str = typer.Option(
+        DEFAULT_OCR_LANG, "--ocr-lang",
+        help="Tesseract language string used for scanned PDFs and images.",
+    ),
+    no_tables: bool = typer.Option(
+        False, "--no-tables", help="Skip PDF table extraction (faster, text only)."
+    ),
     stdout: bool = typer.Option(False, "--stdout", help="Print Markdown to stdout instead of writing files."),
     ignore_errors: bool = typer.Option(False, "--ignore-errors", help="Exit 0 even if some files fail."),
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress progress output."),
@@ -137,7 +174,12 @@ def convert(
 
     converter = Converter(
         timeout=effective_timeout,
-        options={"max_rows": effective_max_rows, "pdf_ocr_fallback": bool(cfg["ocr_enabled"])},
+        options={
+            "max_rows": effective_max_rows,
+            "pdf_ocr_fallback": bool(cfg["ocr_enabled"]),
+            "pdf_tables": not no_tables,
+            "ocr_lang": ocr_lang or cfg["ocr_lang"],
+        },
     )
     targets = _expand_targets(inputs)
     if not targets:
@@ -177,7 +219,7 @@ def convert(
                 output / f"{result.source.stem}.md" if output else result.source.with_suffix(".md")
             )
             destination.parent.mkdir(parents=True, exist_ok=True)
-            destination.write_text(result.markdown, encoding="utf-8")
+            destination.write_text(result.markdown, encoding="utf-8", newline="\n")
             written += 1
 
     chunk_note = ""
@@ -265,25 +307,62 @@ def context_menu_status_command() -> None:
 
 @app.command("gui")
 def gui_command() -> None:
-    """Launch the interactive GUI dashboard for drag-and-drop file conversion."""
+    """Launch the PyQt6 desktop interface for drag-and-drop conversion."""
     try:
-        import tkinter as tk
-        from doc2md.gui import MainWindow
-
-        try:
-            from tkinterdnd2 import Tk
-            root = Tk()
-        except ImportError:
-            root = tk.Tk()
-
-        app_window = MainWindow(root)
-        root.mainloop()
-    except ImportError as e:
+        from doc2md.gui import run_gui
+    except ImportError as exc:
         typer.secho(
-            f"GUI dependencies missing: {e}\n"
-            "Install via: pip install 'doc2md[gui]'",
+            f"GUI dependencies missing: {exc}\n"
+            "Install via: pip install -r requirements.txt (PyQt6)",
             fg=typer.colors.RED,
         )
+        raise typer.Exit(code=1)
+    raise typer.Exit(code=run_gui())
+
+
+@app.command("bridge")
+def bridge_command(
+    inputs: List[Path] = typer.Argument(..., help="Files, directories, or glob patterns."),
+    inbox: Path = typer.Option(
+        ..., "--inbox", "-i",
+        help="Folder the downstream tool watches; the bundle is written there.",
+    ),
+    endpoint: Optional[str] = typer.Option(
+        None, "--endpoint",
+        help="Optional HTTP(S) endpoint to POST the bundle to instead of writing it.",
+    ),
+    token: Optional[str] = typer.Option(
+        None, "--token", help="Bearer token sent with --endpoint."
+    ),
+    ocr_lang: str = typer.Option(
+        DEFAULT_OCR_LANG, "--ocr-lang", help="Tesseract language string for OCR."
+    ),
+    timeout: float = typer.Option(60.0, "--timeout", "-t", min=0.1),
+) -> None:
+    """Convert documents and hand the results to the integration bridge."""
+    from doc2md.core.bridge import BridgeError, FileDropTransport, HttpTransport, payload_from_results
+
+    converter = Converter(timeout=timeout, options={"ocr_lang": ocr_lang})
+    targets = _expand_targets(inputs)
+    if not targets:
+        typer.secho("No input files found.", fg=typer.colors.RED)
+        raise typer.Exit(code=2)
+
+    results = [converter.convert_file(target) for target in targets]
+    failures = [r for r in results if not r.success]
+    for failure in failures:
+        typer.secho(f"FAIL {failure.source.name} -> {failure.error}", fg=typer.colors.YELLOW)
+
+    payload = payload_from_results(results)
+    transport = HttpTransport(endpoint, timeout=timeout, token=token) if endpoint else FileDropTransport(inbox)
+    try:
+        message = transport.send(payload)
+    except BridgeError as exc:
+        typer.secho(f"Bridge failed: {exc}", fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+
+    typer.secho(message, fg=typer.colors.GREEN)
+    if failures:
         raise typer.Exit(code=1)
 
 

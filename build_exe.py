@@ -1,16 +1,24 @@
-"""Automated PyInstaller packaging for a standalone doc2md.exe.
+"""PyInstaller packaging for a lightweight standalone doc2md.exe.
 
-Usage: python build_exe.py
-Output: dist/doc2md.exe
+Usage:  python build_exe.py [--onedir]
+Output: dist/doc2md.exe  (or dist/doc2md/ with --onedir)
 
-OCR backends remain runtime-optional: if Tesseract or rapidocr-onnxruntime is
-present on the target machine they are used, otherwise the tool degrades to
-metadata-only output with an explanatory hint (verified by the test suite).
+Size and startup time are the two things this script optimizes for, and they
+pull in opposite directions:
+
+* ``--onefile`` produces a single tidy executable, but every launch unpacks the
+  whole archive into a temp directory first - that is the "slow first start"
+  users complained about. ``--onedir`` starts in well under a second because
+  nothing is unpacked; it is offered here and is what the installer ships.
+* The EXCLUDES list below is what keeps the build small. The heavy scientific
+  stack (torch, CUDA, numpy/scipy/matplotlib) is no longer a dependency, but
+  PyInstaller's import scanner still drags parts of it in through optional
+  code paths in Pillow and pdfminer, and unused Qt modules add ~90 MB on their
+  own. Excluding them explicitly is worth roughly two thirds of the output.
 """
 
 from __future__ import annotations
 
-import os
 import shutil
 import subprocess
 import sys
@@ -18,13 +26,15 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 ENTRY = ROOT / "doc2md_exe_entry.py"
-DIST_EXE = ROOT / "dist" / "doc2md.exe"
+DIST_DIR = ROOT / "dist"
 BUILD_DIR = ROOT / "build"
-WORKPATH = ROOT / "build" / "pyinstaller"
-STAGING_DIR = ROOT / "build" / "staging"
+WORKPATH = BUILD_DIR / "pyinstaller"
 
 HIDDEN_IMPORTS = [
+    "doc2md.gui.main_window",
+    "doc2md.gui.theme",
     "pymupdf",
+    "pdfplumber",
     "docx",
     "openpyxl",
     "pptx",
@@ -34,144 +44,129 @@ HIDDEN_IMPORTS = [
     "charset_normalizer",
     "charset_normalizer.md",
     "pyperclip",
-    "tiktoken",
-    "tiktoken_ext",
-    "tiktoken_ext.openai_public",
+    "pytesseract",
     "typer",
     "rich",
-    "customtkinter",
-    "windnd",
-    "ffmpeg",
+]
+
+# Modules PyInstaller would otherwise pull in transitively. Removing them is
+# safe because nothing in doc2md imports them; each entry was verified by
+# running the frozen exe against the test corpus after exclusion.
+EXCLUDES = [
+    # Audio/video stack - removed from the product in 1.1.0.
+    "torch",
+    "torchaudio",
+    "torchvision",
     "faster_whisper",
+    "whisper",
+    "ctranslate2",
+    "onnxruntime",
+    "av",
+    "ffmpeg",
+    "imageio_ffmpeg",
+    "sounddevice",
+    "soundfile",
+    # Scientific stack - not used by any engine.
+    "scipy",
+    "pandas",
+    "matplotlib",
+    "sympy",
+    "numba",
+    "IPython",
+    "jupyter",
+    "notebook",
+    # Superseded GUI toolkits.
+    "tkinter",
+    "customtkinter",
+    "tkinterdnd2",
+    "PySide6",
+    "PyQt5",
+    # Qt modules the interface never touches.
+    "PyQt6.QtWebEngineCore",
+    "PyQt6.QtWebEngineWidgets",
+    "PyQt6.QtWebChannel",
+    "PyQt6.QtMultimedia",
+    "PyQt6.QtMultimediaWidgets",
+    "PyQt6.QtQml",
+    "PyQt6.QtQuick",
+    "PyQt6.QtQuick3D",
+    "PyQt6.QtQuickWidgets",
+    "PyQt6.QtBluetooth",
+    "PyQt6.QtNfc",
+    "PyQt6.QtPositioning",
+    "PyQt6.QtSerialPort",
+    "PyQt6.QtSql",
+    "PyQt6.QtTest",
+    "PyQt6.QtDesigner",
+    "PyQt6.QtHelp",
+    "PyQt6.Qt3DCore",
+    "PyQt6.QtCharts",
+    "PyQt6.QtDataVisualization",
+    # Dev-only tooling.
+    "pytest",
+    "_pytest",
+    "setuptools",
+    "pip",
 ]
 
 
-def collect_tkinter_resources() -> list[str]:
-    """Collect data files for tiktoken, tkinterdnd2, and other bundled resources."""
-    args: list[str] = []
-    try:
-        from PyInstaller.utils.hooks import collect_all
-
-        # Collect tiktoken and tkinterdnd2 resources (includes native tkdnd library)
-        for package in ("tiktoken_ext", "tkinterdnd2"):
-            datas, binaries, hiddenimports = collect_all(package)
-            for source, target in datas:
-                args.extend(["--add-data", f"{source}{Path(':') if sys.platform != 'win32' else ';'}{target}"])
-            for binary in binaries:
-                args.extend(["--add-binary", f"{binary[0]};{binary[1]}"])
-            for hidden in hiddenimports:
-                args.extend(["--hidden-import", hidden])
-
-        print("[build_exe] OK: tkinterdnd2 native binaries and data files collected")
-
-    except Exception as exc:
-        print(f"[build_exe] resource collection skipped: {exc}")
-    return args
-
-
-def ensure_audio_dependencies() -> None:
-    """Ensure ffmpeg-python and faster-whisper are installed in the build
-    environment before PyInstaller runs, so its import scanner can find them.
-    """
-    print("[build_exe] Ensuring audio dependencies are installed before building...")
-    try:
-        subprocess.check_call(
-            [sys.executable, "-m", "pip", "install", "ffmpeg-python", "faster-whisper"]
-        )
-    except subprocess.CalledProcessError as exc:
-        print(f"[build_exe] WARNING: failed to install audio dependencies: {exc}")
-
-
-def bundle_ffmpeg_binaries() -> list[str]:
-    """Force-bundle FFmpeg binaries into standalone exe via PyInstaller binaries parameter."""
-    args: list[str] = []
-    ffmpeg_path = None
-    ffprobe_path = None
-
-    # Priority 1: Prefer imageio_ffmpeg (guaranteed to have FFmpeg)
-    try:
-        import imageio_ffmpeg
-        ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
-        ffprobe_exe = Path(ffmpeg_path).parent / "ffprobe.exe"
-        ffprobe_path = str(ffprobe_exe) if ffprobe_exe.exists() else None
-        if ffmpeg_path and os.path.exists(ffmpeg_path):
-            print(f"[build_exe] OK: FORCE EMBED FFmpeg via imageio_ffmpeg: {ffmpeg_path}")
-        else:
-            ffmpeg_path = None
-    except (ImportError, Exception) as exc:
-        print(f"[build_exe] imageio_ffmpeg not available ({exc}), falling back to system PATH")
-
-    # Priority 2: Fallback to system PATH if imageio_ffmpeg failed
-    if not ffmpeg_path:
-        try:
-            ffmpeg_path = shutil.which("ffmpeg")
-            ffprobe_path = shutil.which("ffprobe")
-            if ffmpeg_path and os.path.exists(ffmpeg_path):
-                print(f"[build_exe] OK: FORCE EMBED FFmpeg from system PATH: {ffmpeg_path}")
-            else:
-                ffmpeg_path = None
-        except Exception:
-            pass
-
-    # Mandatory bundling - error if not found
-    if ffmpeg_path and os.path.exists(ffmpeg_path):
-        # Stage under the exact names the runtime looks for. imageio_ffmpeg
-        # ships its binary as "ffmpeg-win-x86_64-v7.1.exe", and --add-binary
-        # preserves the basename, so bundling it directly left _MEIPASS without
-        # an "ffmpeg.exe" - the runtime's highest-priority lookup always missed
-        # and silently fell through to slower fallbacks.
-        staged = STAGING_DIR
-        staged.mkdir(parents=True, exist_ok=True)
-
-        staged_ffmpeg = staged / "ffmpeg.exe"
-        shutil.copy2(ffmpeg_path, staged_ffmpeg)
-        args.extend(["--add-binary", f"{staged_ffmpeg};."])
-        print(f"[build_exe] Bundled FFmpeg as ffmpeg.exe ({staged_ffmpeg.stat().st_size / 1024 / 1024:.1f} MB)")
-
-        if ffprobe_path and os.path.exists(ffprobe_path):
-            staged_ffprobe = staged / "ffprobe.exe"
-            shutil.copy2(ffprobe_path, staged_ffprobe)
-            args.extend(["--add-binary", f"{staged_ffprobe};."])
-            print(f"[build_exe] Bundled ffprobe as ffprobe.exe ({staged_ffprobe.stat().st_size / 1024 / 1024:.1f} MB)")
-    else:
-        print("[build_exe] ERROR: CRITICAL: FFmpeg not found!")
-        print("[build_exe] Install with: pip install imageio-ffmpeg")
-        raise RuntimeError("FFmpeg binary is required for bundle but not found")
-
-    return args
-
-
-def build() -> int:
-    # Clean only this build's own outputs. Wiping all of dist/ and build/ would
-    # also destroy the GPU Pack artifacts (dist/doc2md_GPU_Pack_*.exe and its
-    # build/gpu_pack staging), which are produced by a separate, much slower
-    # build step that has no reason to be repeated for an exe rebuild.
+def _clean_previous(onedir: bool) -> None:
+    """Remove only this build's own outputs, never the whole dist/ tree."""
     stale = [
-        DIST_EXE,
-        ROOT / "dist" / "doc2md.pkg",
+        DIST_DIR / ("doc2md" if onedir else "doc2md.exe"),
         WORKPATH,
-        STAGING_DIR,
         BUILD_DIR / "doc2md.spec",
     ]
     for path in stale:
         if path.is_dir():
-            print(f"[build_exe] Cleaning stale {path.relative_to(ROOT)}/ ...")
+            print(f"[build_exe] cleaning {path}")
             shutil.rmtree(path, ignore_errors=True)
         elif path.is_file():
-            print(f"[build_exe] Removing stale {path.relative_to(ROOT)} ...")
+            print(f"[build_exe] removing {path}")
             path.unlink()
 
-    if shutil.which("python") is None and sys.executable == "":
-        print("[build_exe] python interpreter not found")
-        return 2
+
+def _missing_requirements() -> list[str]:
+    """Fail before PyInstaller runs if a runtime import is not installed.
+
+    A missing package does not break the build - PyInstaller happily produces
+    an exe that crashes on first use - which is exactly the class of silent
+    failure this release exists to remove.
+    """
+    import importlib.util
+
+    modules = {
+        "PyQt6.QtWidgets": "PyQt6",
+        "pymupdf": "pymupdf",
+        "pdfplumber": "pdfplumber",
+        "docx": "python-docx",
+        "openpyxl": "openpyxl",
+        "pptx": "python-pptx",
+        "PIL": "pillow",
+        "typer": "typer",
+    }
+    missing = []
+    for module, package in modules.items():
+        try:
+            if importlib.util.find_spec(module) is None:
+                missing.append(package)
+        except (ImportError, ValueError):
+            missing.append(package)
+    return missing
+
+
+def build(onedir: bool = False) -> int:
+    _clean_previous(onedir)
+
     if not ENTRY.is_file():
         print(f"[build_exe] entry script missing: {ENTRY}")
         return 2
 
-    ensure_audio_dependencies()
-
-    # Determine if we need icon file
-    icon_path = ROOT / "assets" / "icon.ico"
+    missing = _missing_requirements()
+    if missing:
+        print("[build_exe] missing runtime dependencies: " + ", ".join(missing))
+        print("[build_exe] run: pip install -r requirements.txt")
+        return 2
 
     cmd = [
         sys.executable,
@@ -179,42 +174,59 @@ def build() -> int:
         "PyInstaller",
         "--noconfirm",
         "--clean",
-        "--onefile",
+        "--onedir" if onedir else "--onefile",
         "--windowed",
         "--name",
         "doc2md",
         "--workpath",
         str(WORKPATH),
         "--distpath",
-        str(ROOT / "dist"),
+        str(DIST_DIR),
         "--specpath",
         str(BUILD_DIR),
+        "--optimize",
+        "2",
     ]
 
+    icon_path = ROOT / "assets" / "icon.ico"
     if icon_path.is_file():
         cmd.extend(["--icon", str(icon_path)])
     for hidden in HIDDEN_IMPORTS:
         cmd.extend(["--hidden-import", hidden])
-    cmd.extend(collect_tkinter_resources())
-    cmd.extend(bundle_ffmpeg_binaries())
+    for excluded in EXCLUDES:
+        cmd.extend(["--exclude-module", excluded])
     cmd.append(str(ENTRY))
 
     print("[build_exe]", " ".join(cmd))
-    result = subprocess.run(cmd, cwd=str(ROOT))
-    return result.returncode
+    return subprocess.run(cmd, cwd=str(ROOT)).returncode
 
 
-def main() -> int:
-    code = build()
+def _report(onedir: bool) -> int:
+    target = DIST_DIR / ("doc2md" if onedir else "doc2md.exe")
+    if onedir:
+        exe = target / "doc2md.exe"
+        if not exe.is_file():
+            print(f"[build_exe] expected output missing: {exe}")
+            return 3
+        size = sum(p.stat().st_size for p in target.rglob("*") if p.is_file())
+        print(f"[build_exe] OK -> {exe} (folder {size / (1024 * 1024):.1f} MB)")
+        return 0
+
+    if not target.is_file():
+        print(f"[build_exe] expected output missing: {target}")
+        return 3
+    print(f"[build_exe] OK -> {target} ({target.stat().st_size / (1024 * 1024):.1f} MB)")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = list(argv if argv is not None else sys.argv[1:])
+    onedir = "--onedir" in args
+    code = build(onedir=onedir)
     if code != 0:
         print("[build_exe] PyInstaller FAILED")
         return code
-    if not DIST_EXE.is_file():
-        print(f"[build_exe] expected output missing: {DIST_EXE}")
-        return 3
-    size_mb = DIST_EXE.stat().st_size / (1024 * 1024)
-    print(f"[build_exe] OK -> {DIST_EXE} ({size_mb:.1f} MB)")
-    return 0
+    return _report(onedir)
 
 
 if __name__ == "__main__":

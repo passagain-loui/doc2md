@@ -1,84 +1,101 @@
 # CHANGELOG.md
 
-`````````````````````````````text
-# CHANGELOG.md
-
-````````````````````````````text
-# CHANGELOG.md
-
-```````````````````````````text
-# CHANGELOG.md
-
-``````````````````````````text
-# CHANGELOG.md
-
-`````````````````````````text
-# CHANGELOG.md
-
-````````````````````````text
-# CHANGELOG.md
-
-```````````````````````text
-# CHANGELOG.md
-
-``````````````````````text
-# CHANGELOG.md
-
-`````````````````````text
-# CHANGELOG.md
-
-````````````````````text
-# CHANGELOG.md
-
-```````````````````text
-# CHANGELOG.md
-
-``````````````````text
-# CHANGELOG.md
-
-`````````````````text
-# CHANGELOG.md
-
-````````````````text
-# CHANGELOG.md
-
-```````````````text
-# CHANGELOG.md
-
-``````````````text
-# CHANGELOG.md
-
-`````````````text
-# CHANGELOG.md
-
-````````````text
-# CHANGELOG.md
-
-```````````text
-# CHANGELOG.md
-
-``````````text
-# CHANGELOG.md
-
-`````````text
-# CHANGELOG.md
-
-````````text
-# CHANGELOG.md
-
-```````text
-# CHANGELOG.md
-
-``````text
-# CHANGELOG.md
-
-`````text
-# CHANGELOG.md
-
-````text
-# CHANGELOG.md
-
 ```text
+# Changelog
+
+## [1.1.0] (2026-08-30) - CLEAN DOCUMENT CONVERTER
+
+Breaking release. doc2md is now a document converter only; audio and video
+transcription has been removed in full.
+
+### Removed
+- **Audio/video transcription.** `doc2md/engine/audio_engine.py`, the GPU Pack
+ build (`build_gpu_pack.py`, `setup_gpu_pack.iss`) and the `FileKind.AUDIO` /
+ `FileKind.VIDEO` routes are gone, along with the dependencies that made the
+ installer enormous: faster-whisper, ctranslate2, torch, torchaudio,
+ ffmpeg-python and imageio-ffmpeg. These accounted for roughly 2 GB of CUDA and
+ MKL binaries, the separate GPU Pack installer, and the long class of silent
+ failures where a model or an ffmpeg binary was missing at runtime and the
+ conversion produced an empty file instead of an error.
+- **CustomTkinter/TkinterDnD GUI.** Replaced, not ported - see below.
+
+### Added
+- **PyQt6 interface.** Dark themed, inline SVG icons, multi-file and whole-folder
+ drag & drop, a per-file status table (Queued / Converting / Success / Skipped /
+ Error) with the reason shown in the row, a batch progress bar, a Markdown
+ preview pane, a Copy Markdown button and a Send to Sandbox button.
+ Conversion runs on a `QThread` and communicates through signals, so no widget is
+ ever touched from a worker.
+- **PDF table extraction.** pdfplumber recovers ruled tables page by page and
+ they are emitted as real Markdown tables. Disable with `--no-tables`.
+- **Automatic text-vs-scanned PDF routing.** A document whose text layer yields
+ almost nothing is rasterized and sent to OCR; everything else takes the fast
+ PyMuPDF text path. No switch to set, and a scan can no longer convert to an
+ empty document without saying why.
+- **Thai OCR by default.** `tha+eng` is the default language for scanned PDFs and
+ images (`--ocr-lang` to change it). If the Thai model is not installed the run
+ falls back to English and says so in the output instead of failing.
+- **Shared Markdown table builder** (`doc2md.core.tables`). One implementation for
+ PDF, DOCX, XLSX and PPTX: ragged rows are padded to a single width, pipes,
+ backslashes and control characters are escaped, and multi-line cells become
+ `<br>` so they stay in their column.
+- **Integration bridge** (`doc2md.core.bridge`) and a `doc2md bridge` command.
+ Writes a bundle of `.md` files plus a `manifest.json` (schema, producer,
+ per-document SHA-256, token counts) into a folder the Mediplex AI Sandbox
+ watches; the manifest is written last so a watcher never sees a half-written
+ bundle. An opt-in HTTP transport is available for an explicit endpoint.
+- **`requirements.txt` / `requirements-dev.txt`**, which the project never had.
+- Test suites for the table builder, Thai documents end to end, the bridge, and
+ the PyQt6 window.
+
+### Fixed
+- **Nested lists were flattened.** The output sanitizer collapsed runs of two or
+ more spaces anywhere in a line, including the leading indent that makes a
+ sub-bullet a sub-bullet. Leading whitespace is now preserved.
+- **Table rows were treated as prose.** The sanitizer's duplicate-line pass
+ deleted a table row that legitimately repeated the row above it, and its
+ CSS-residue pass ate any cell containing braces. Table blocks are now
+ excluded from both.
+- **The sanitizer deleted braces from prose.** The CSS-residue stripper matched
+ any braced run at all, so a JSON snippet, set notation, or a Thai template
+ placeholder was silently removed from the output. It now only matches a block
+ containing at least one `property: value;` declaration.
+- **Bundle hashes never matched on Windows.** Markdown was written with
+ `Path.write_text`, whose default newline handling converts LF to CRLF on
+ Windows, so the file on disk did not match the SHA-256 recorded in the
+ manifest. All Markdown output is now written with LF explicitly.
+- **Emphasis markers had stray whitespace.** Word splits a styled phrase across
+ several runs; wrapping each run individually produced `** bold **`, which
+ renders as literal asterisks. Adjacent runs with the same formatting are now
+ merged before the markers are added.
+- **Drag & drop path handling.** Qt hands over `QUrl` objects, so there is no
+ re-tokenizing of a flat string and no escape processing - Thai names, spaces,
+ `#`, `&`, `%` and backslashes all survive intact.
+- **A dropped recording now explains itself.** Audio and video extensions are
+ still detected and produce "transcription was removed in 1.1.0" rather than the
+ generic "unrecognized file type".
+- Excel sheets no longer emit phantom `col3..col8` headers for the empty columns
+ Excel reports in its used range.
+- PPTX shapes nested inside groups are no longer dropped.
+- One unreadable PDF page no longer fails the whole document; only a document
+ whose every page is unreadable is an error.
+
+### Changed
+- Default per-file timeout stays 60s, with 600s for the OCR path.
+- `build_exe.py` excludes the scientific and audio stacks plus the unused Qt
+ modules, and accepts `--onedir`.
+- **The installer now ships the folder build.** Measured with `--version`, five
+ runs each on a warm cache: the folder build reaches its first window in
+ ~0.15 s, the single-file build in ~1.7 s - the whole difference is the
+ single-file archive being unpacked into a temp directory on every launch. The
+ single-file executable is still published as a portable download (85 MB); the
+ folder build is 184 MB on disk. For comparison, 1.0.27 shipped a base
+ executable plus a separate 758 MB GPU Pack.
+- `build.py` now produces the complete release set: both executables and the
+ installer.
+- The build now fails up front if a runtime dependency is missing, rather than
+ producing an executable that crashes on first use.
+
 ## [1.0.27] (2026-08-30) - LONG-RECORDING PROGRESS AND FFMPEG BUNDLING
 
 - **UX FIX**: A long recording looked frozen. Transcribing a 27-minute file showed "0%" for the
@@ -116,9 +133,9 @@ GPU utilisation during the run held at 26-71%, so the card is not saturated.
 Two levers exist in the installed faster-whisper 1.2.1 and are **not yet enabled**:
 
 - `vad_filter` (currently `False`) - silence is transcribed like speech, and
-  meeting recordings contain a lot of it.
+ meeting recordings contain a lot of it.
 - `BatchedInferencePipeline` - batches chunks per GPU pass, targeting the
-  utilisation headroom above.
+ utilisation headroom above.
 
 Both are being benchmarked against a 5-minute slice of the same real recording,
 measuring wall time **and** transcript character count together, so a speedup
@@ -332,29 +349,3 @@ not a configuration change.
 - **Hardening**: Added bulletproof exception guard for native C-extension crashes (CTranslate2, FFmpeg, pybind11)
 - **Hardening**: Pre-flight audio file validation guard prevents corrupt/unreadable files from reaching FFmpeg decode path
 ```
-````
-`````
-``````
-```````
-````````
-`````````
-``````````
-```````````
-````````````
-`````````````
-``````````````
-```````````````
-````````````````
-`````````````````
-``````````````````
-```````````````````
-````````````````````
-`````````````````````
-``````````````````````
-```````````````````````
-````````````````````````
-`````````````````````````
-``````````````````````````
-```````````````````````````
-````````````````````````````
-`````````````````````````````

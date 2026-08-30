@@ -1,136 +1,111 @@
 # README.md
 
-`````````````````````````````text
-# README.md
-
-````````````````````````````text
-# README.md
-
-```````````````````````````text
-# README.md
-
-``````````````````````````text
-# README.md
-
-`````````````````````````text
-# README.md
-
-````````````````````````text
-# README.md
-
-```````````````````````text
-# README.md
-
-``````````````````````text
-# README.md
-
-`````````````````````text
-# README.md
-
-````````````````````text
-# README.md
-
-```````````````````text
-# README.md
-
-``````````````````text
-# README.md
-
-`````````````````text
-# README.md
-
-````````````````text
-# README.md
-
-```````````````text
-# README.md
-
-``````````````text
-# README.md
-
-`````````````text
-# README.md
-
-````````````text
-# README.md
-
-```````````text
-# README.md
-
-``````````text
-# README.md
-
-`````````text
-# README.md
-
-````````text
-# README.md
-
-```````text
-# README.md
-
-``````text
-# README.md
-
-`````text
-# README.md
-
 ````text
-# README.md
+# doc2md v1.1.0
 
-```text
-# doc2md v1.0.27
+Drag a document in, get clean Markdown out. PDF, Word, Excel, PowerPoint, HTML,
+e-mail, images and source files, with Thai text and Thai filenames handled
+correctly throughout.
 
-## Performance (measured, not estimated)
+> **1.1.0 is a breaking release.** Audio and video transcription has been removed
+> in full. If you need it, stay on 1.0.27. See CHANGELOG.md for the reasoning.
 
-Measured on an RTX 4060 Laptop GPU with the `small` model, transcribing a real
-27-minute Thai meeting recording (38 MB MP3):
+## What it converts
 
-| Mode | Time for 27 min of audio | Throughput |
-|---|---|---|
-| GPU (CUDA, float16) | **10.7 min** | ~2.5x realtime |
-| CPU (int8, 20 threads) | ~2 hours | ~0.4x realtime |
+| Input | Engine | Notes |
+| --- | --- | --- |
+| `.pdf` | PyMuPDF + pdfplumber | text layer on the fast path, OCR when scanned, tables extracted |
+| `.docx` | python-docx | headings, nested lists, bold/italic, tables |
+| `.xlsx` `.xlsm` `.csv` | openpyxl | one table per sheet, truncated summary past the row limit |
+| `.pptx` | python-pptx | slide titles, bullet nesting, tables, speaker notes |
+| `.html` `.htm` `.eml` | BeautifulSoup | article text, links, tables |
+| `.png` `.jpg` `.jpeg` `.bmp` `.tif` `.webp` | Tesseract | Thai + English OCR |
+| source files, `.json`, `.txt`, `.md` | built in | fenced with the right language |
 
-Speech is much heavier than tone-based synthetic benchmarks: the same GPU hits
-10.65x on synthetic audio but ~2.5x on real speech, because every spoken segment
-must actually be decoded. Plan for roughly **40% of the recording's length** on GPU.
-
-Progress is reported as position plus an estimate, so a long job is legible from
-the start:
-
-```
-Audio length: 27:01 - transcribing...
-21% (5:40 / 27:01) ~9:12 left
-```
-
-### Checking whether the GPU is really being used
-
-Task Manager's default GPU panes (3D, Copy, Video Encode, Video Decode) **do not
-show CUDA compute**, so an active transcription looks idle at ~1%. Either:
-
-- switch a pane's dropdown to **Cuda**, or
-- run `nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv`
-
-A healthy run on this hardware shows 26-71% GPU utilisation and 1.5-1.8 GB of
-VRAM in use. The status log also states the active mode on every conversion:
+## Install
 
 ```
-Acceleration: GPU/CUDA (1 device, float16)
+pip install -r requirements.txt
 ```
 
-### Known speed levers (under evaluation, not yet enabled)
+OCR needs [Tesseract](https://github.com/UB-Mannheim/tesseract/wiki) on PATH.
+Install the Thai language data (`tha`) as well - without it, scanned Thai
+documents fall back to English and say so in the output. Tesseract is
+deliberately **not** bundled: the Thai model alone is larger than the rest of
+the application.
 
-Two options are available in the installed faster-whisper 1.2.1 but are not used
-by doc2md yet, pending measurement on real recordings:
+## Use
 
-- **`vad_filter`** - currently off, so silence in a recording is transcribed like
-  speech. Meeting audio contains a lot of it.
-- **`BatchedInferencePipeline`** - processes several chunks per GPU pass. GPU
-  utilisation during transcription peaks around 71%, so there is headroom.
+Desktop interface:
 
-Neither is enabled until the speed gain and any effect on transcript
-completeness have been measured side by side. See CHANGELOG for status.
+```
+python -m doc2md gui
+```
 
+Drag in any number of files or whole folders. Each row shows its own status -
+Queued, Converting, Success, Skipped or Error - with the reason when something
+goes wrong, so nothing fails quietly. `Copy Markdown` puts the whole batch on
+the clipboard; `Send to Sandbox` writes an ingest bundle (see below).
+
+Command line:
+
+```
+python -m doc2md convert report.pdf
+python -m doc2md convert "C:/docs" --output "C:/out" --stats
+python -m doc2md convert scan.pdf --ocr-lang tha+eng
+python -m doc2md convert big.pdf --no-tables --chunk 4000
+```
+
+Hand a batch to a downstream tool:
+
+```
+python -m doc2md bridge "C:/docs" --inbox "C:/sandbox/inbox"
+```
+
+This writes the `.md` files plus a `manifest.json` describing them - schema
+version, producer, per-document SHA-256 and token counts. The manifest is
+written last, so a watcher triggering on it never sees a half-written bundle.
+An HTTP transport is available with `--endpoint` for an explicit URL; nothing
+here touches the network unless you ask it to.
+
+## Configuration
+
+An optional `doc2md.toml` in the working directory or your home directory:
+
+```toml
+timeout = 60
+max_rows = 10000
+ocr_enabled = true
+ocr_lang = "tha+eng"
+pdf_tables = true
+default_copy = false
+stats = false
+```
+
+## Build
+
+```
+python build_exe.py # single-file dist/doc2md.exe
+python build_exe.py --onedir # folder build, starts without unpacking
+```
+
+The build refuses to run if a runtime dependency is missing, rather than
+producing an executable that fails on first use.
+
+## Development
+
+```
+pip install -r requirements-dev.txt
+powershell -ExecutionPolicy Bypass -File ./tools/verify.ps1
+```
+
+The verification gate checks version consistency, imports every module, requires
+release notes for the current version, smoke-tests the CLI, and runs the full
+test suite. It must exit 0 before a release is built.
+
+---
+
+# Release history
 
 ## Version 1.0.27 (2026-08-30) - PROGRESS DISPLAY & FFMPEG BUNDLING
 
@@ -317,30 +292,4 @@ GPU Pack to those users.
 - **Hardening**: Deep audit applied - subprocess zombie process prevention on Windows
 - **Hardening**: Singleton pattern for WhisperModel caching with memory release
 - **Hardening**: Bulletproof exception guards for native C-extension crashes
-```
 ````
-`````
-``````
-```````
-````````
-`````````
-``````````
-```````````
-````````````
-`````````````
-``````````````
-```````````````
-````````````````
-`````````````````
-``````````````````
-```````````````````
-````````````````````
-`````````````````````
-``````````````````````
-```````````````````````
-````````````````````````
-`````````````````````````
-``````````````````````````
-```````````````````````````
-````````````````````````````
-`````````````````````````````

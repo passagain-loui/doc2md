@@ -1,84 +1,48 @@
 # HISTORY.md
 
-`````````````````````````````text
-# HISTORY.md
-
-````````````````````````````text
-# HISTORY.md
-
-```````````````````````````text
-# HISTORY.md
-
-``````````````````````````text
-# HISTORY.md
-
-`````````````````````````text
-# HISTORY.md
-
-````````````````````````text
-# HISTORY.md
-
-```````````````````````text
-# HISTORY.md
-
-``````````````````````text
-# HISTORY.md
-
-`````````````````````text
-# HISTORY.md
-
-````````````````````text
-# HISTORY.md
-
-```````````````````text
-# HISTORY.md
-
-``````````````````text
-# HISTORY.md
-
-`````````````````text
-# HISTORY.md
-
-````````````````text
-# HISTORY.md
-
-```````````````text
-# HISTORY.md
-
-``````````````text
-# HISTORY.md
-
-`````````````text
-# HISTORY.md
-
-````````````text
-# HISTORY.md
-
-```````````text
-# HISTORY.md
-
-``````````text
-# HISTORY.md
-
-`````````text
-# HISTORY.md
-
-````````text
-# HISTORY.md
-
-```````text
-# HISTORY.md
-
-``````text
-# HISTORY.md
-
-`````text
-# HISTORY.md
-
-````text
-# HISTORY.md
-
 ```text
+# History
+
+## [1.1.0] - 2026-08-30
+
+Refocused doc2md from "convert anything, including recordings" to "convert
+documents, well".
+
+The audio stack was the source of both problems the tool actually had. It was
+responsible for essentially all of the download size - torch, CUDA and MKL
+binaries, plus a separate GPU Pack installer - and for the failure mode that
+was hardest to diagnose: when a model file or an ffmpeg binary was missing at
+runtime, transcription produced an empty document rather than an error, so the
+tool looked like it had worked. Removing it took the product back to what it is
+used for, and made every remaining failure explicit.
+
+The GUI was rewritten in PyQt6 rather than ported. The Tk implementation
+received drag-and-drop payloads as a single brace-delimited string and had to
+re-tokenize it; every available splitter applied escape processing, which ate
+backslashes and mangled Thai filenames. Qt delivers `QUrl` objects, which
+removes that entire class of bug rather than patching it again.
+
+Table extraction was rebuilt around one shared module. Previously each engine
+had its own table renderer, and each had a different subset of the same three
+bugs: ragged rows emitting different pipe counts, unescaped pipes ending a cell
+early, and multi-line cells breaking the row. Thai made all three worse, because
+its combining vowel and tone marks are zero-width, so any attempt to align
+columns by character count produced visibly crooked output.
+
+Three findings came out of writing the tests and reading the tool's own output
+rather than from reports. The sanitizer was flattening nested lists, because it
+collapsed the leading indent along with internal double spaces. It was also
+deleting every braced run in the document - the stripper meant for leftover CSS
+matched any `{...}`, which quietly removed JSON snippets and Thai template
+placeholders from ordinary prose; it now requires an actual `property: value;`
+declaration. And bundle checksums could never match on Windows, because
+`Path.write_text` converted LF to CRLF after the hash had already been taken.
+
+The brace bug is worth noting for how it was found: it damaged this project's
+own CHANGELOG when the repository's file-mirroring step ran the document back
+through the converter. A tool that quietly eats its own release notes is the
+same failure mode as one that quietly produces an empty transcript.
+
 ## [1.0.27] (2026-08-30) - LONG-RECORDING PROGRESS AND FFMPEG BUNDLING
 
 - **UX FIX**: A long recording looked frozen. Transcribing a 27-minute file showed "0%" for the
@@ -116,9 +80,9 @@ GPU utilisation during the run held at 26-71%, so the card is not saturated.
 Two levers exist in the installed faster-whisper 1.2.1 and are **not yet enabled**:
 
 - `vad_filter` (currently `False`) - silence is transcribed like speech, and
-  meeting recordings contain a lot of it.
+ meeting recordings contain a lot of it.
 - `BatchedInferencePipeline` - batches chunks per GPU pass, targeting the
-  utilisation headroom above.
+ utilisation headroom above.
 
 Both are being benchmarked against a 5-minute slice of the same real recording,
 measuring wall time **and** transcript character count together, so a speedup
@@ -283,29 +247,3 @@ numbers exist; defaults are unchanged in this release.
 - **Hardening**: Added bulletproof exception guard for native C-extension crashes (CTranslate2, FFmpeg, pybind11)
 - **Hardening**: Pre-flight audio file validation guard prevents corrupt/unreadable files from reaching FFmpeg decode path
 ```
-````
-`````
-``````
-```````
-````````
-`````````
-``````````
-```````````
-````````````
-`````````````
-``````````````
-```````````````
-````````````````
-`````````````````
-``````````````````
-```````````````````
-````````````````````
-`````````````````````
-``````````````````````
-```````````````````````
-````````````````````````
-`````````````````````````
-``````````````````````````
-```````````````````````````
-````````````````````````````
-`````````````````````````````

@@ -29,7 +29,16 @@ from doc2md.core.router import Detection, FileKind, detect
 from doc2md.engine import get_engine, get_engine_by_name
 
 DEFAULT_TIMEOUT_S = 60.0
-AUDIO_TIMEOUT_S = 1800.0  # 30 minutes for audio/video transcription
+
+# A scanned PDF rendered page-by-page through OCR is the only genuinely slow
+# path left, and it is opt-in. Everything else finishes in well under a second.
+OCR_TIMEOUT_S = 600.0
+
+MEDIA_REMOVED_HINT = (
+    "audio and video transcription was removed in doc2md 1.1.0; "
+    "this build is a document converter only "
+    "(PDF, DOCX, XLSX, CSV, PPTX, HTML, EML, images, code)"
+)
 
 
 @dataclass
@@ -201,6 +210,18 @@ class Converter:
                 raise ConversionError(result.error)
             return result
 
+        if detection.kind is FileKind.MEDIA:
+            result = ConversionResult(
+                source=source,
+                success=False,
+                error=f"{source.name}: {MEDIA_REMOVED_HINT}",
+                kind=detection.kind.value,
+                duration_s=time.perf_counter() - started,
+            )
+            if strict:
+                raise ConversionError(result.error)
+            return result
+
         engine = get_engine(detection.kind)
         if engine is None:
             result = ConversionResult(
@@ -232,10 +253,11 @@ class Converter:
         }
 
         try:
-            # Use longer timeout for audio/video files
+            # A scanned PDF or a large image can legitimately spend minutes in
+            # Tesseract; the default 60s ceiling would kill it mid-page.
             effective_timeout = self.timeout
-            if detection.kind in (FileKind.AUDIO, FileKind.VIDEO):
-                effective_timeout = max(self.timeout, AUDIO_TIMEOUT_S)
+            if engine.requires_process_isolation and options.get("pdf_ocr_fallback", True):
+                effective_timeout = max(self.timeout, OCR_TIMEOUT_S)
 
             if engine.requires_process_isolation:
                 raw_markdown = _run_in_process(payload, effective_timeout)

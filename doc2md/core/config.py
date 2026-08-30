@@ -14,11 +14,14 @@ DEFAULTS: dict = {
     "timeout": 60.0,
     "max_rows": 10_000,
     "ocr_enabled": True,
+    "ocr_lang": "tha+eng",
+    "pdf_tables": True,
 }
 
 _INT_KEYS = {"chunk", "max_rows"}
 _FLOAT_KEYS = {"timeout"}
-_BOOL_KEYS = {"default_copy", "stats", "ocr_enabled"}
+_BOOL_KEYS = {"default_copy", "stats", "ocr_enabled", "pdf_tables"}
+_STR_KEYS = {"ocr_lang"}
 
 
 class ConfigError(Exception):
@@ -95,6 +98,10 @@ def _sanitize(config: dict) -> dict:
                 cleaned[key] = max(0.1, float(value))
             elif key in _BOOL_KEYS:
                 cleaned[key] = bool(value)
+            elif key in _STR_KEYS:
+                text = str(value).strip()
+                if text:
+                    cleaned[key] = text
             else:
                 continue
         except (TypeError, ValueError):

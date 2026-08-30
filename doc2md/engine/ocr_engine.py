@@ -1,14 +1,19 @@
-"""OCR engine. Runs in an isolated worker process (native bindings can crash).
+"""Image OCR engine (Thai + English). Runs in an isolated worker process.
 
 Backend priority:
-1. Tesseract binary on PATH (via pytesseract)
-2. rapidocr_onnxruntime package (bundled ONNX models, no external binary)
-3. Metadata-only output with an explanatory hint
 
-Thread-safety: the RapidOCR singleton is created and invoked under a class-level
-lock so concurrent in-process workers can never race ONNX initialization or
-inference. Cross-process parallelism is provided by the converter's process
-isolation for this engine.
+1. Tesseract binary on PATH (via pytesseract), using ``tha+eng`` by default so
+   Thai documents are read correctly without any per-file configuration.
+2. ``rapidocr_onnxruntime`` if it happens to be installed - it bundles its own
+   ONNX models and needs no external binary. It is *not* a dependency of this
+   project (the ONNX runtime alone would triple the size of the executable),
+   only an opt-in upgrade path.
+3. Metadata-only output with an explanatory hint, so a missing OCR backend is
+   visible in the output rather than silently producing an empty file.
+
+Thread-safety: the RapidOCR singleton is created and invoked under a
+class-level lock so concurrent in-process workers can never race ONNX
+initialization or inference.
 """
 
 from __future__ import annotations
@@ -21,6 +26,14 @@ from pathlib import Path
 from doc2md.core.errors import ConversionError, EngineUnavailableError
 from doc2md.core.router import FileKind
 from doc2md.engine.base import BaseEngine
+
+DEFAULT_OCR_LANG = "tha+eng"
+
+_MISSING_LANGUAGE_MARKERS = (
+    "failed loading language",
+    "could not initialize tesseract",
+    "tessdata",
+)
 
 
 class OcrEngine(BaseEngine):
@@ -39,12 +52,18 @@ class OcrEngine(BaseEngine):
             return self._assemble(parts, text)
         return self._assemble(parts, self._run_rapidocr(source))
 
+    @staticmethod
+    def language(options: dict) -> str:
+        """Resolve the Tesseract language string for this conversion."""
+        value = str(options.get("ocr_lang") or DEFAULT_OCR_LANG).strip()
+        return value or DEFAULT_OCR_LANG
+
     def _metadata_markdown(self, source: Path) -> list[str]:
         try:
             from PIL import Image, UnidentifiedImageError
         except ImportError as exc:
             raise EngineUnavailableError(
-                "OCR backend missing: pip install 'doc2md[ocr]' (Pillow)"
+                "OCR backend missing: pip install -r requirements.txt (Pillow)"
             ) from exc
 
         try:
@@ -61,7 +80,7 @@ class OcrEngine(BaseEngine):
             raise ConversionError(f"Unreadable image file: {source} ({exc})") from exc
 
         return [
-            f"# {Path(source).name}",
+            f"# {source.name}",
             "",
             f"- **Type:** image ({fmt})",
             f"- **Dimensions:** {width} x {height}",
@@ -71,7 +90,12 @@ class OcrEngine(BaseEngine):
 
     @staticmethod
     def _normalized_rgb(source: Path, workdir: Path) -> Path:
-        """Decode any PIL-supported format into an EXIF-upright RGB PNG."""
+        """Decode any PIL-supported format into an EXIF-upright RGB PNG.
+
+        Also gives Tesseract a path it can definitely open: passing a Thai
+        filename straight through would be re-encoded with the Windows code
+        page by the Tesseract CLI and fail to open.
+        """
         from PIL import Image, ImageOps
 
         out_path = workdir / "normalized.png"
@@ -83,7 +107,6 @@ class OcrEngine(BaseEngine):
         return out_path
 
     def _run_tesseract(self, source: Path, options: dict) -> str | None:
-        language = str(options.get("ocr_lang", "eng"))
         try:
             import pytesseract
         except ImportError as exc:
@@ -92,10 +115,21 @@ class OcrEngine(BaseEngine):
                 f"({exc}); run pip install pytesseract"
             ) from exc
 
+        language = self.language(options)
         try:
             with tempfile.TemporaryDirectory(prefix="doc2md_ocr_") as tmpdir:
                 normalized = self._normalized_rgb(source, Path(tmpdir))
-                return pytesseract.image_to_string(str(normalized), lang=language)
+                try:
+                    return pytesseract.image_to_string(str(normalized), lang=language)
+                except Exception as exc:
+                    fallback = self._language_fallback(language, exc)
+                    if fallback is None:
+                        raise
+                    text = pytesseract.image_to_string(str(normalized), lang=fallback)
+                    return (
+                        f"> The `{language}` Tesseract language data is not installed; "
+                        f"this image was read with `{fallback}` instead.\n\n{text}"
+                    )
         except ConversionError:
             raise
         except Exception as exc:
@@ -103,6 +137,23 @@ class OcrEngine(BaseEngine):
             if tesseract_error and isinstance(exc, tesseract_error):
                 raise ConversionError(f"Tesseract OCR failed: {exc}") from exc
             raise ConversionError(f"OCR conversion failed: {source} ({exc})") from exc
+
+    @staticmethod
+    def _language_fallback(language: str, exc: Exception) -> str | None:
+        """Return a reduced language string when *exc* is a missing-model error.
+
+        A Thai-capable install is the goal, but a machine with plain English
+        tessdata should still read the English half of a document rather than
+        failing the whole conversion.
+        """
+        message = str(exc).lower()
+        if not any(marker in message for marker in _MISSING_LANGUAGE_MARKERS):
+            return None
+        remaining = [
+            part for part in language.split("+") if part and part.lower() != "tha"
+        ]
+        candidate = "+".join(remaining) or "eng"
+        return candidate if candidate != language else None
 
     def _get_rapidocr(self):
         cls = type(self)
@@ -133,8 +184,8 @@ class OcrEngine(BaseEngine):
             if "rapidocr" in hint.lower() and "tesseract" in hint.lower():
                 return (
                     "> OCR unavailable: neither Tesseract nor RapidOCR is available. "
-                    "Install Tesseract OCR or run pip install rapidocr-onnxruntime "
-                    "(RapidOCR bundles ONNX models, no external binary needed)."
+                    "Install Tesseract OCR (with the Thai language data for Thai "
+                    "documents) or run pip install rapidocr-onnxruntime."
                 )
             raise
         cls = type(self)
@@ -144,7 +195,6 @@ class OcrEngine(BaseEngine):
         except Exception as exc:
             raise ConversionError(f"RapidOCR failed during inference: {exc}") from exc
 
-        lines: list[str] = []
         try:
             items = sorted(raw_result or [], key=lambda item: item[0])
             lines = [str(item[1]).strip() for item in items if str(item[1]).strip()]
@@ -155,9 +205,7 @@ class OcrEngine(BaseEngine):
     def _assemble(self, parts: list[str], text: str | None) -> str:
         cleaned = (text or "").strip()
         if not cleaned:
-            parts.append(
-                "> OCR completed but no readable text was found in the image."
-            )
+            parts.append("> OCR completed but no readable text was found in the image.")
             return "\n".join(parts)
         parts.extend(["## Extracted text", "", cleaned])
         return "\n".join(parts)

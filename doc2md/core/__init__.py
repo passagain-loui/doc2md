@@ -1,3 +1,12 @@
-"""Core modules: routing, cleaning, encoding safety, and conversion orchestration."""
+"""Core modules: routing, tables, cleaning, export, and conversion orchestration."""
 
-__all__ = ["cleaner", "converter", "encoding", "errors", "router"]
+__all__ = [
+    "bridge",
+    "cleaner",
+    "converter",
+    "encoding",
+    "errors",
+    "exporter",
+    "router",
+    "tables",
+]

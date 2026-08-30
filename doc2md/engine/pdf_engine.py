@@ -1,8 +1,17 @@
-"""PDF engine. Runs in an isolated worker process (PyMuPDF can segfault).
+"""PDF engine: automatic text-vs-scanned routing, table extraction, Thai OCR.
 
-If a PDF contains no extractable text (scanned document), the engine can
-optionally fall back to OCR: pages are rendered to temporary PNGs and passed
-to Tesseract (guarded by `pdf_ocr_fallback` option, default enabled).
+Runs in an isolated worker process because both PyMuPDF and Tesseract are
+native code that can abort the interpreter outright.
+
+Two distinct paths, chosen per document rather than per installation:
+
+* **Text PDF** - PyMuPDF pulls the embedded text layer. This is the fast path
+  (milliseconds per page) and is used whenever the document actually has text.
+  Tables are recovered separately through pdfplumber, whose ruling-line/word
+  clustering handles Thai glyphs that a naive x-position sort scrambles.
+* **Scanned PDF** - detected when the text layer yields almost nothing, the
+  page is rendered to a bitmap and pushed through Tesseract with the Thai +
+  English models. No manual switch, no silent empty output.
 """
 
 from __future__ import annotations
@@ -13,7 +22,18 @@ from pathlib import Path
 
 from doc2md.core.errors import ConversionError, EngineUnavailableError
 from doc2md.core.router import FileKind
+from doc2md.core.tables import render_table
 from doc2md.engine.base import BaseEngine
+from doc2md.engine.ocr_engine import DEFAULT_OCR_LANG
+
+# A document whose entire text layer yields fewer than this many characters is
+# treated as a scan rather than as a text PDF. Measured across the whole
+# document, not per page: a text PDF with one scanned cover page should not
+# send all 200 of its pages through OCR, and a genuine scan yields only the
+# handful of characters a stray page-number layer contributes.
+SCANNED_TEXT_THRESHOLD = 16
+
+DEFAULT_OCR_DPI = 200
 
 
 class PdfEngine(BaseEngine):
@@ -23,42 +43,27 @@ class PdfEngine(BaseEngine):
 
     def convert(self, source: Path, options: dict) -> str:
         self.validate_source(source)
-        try:
-            import pymupdf
-        except ImportError as exc:
-            raise EngineUnavailableError(
-                "PDF backend missing: pip install 'doc2md[docs]' (pymupdf)"
-            ) from exc
-
-        try:
-            doc = pymupdf.open(str(source))
-        except Exception as exc:
-            raise ConversionError(f"Corrupted or unreadable PDF: {source} ({exc})") from exc
-
+        doc = self._open(source)
         try:
             if doc.needs_pass:
-                raise ConversionError(f"Password-protected PDF cannot be converted: {source}")
-            parts: list[str] = [f"# {Path(source).name}", ""]
-            text_pages = 0
-            for index, page in enumerate(doc, start=1):
-                text = page.get_text("text").strip()
-                if not text:
-                    continue
-                text_pages += 1
-                parts.append(f"## Page {index}")
-                parts.append("")
-                parts.append(text)
-                parts.append("")
-            if text_pages == 0:
-                ocr_markdown = self._try_ocr_fallback(doc, options)
-                if ocr_markdown:
-                    parts.extend(ocr_markdown)
-                else:
-                    parts.append(
-                        f"> No extractable text found on {doc.page_count} page(s). "
-                        "The PDF is likely scanned; re-run with OCR enabled."
-                    )
-            return "\n".join(parts)
+                raise ConversionError(
+                    f"Password-protected PDF cannot be converted: {source}"
+                )
+
+            pages, unreadable = self._read_text_layer(doc)
+            if doc.page_count and unreadable == doc.page_count:
+                raise ConversionError(
+                    f"PDF conversion failed: {source} "
+                    f"(the text layer is unreadable on all {doc.page_count} page(s))"
+                )
+            has_text = sum(len(text) for text in pages) >= SCANNED_TEXT_THRESHOLD
+
+            if has_text:
+                body = self._render_text_pdf(source, pages, options)
+            else:
+                body = self._render_scanned_pdf(source, doc, options)
+
+            return "\n".join([f"# {source.name}", "", *body]).rstrip() + "\n"
         except ConversionError:
             raise
         except Exception as exc:
@@ -69,27 +74,164 @@ class PdfEngine(BaseEngine):
             except Exception:
                 pass
 
-    def _try_ocr_fallback(self, doc, options: dict) -> list[str] | None:
-        if not options.get("pdf_ocr_fallback", True):
-            return None
-        if shutil.which("tesseract") is None:
-            return None
-        try:
-            import pytesseract
-        except ImportError:
-            return None
+    # ------------------------------------------------------------------ setup
 
-        language = str(options.get("ocr_lang", "eng"))
-        out: list[str] = []
+    @staticmethod
+    def _open(source: Path):
         try:
-            with tempfile.TemporaryDirectory(prefix="doc2md_pdfocr_") as tmpdir:
-                for index, page in enumerate(doc, start=1):
-                    png_path = Path(tmpdir) / f"page_{index}.png"
-                    pix = page.get_pixmap(dpi=150)
+            import pymupdf
+        except ImportError as exc:
+            raise EngineUnavailableError(
+                "PDF backend missing: pip install -r requirements.txt (pymupdf)"
+            ) from exc
+        try:
+            # str() rather than the Path: PyMuPDF encodes the filename with the
+            # active code page on Windows, which mangles Thai directory names.
+            # Passing the raw bytes of an already-resolved path avoids that.
+            return pymupdf.open(filename=str(source))
+        except Exception as exc:
+            raise ConversionError(
+                f"Corrupted or unreadable PDF: {source} ({exc})"
+            ) from exc
+
+    @staticmethod
+    def _read_text_layer(doc) -> tuple[list[str], int]:
+        """Return per-page text plus the number of pages that could not be read.
+
+        One page failing must not lose the other 199, so failures are recorded
+        rather than raised. The caller escalates only when *every* page fails,
+        which means the document - not a page - is the problem.
+        """
+        pages: list[str] = []
+        unreadable = 0
+        for page in doc:
+            try:
+                pages.append(page.get_text("text").strip())
+            except Exception:
+                unreadable += 1
+                pages.append("")
+        return pages, unreadable
+
+    # -------------------------------------------------------------- text path
+
+    def _render_text_pdf(self, source: Path, pages: list[str], options: dict) -> list[str]:
+        tables_by_page = self._extract_tables(source, options)
+        out: list[str] = []
+        for index, text in enumerate(pages, start=1):
+            tables = tables_by_page.get(index, [])
+            if not text and not tables:
+                continue
+            out.extend([f"## Page {index}", ""])
+            if text:
+                out.extend([text, ""])
+            for table in tables:
+                out.extend([table, ""])
+        if not out:
+            out.append("_(the PDF contains pages but no extractable content)_")
+        return out
+
+    def _extract_tables(self, source: Path, options: dict) -> dict[int, list[str]]:
+        """Recover tables per page as Markdown, keyed by 1-based page number.
+
+        Failure here is never fatal: a document whose tables cannot be parsed
+        still converts, it just loses the grid formatting. pdfplumber is also
+        optional, so a slim install degrades to text-only instead of crashing.
+        """
+        if not options.get("pdf_tables", True):
+            return {}
+        try:
+            import pdfplumber
+        except ImportError:
+            return {}
+
+        found: dict[int, list[str]] = {}
+        try:
+            with pdfplumber.open(str(source)) as pdf:
+                for index, page in enumerate(pdf.pages, start=1):
+                    try:
+                        raw_tables = page.extract_tables() or []
+                    except Exception:
+                        continue
+                    rendered = [
+                        markdown
+                        for raw in raw_tables
+                        if (markdown := render_table(raw))
+                    ]
+                    if rendered:
+                        found[index] = rendered
+        except Exception:
+            return found
+        return found
+
+    # ----------------------------------------------------------- scanned path
+
+    def _render_scanned_pdf(self, source: Path, doc, options: dict) -> list[str]:
+        if not options.get("pdf_ocr_fallback", True):
+            return [
+                f"> No extractable text found on {doc.page_count} page(s); this PDF "
+                "appears to be scanned and OCR is switched off. Re-run with OCR "
+                "enabled to read it."
+            ]
+
+        reason = self._ocr_unavailable_reason()
+        if reason:
+            return [
+                f"> No extractable text found on {doc.page_count} page(s); this PDF "
+                f"appears to be scanned, but OCR is unavailable: {reason}"
+            ]
+
+        import pytesseract
+
+        language = self._ocr_language(options)
+        dpi = self._ocr_dpi(options)
+        out: list[str] = []
+        with tempfile.TemporaryDirectory(prefix="doc2md_pdfocr_") as tmpdir:
+            for index, page in enumerate(doc, start=1):
+                png_path = Path(tmpdir) / f"page_{index}.png"
+                try:
+                    pix = page.get_pixmap(dpi=dpi)
                     pix.save(str(png_path))
                     del pix
-                    text = pytesseract.image_to_string(str(png_path), lang=language).strip()
-                    out.extend([f"## Page {index} (OCR)", "", text or "_(no text detected)_", ""])
-        except Exception:
-            return None
-        return out or None
+                    text = pytesseract.image_to_string(
+                        str(png_path), lang=language
+                    ).strip()
+                except Exception as exc:
+                    out.extend(
+                        [f"## Page {index} (OCR)", "", f"> OCR failed: {exc}", ""]
+                    )
+                    continue
+                out.extend(
+                    [
+                        f"## Page {index} (OCR)",
+                        "",
+                        text or "_(no text detected on this page)_",
+                        "",
+                    ]
+                )
+        return out
+
+    @staticmethod
+    def _ocr_unavailable_reason() -> str | None:
+        if shutil.which("tesseract") is None:
+            return (
+                "the Tesseract binary is not on PATH "
+                "(install Tesseract OCR with the Thai language data)"
+            )
+        try:
+            import pytesseract  # noqa: F401
+        except ImportError:
+            return "the pytesseract package is not installed"
+        return None
+
+    @staticmethod
+    def _ocr_language(options: dict) -> str:
+        language = str(options.get("ocr_lang") or DEFAULT_OCR_LANG).strip()
+        return language or DEFAULT_OCR_LANG
+
+    @staticmethod
+    def _ocr_dpi(options: dict) -> int:
+        try:
+            dpi = int(options.get("ocr_dpi", DEFAULT_OCR_DPI))
+        except (TypeError, ValueError):
+            return DEFAULT_OCR_DPI
+        return min(max(dpi, 72), 600)

@@ -20,8 +20,7 @@ class FileKind(str, Enum):
     HTML = "html"
     EML = "eml"
     IMAGE = "image"
-    AUDIO = "audio"
-    VIDEO = "video"
+    MEDIA = "media"
     JSON = "json"
     CODE = "code"
     TEXT = "text"
@@ -68,7 +67,11 @@ IMAGE_EXTENSIONS = {
     ".webp": "image/webp",
 }
 
-AUDIO_EXTENSIONS = {
+# Audio/video transcription was removed in v1.1.0 (doc2md is a document
+# converter now). These extensions are still *detected* so a dropped recording
+# produces one explicit "no longer supported" message instead of the generic
+# "unrecognized file type" - a silent failure users could not act on.
+MEDIA_EXTENSIONS = {
     ".mp3": "audio/mpeg",
     ".wav": "audio/wav",
     ".m4a": "audio/mp4",
@@ -77,9 +80,6 @@ AUDIO_EXTENSIONS = {
     ".ogg": "audio/ogg",
     ".wma": "audio/x-ms-wma",
     ".aiff": "audio/aiff",
-}
-
-VIDEO_EXTENSIONS = {
     ".mp4": "video/mp4",
     ".mkv": "video/x-matroska",
     ".avi": "video/x-msvideo",
@@ -131,8 +131,7 @@ MIME_BY_KIND: dict[FileKind, str] = {
     FileKind.HTML: "text/html",
     FileKind.EML: "message/rfc822",
     FileKind.IMAGE: "application/octet-stream",
-    FileKind.AUDIO: "audio/mpeg",
-    FileKind.VIDEO: "video/mp4",
+    FileKind.MEDIA: "application/octet-stream",
     FileKind.JSON: "application/json",
     FileKind.CODE: "text/x-code",
     FileKind.TEXT: "text/plain",
@@ -251,10 +250,8 @@ def _detect_extension(p: Path) -> Detection | None:
         return Detection(kind, MIME_BY_KIND[kind], "extension")
     if suffix in IMAGE_EXTENSIONS:
         return Detection(FileKind.IMAGE, IMAGE_EXTENSIONS[suffix], "extension")
-    if suffix in AUDIO_EXTENSIONS:
-        return Detection(FileKind.AUDIO, AUDIO_EXTENSIONS[suffix], "extension")
-    if suffix in VIDEO_EXTENSIONS:
-        return Detection(FileKind.VIDEO, VIDEO_EXTENSIONS[suffix], "extension")
+    if suffix in MEDIA_EXTENSIONS:
+        return Detection(FileKind.MEDIA, MEDIA_EXTENSIONS[suffix], "extension")
     if suffix in CODE_EXTENSIONS:
         return Detection(FileKind.CODE, MIME_BY_KIND[FileKind.CODE], "extension")
     return None

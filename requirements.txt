@@ -1,0 +1,32 @@
+# doc2md runtime dependencies - document conversion only.
+#
+# Audio/video transcription (faster-whisper, ctranslate2, torch, torchaudio,
+# ffmpeg-python, imageio-ffmpeg) was removed in 1.1.0. Those packages pulled in
+# roughly 2 GB of CUDA/MKL binaries and were the sole reason the executable
+# needed a separate "GPU Pack" installer. Do not add them back.
+
+# --- interface ---
+PyQt6>=6.6,<7
+typer>=0.12
+rich>=13.7
+
+# --- document engines ---
+pymupdf>=1.24          # fast PDF text layer + page rasterization for OCR
+pdfplumber>=0.11       # PDF table extraction (ruling lines + word clustering)
+python-docx>=1.1
+openpyxl>=3.1
+python-pptx>=1.0
+
+# --- HTML / e-mail ---
+beautifulsoup4>=4.12
+lxml>=5.2
+
+# --- images and OCR ---
+# Tesseract itself is an external binary and is intentionally NOT bundled:
+# the Thai language pack alone is larger than the rest of the application.
+pillow>=10.3
+pytesseract>=0.3.10
+
+# --- utilities ---
+charset-normalizer>=3.3
+pyperclip>=1.8

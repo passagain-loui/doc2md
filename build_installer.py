@@ -18,7 +18,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 ISS_SCRIPT = ROOT / "setup_builder.iss"
-PAYLOAD_EXE = ROOT / "dist" / "doc2md.exe"
+# The installer packages the folder build; see the comment in setup_builder.iss.
+PAYLOAD_EXE = ROOT / "dist" / "doc2md" / "doc2md.exe"
 PYPROJECT = ROOT / "pyproject.toml"
 
 ISCC_CANDIDATES = [

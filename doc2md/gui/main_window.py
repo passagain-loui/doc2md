@@ -1,692 +1,800 @@
-"""Modern GUI dashboard for doc2md converter with full control set."""
+"""PyQt6 desktop interface for doc2md.
+
+Design notes that matter for correctness rather than looks:
+
+* **Paths.** Dropped files arrive as ``QUrl`` objects and are read with
+  ``QUrl.toLocalFile()``, which hands back a real Python ``str`` decoded from
+  UTF-16. The previous Tk implementation received one flat string and had to
+  re-tokenize it, which is where Thai names, spaces and backslash escapes went
+  wrong. Nothing in this module parses a path out of text.
+* **Threading.** Conversion runs in a ``QThread``; the worker only *emits*
+  signals and never touches a widget. Qt queues those signals onto the GUI
+  thread, so there is no equivalent of the Tk "call widgets from a worker and
+  hope" hazard.
+* **Reporting.** Every file ends in exactly one terminal state - Success,
+  Skipped or Error - and the error text is shown in the row. A file can never
+  silently disappear from the batch.
+"""
 
 from __future__ import annotations
 
-import gc
 import logging
-import os
-import re
-import threading
-import time
-import traceback
 from pathlib import Path
-from typing import Optional
 
-try:
-    import customtkinter as ctk
-    from tkinter import messagebox, filedialog
-except ImportError:
-    import tkinter as ctk
-    from tkinter import messagebox, filedialog
-
-try:
-    from tkinterdnd2 import DND_FILES, DND_TEXT
-except ImportError:
-    DND_FILES = None
-    DND_TEXT = None
-
-from doc2md.core.converter import Converter
-from doc2md.core.errors import ConversionError
-from doc2md.core.router import (
-    AUDIO_EXTENSIONS,
-    CODE_EXTENSIONS,
-    IMAGE_EXTENSIONS,
-    VIDEO_EXTENSIONS,
-    detect,
-    FileKind,
+from PyQt6.QtCore import QObject, Qt, QThread, QUrl, pyqtSignal
+from PyQt6.QtGui import QColor, QGuiApplication
+from PyQt6.QtWidgets import (
+    QAbstractItemView,
+    QCheckBox,
+    QComboBox,
+    QFileDialog,
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QMainWindow,
+    QMessageBox,
+    QPlainTextEdit,
+    QProgressBar,
+    QPushButton,
+    QSplitter,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QVBoxLayout,
+    QWidget,
 )
+
+from doc2md import __version__
+from doc2md.core.converter import Converter
+from doc2md.core.router import FileKind, detect
+from doc2md.gui import theme
 
 logger = logging.getLogger(__name__)
 
-# Every kind the engine registry can actually convert. FileKind.UNKNOWN is
-# deliberately excluded so unsupported drops are reported up front instead of
-# failing later inside the worker.
-SUPPORTED_KINDS = frozenset(k for k in FileKind if k is not FileKind.UNKNOWN)
+# Kinds an engine can actually handle. MEDIA is excluded on purpose: audio and
+# video are recognized so the user gets a specific "no longer supported"
+# message, not routed to a converter that does not exist.
+SUPPORTED_KINDS = frozenset(
+    kind for kind in FileKind if kind not in (FileKind.UNKNOWN, FileKind.MEDIA)
+)
+
+OUTPUT_FORMATS = [("Markdown (.md)", ".md"), ("Plain text (.txt)", ".txt")]
+OCR_LANGUAGES = [
+    ("Thai + English", "tha+eng"),
+    ("Thai only", "tha"),
+    ("English only", "eng"),
+]
+
+STATUS_QUEUED = "Queued"
+STATUS_CONVERTING = "Converting"
+STATUS_SUCCESS = "Success"
+STATUS_SKIPPED = "Skipped"
+STATUS_ERROR = "Error"
+
+_STATUS_KEYS = {
+    STATUS_QUEUED: "queued",
+    STATUS_CONVERTING: "converting",
+    STATUS_SUCCESS: "success",
+    STATUS_SKIPPED: "skipped",
+    STATUS_ERROR: "error",
+}
+
+COLUMN_FILE = 0
+COLUMN_KIND = 1
+COLUMN_STATUS = 2
+COLUMN_DETAIL = 3
 
 
-class MainWindow:
-    """Full-featured CustomTkinter GUI for doc2md converter."""
+def collect_files(paths, *, recurse: bool = True) -> tuple[list[Path], list[tuple[Path, str]]]:
+    """Split *paths* into convertible files and rejected ``(path, reason)`` pairs.
 
-    AUDIO_MODELS = ["tiny", "base", "small", "medium", "large-v3"]
-    LANGUAGES = ["Auto-detect", "English", "Thai", "Spanish", "French", "German", "Chinese", "Japanese"]
-    OUTPUT_FORMATS = ["Markdown (.md)", "Plain Text (.txt)"]
+    Directories are walked so a user can drop a whole folder. Duplicates are
+    removed case-insensitively (the Windows filesystem is case-insensitive, and
+    converting the same document twice writes the second result to a ``-1``
+    file for no reason).
+    """
+    accepted: list[Path] = []
+    rejected: list[tuple[Path, str]] = []
+    seen: set[str] = set()
 
-    def __init__(self, root):
-        """Initialize the GUI window."""
-        from doc2md import __version__
-        self.root = root
-        self.version = __version__
-        self.root.title("doc2md - Document to Markdown Converter")
-        self.root.geometry("950x800")
-
-        # Theme setup
+    def push(path: Path) -> None:
         try:
-            if hasattr(ctk, 'set_appearance_mode'):
-                ctk.set_appearance_mode("dark")
-            if hasattr(ctk, 'set_default_color_theme'):
-                ctk.set_default_color_theme("blue")
-        except Exception as exc:
-            logger.warning(f"Theme setup failed: {exc}")
-
-        self.converter = Converter()
-        self.is_converting = False
-        self.cancel_event = threading.Event()
-        self.conversion_thread: Optional[threading.Thread] = None
-        self.selected_files: list[Path] = []
-        self._media_duration: float = 0.0
-        self._stage_started: float = 0.0
-
-        # UI variables
-        self.audio_model_var = ctk.StringVar(value="small")
-        self.language_var = ctk.StringVar(value="Auto-detect")
-        self.output_format_var = ctk.StringVar(value="Markdown (.md)")
-        self.ocr_enabled_var = ctk.BooleanVar(value=False)
-        self.copy_clipboard_var = ctk.BooleanVar(value=True)
-        self.output_dir_var = ctk.StringVar(value=str(Path.home() / "Documents"))
-
-        self._setup_ui()
-        self._setup_drag_drop()
-        self._setup_cleanup()
-
-    def _setup_ui(self) -> None:
-        """Set up complete UI layout with all controls (Tech Dark Mode theme)."""
-        # Tech Dark Mode colors
-        bg_dark = "#0F172A"
-        card_dark = "#1E293B"
-        accent_cyan = "#06B6D4"
-
-        # Main container (Tech Dark background)
-        main_frame = ctk.CTkFrame(self.root, fg_color=bg_dark)
-        main_frame.pack(fill="both", expand=True, padx=15, pady=15)
-
-        # Header block: product name + version/branding line (in-app, not in the
-        # window titlebar - the titlebar is reserved for the plain product name).
-        header_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
-        header_frame.pack(fill="x", pady=(0, 20))
-
-        title = ctk.CTkLabel(header_frame, text="doc2md - Document to Markdown Converter",
-                            font=("Arial", 22, "bold"), text_color=accent_cyan)
-        title.pack()
-
-        subtitle = ctk.CTkLabel(header_frame, text=f"v{self.version}  •  by Passagain P.",
-                                font=("Arial", 12), text_color="#64748B")
-        subtitle.pack(pady=(2, 0))
-
-        # Settings panel - Grid-based layout with Tech Dark theme
-        settings_frame = ctk.CTkFrame(main_frame, fg_color=card_dark, corner_radius=12)
-        settings_frame.pack(fill="x", padx=5, pady=(0, 15))
-
-        # Row 1: Model, Language, Format (expanded widths to prevent ComboBox text clipping)
-        row1_frame = ctk.CTkFrame(settings_frame, fg_color="transparent")
-        row1_frame.pack(fill="x", padx=15, pady=(12, 8))
-
-        model_label = ctk.CTkLabel(row1_frame, text="Audio Model:", font=("Arial", 11, "bold"), text_color=accent_cyan)
-        model_label.pack(side="left", padx=5)
-
-        model_combo = ctk.CTkComboBox(row1_frame, values=self.AUDIO_MODELS,
-                                      variable=self.audio_model_var, width=130, state="readonly", font=("Arial", 10))
-        model_combo.pack(side="left", padx=8)
-
-        self.model_status_label = ctk.CTkLabel(row1_frame, text="Ready",
-                                              text_color=("#10b981", "#34d399"), font=("Arial", 10))
-        self.model_status_label.pack(side="left", padx=20)
-
-        lang_label = ctk.CTkLabel(row1_frame, text="Language:", font=("Arial", 11, "bold"), text_color=accent_cyan)
-        lang_label.pack(side="left", padx=5)
-
-        lang_combo = ctk.CTkComboBox(row1_frame, values=self.LANGUAGES,
-                                     variable=self.language_var, width=150, state="readonly", font=("Arial", 10))
-        lang_combo.pack(side="left", padx=8)
-
-        format_label = ctk.CTkLabel(row1_frame, text="Format:", font=("Arial", 11, "bold"), text_color=accent_cyan)
-        format_label.pack(side="left", padx=5)
-
-        format_combo = ctk.CTkComboBox(row1_frame, values=self.OUTPUT_FORMATS,
-                                       variable=self.output_format_var, width=160, state="readonly", font=("Arial", 10))
-        format_combo.pack(side="left", padx=8)
-
-        # Row 2: Output Directory (with tech dark styling)
-        row2_frame = ctk.CTkFrame(settings_frame, fg_color="transparent")
-        row2_frame.pack(fill="x", padx=15, pady=(8, 12))
-
-        output_label = ctk.CTkLabel(row2_frame, text="Output Folder:", font=("Arial", 11, "bold"), text_color=accent_cyan)
-        output_label.pack(side="left", padx=5)
-
-        self.output_dir_entry = ctk.CTkEntry(row2_frame, textvariable=self.output_dir_var, width=350, font=("Arial", 10))
-        self.output_dir_entry.pack(side="left", padx=8, fill="x", expand=True)
-
-        browse_output_btn = ctk.CTkButton(row2_frame, text="Browse", command=self._browse_output_dir, width=90,
-                                         fg_color=accent_cyan, hover_color="#0891B2", font=("Arial", 10, "bold"))
-        browse_output_btn.pack(side="left", padx=8)
-
-        # Advanced settings frame (Tech Dark)
-        adv_frame = ctk.CTkFrame(main_frame, fg_color=card_dark, corner_radius=12)
-        adv_frame.pack(fill="x", padx=5, pady=(0, 15))
-
-        ocr_check = ctk.CTkCheckBox(adv_frame, text="Enable PDF OCR (Slower)",
-                                   variable=self.ocr_enabled_var, font=("Arial", 10), text_color=accent_cyan)
-        ocr_check.pack(side="left", padx=15, pady=12)
-
-        clip_check = ctk.CTkCheckBox(adv_frame, text="Copy to Clipboard",
-                                    variable=self.copy_clipboard_var, font=("Arial", 10), text_color=accent_cyan)
-        clip_check.pack(side="left", padx=20)
-
-        # Drop zone (Tech Dark with cyan border)
-        drop_frame = ctk.CTkFrame(main_frame, fg_color=card_dark, border_width=2, border_color=accent_cyan, corner_radius=12)
-        drop_frame.pack(fill="both", expand=True, padx=5, pady=(0, 15))
-
-        drop_label = ctk.CTkLabel(drop_frame, text="📁 Drag & drop files here\nor click to browse",
-                                 font=("Arial", 16, "bold"), text_color=accent_cyan)
-        drop_label.pack(expand=True, pady=30)
-
-        self.drop_zone = drop_frame
-        self.drop_label = drop_label
-
-        # Progress bar with percentage label (Tech Dark)
-        progress_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
-        progress_frame.pack(fill="x", padx=5, pady=(0, 10))
-
-        progress_header_frame = ctk.CTkFrame(progress_frame, fg_color="transparent")
-        progress_header_frame.pack(fill="x", padx=0, pady=(0, 5))
-
-        progress_label = ctk.CTkLabel(progress_header_frame, text="Progress:", font=("Arial", 10, "bold"), text_color=accent_cyan)
-        progress_label.pack(side="left", anchor="w")
-
-        self.progress_percent_label = ctk.CTkLabel(progress_header_frame, text="0%", font=("Arial", 10, "bold"),
-                                                    text_color=accent_cyan)
-        self.progress_percent_label.pack(side="right", anchor="e")
-
-        self.progress_bar = ctk.CTkProgressBar(progress_frame, height=24, corner_radius=8, progress_color=accent_cyan)
-        self.progress_bar.pack(fill="x", padx=0, pady=0)
-        self.progress_bar.set(0)
-
-        # Button frame (Tech Dark)
-        button_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
-        button_frame.pack(fill="x", padx=5, pady=(0, 15))
-
-        browse_btn = ctk.CTkButton(button_frame, text="Browse Files",
-                                  command=self._browse_files, width=130, height=38, font=("Arial", 11, "bold"),
-                                  fg_color=accent_cyan, hover_color="#0891B2")
-        browse_btn.pack(side="left", padx=5)
-
-        self.convert_button = ctk.CTkButton(button_frame, text="Convert",
-                                           command=self._start_conversion, state="disabled",
-                                           width=130, height=38, font=("Arial", 11, "bold"),
-                                           fg_color=accent_cyan, hover_color="#0891B2")
-        self.convert_button.pack(side="left", padx=5)
-
-        # Cancel button (red)
-        self.cancel_button = ctk.CTkButton(button_frame, text="Cancel",
-                                          command=self._cancel_conversion, state="disabled",
-                                          width=130, height=38, fg_color="#DC2626", hover_color="#991b1b",
-                                          font=("Arial", 11, "bold"))
-        self.cancel_button.pack(side="left", padx=5)
-
-        # Status log (Tech Dark)
-        log_frame = ctk.CTkFrame(main_frame, fg_color=card_dark, corner_radius=12)
-        log_frame.pack(fill="both", expand=True, padx=5)
-
-        log_label = ctk.CTkLabel(log_frame, text="Status Log:", font=("Arial", 12, "bold"), text_color=accent_cyan)
-        log_label.pack(anchor="w", padx=15, pady=(12, 5))
-
-        try:
-            self.log_text = ctk.CTkTextbox(log_frame, height=150)
-        except AttributeError:
-            import tkinter as tk
-            self.log_text = tk.Text(log_frame, height=8, width=60, wrap="word")
-
-        self.log_text.pack(fill="both", expand=True, padx=15, pady=15)
-        self.log_text.configure(state="disabled")
-
-    def _setup_drag_drop(self) -> None:
-        """Setup DnD with robust event handling on entire drop frame, label, and root window."""
-        if DND_FILES is None:
-            self._log("⚠️ TkinterDnD2 not available - drag & drop disabled")
-            logger.warning("TkinterDnD2 not available")
+            key = str(path.resolve()).casefold()
+        except OSError:
+            key = str(path).casefold()
+        if key in seen:
             return
+        seen.add(key)
+        kind = _kind_of(path)
+        if kind in SUPPORTED_KINDS:
+            accepted.append(path)
+        elif kind is FileKind.MEDIA:
+            rejected.append((path, "audio/video transcription was removed in 1.1.0"))
+        else:
+            rejected.append((path, "unsupported file type"))
 
-        try:
-            # Register on root window for maximum coverage
+    for raw in paths:
+        path = Path(raw)
+        if path.is_file():
+            push(path)
+        elif path.is_dir() and recurse:
+            children = sorted(p for p in path.rglob("*") if p.is_file())
+            if not children:
+                rejected.append((path, "folder contains no files"))
+            for child in children:
+                if _kind_of(child) in SUPPORTED_KINDS:
+                    push(child)
+        else:
+            rejected.append((path, "not found"))
+    return accepted, rejected
+
+
+def _kind_of(path: Path) -> FileKind:
+    try:
+        return detect(path).kind
+    except Exception:
+        return FileKind.UNKNOWN
+
+
+class ConversionWorker(QObject):
+    """Runs the batch off the GUI thread and reports progress through signals."""
+
+    file_started = pyqtSignal(int, str)
+    file_finished = pyqtSignal(int, bool, str, str)
+    progress = pyqtSignal(int, int)
+    finished = pyqtSignal(int, int, bool)
+
+    def __init__(self, files: list[Path], options: dict, timeout: float) -> None:
+        super().__init__()
+        self._files = list(files)
+        self._options = dict(options)
+        self._timeout = float(timeout)
+        self._cancelled = False
+
+    def cancel(self) -> None:
+        self._cancelled = True
+
+    def run(self) -> None:
+        converter = Converter(timeout=self._timeout, options=self._options)
+        total = len(self._files)
+        succeeded = 0
+        failed = 0
+        for index, path in enumerate(self._files):
+            if self._cancelled:
+                break
+            self.file_started.emit(index, path.name)
             try:
-                self.root.drop_target_register(DND_FILES, DND_TEXT)
-                self.root.dnd_bind('<<Drop>>', self._on_drop)
-                self.root.dnd_bind('<<DragEnter>>', self._on_drag_enter)
-                self.root.dnd_bind('<<DragLeave>>', self._on_drag_leave)
-                logger.info("DnD registered on root window")
-            except Exception as e:
-                logger.warning(f"DnD root registration failed: {e}")
+                result = converter.convert_file(path)
+            except Exception as exc:  # pragma: no cover - converter is defensive
+                logger.exception("unexpected converter failure for %s", path)
+                failed += 1
+                self.file_finished.emit(index, False, "", f"{type(exc).__name__}: {exc}")
+            else:
+                if result.success:
+                    succeeded += 1
+                    self.file_finished.emit(index, True, result.markdown, "")
+                else:
+                    failed += 1
+                    self.file_finished.emit(index, False, "", result.error or "conversion failed")
+            self.progress.emit(index + 1, total)
+        self.finished.emit(succeeded, failed, self._cancelled)
 
-            # Register on the main drop frame and its label for complete coverage
-            self.drop_zone.drop_target_register(DND_FILES, DND_TEXT)
-            self.drop_zone.dnd_bind('<<Drop>>', self._on_drop)
-            self.drop_zone.dnd_bind('<<DragEnter>>', self._on_drag_enter)
-            self.drop_zone.dnd_bind('<<DragLeave>>', self._on_drag_leave)
 
-            # Also bind to the label to catch drops on the label itself
-            self.drop_label.drop_target_register(DND_FILES, DND_TEXT)
-            self.drop_label.dnd_bind('<<Drop>>', self._on_drop)
-            self.drop_label.dnd_bind('<<DragEnter>>', self._on_drag_enter)
-            self.drop_label.dnd_bind('<<DragLeave>>', self._on_drag_leave)
+class DropZone(QFrame):
+    """Drop target for files and folders."""
 
-            self._log("✅ Drag & Drop enabled - ready for file drops")
-            logger.info("DnD registered successfully on root, drop_zone frame, and label")
-        except Exception as exc:
-            logger.warning(f"DnD setup failed: {exc}")
+    files_dropped = pyqtSignal(list)
+    clicked = pyqtSignal()
 
-    def _on_drag_enter(self, event) -> str:
-        """Visual feedback on drag enter (highlight with bright cyan)."""
-        try:
-            self.drop_zone.configure(fg_color="#0891B2")  # Brighter cyan
-            self.drop_label.configure(text_color="#FFFFFF")
-        except Exception:
-            pass
-        return "copy"
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("DropZone")
+        self.setAcceptDrops(True)
+        self.setProperty("hover", "false")
+        self.setMinimumHeight(120)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
 
-    def _on_drag_leave(self, event) -> str:
-        """Restore color on drag leave."""
-        try:
-            self.drop_zone.configure(fg_color="#1E293B")  # Back to card dark
-            self.drop_label.configure(text_color="#06B6D4")  # Back to cyan
-        except Exception:
-            pass
-        return "refuse"
+        layout = QVBoxLayout(self)
+        layout.setSpacing(4)
+        title = QLabel("Drag & drop documents here")
+        title.setObjectName("DropTitle")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        hint = QLabel(
+            "PDF · DOCX · XLSX · CSV · PPTX · HTML · EML · PNG/JPG · code  —  "
+            "folders and multiple files welcome, or click to browse"
+        )
+        hint.setObjectName("DropHint")
+        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        hint.setWordWrap(True)
+        layout.addStretch(1)
+        layout.addWidget(title)
+        layout.addWidget(hint)
+        layout.addStretch(1)
+
+    def _set_hover(self, active: bool) -> None:
+        self.setProperty("hover", "true" if active else "false")
+        # Property-driven QSS selectors only re-evaluate on an explicit
+        # unpolish/polish cycle.
+        self.style().unpolish(self)
+        self.style().polish(self)
+
+    def dragEnterEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+            self._set_hover(True)
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dragLeaveEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        self._set_hover(False)
+        event.accept()
+
+    def dropEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        self._set_hover(False)
+        paths = self.paths_from_urls(event.mimeData().urls())
+        if paths:
+            event.acceptProposedAction()
+            self.files_dropped.emit(paths)
+        else:
+            event.ignore()
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+        super().mouseReleaseEvent(event)
 
     @staticmethod
-    def _parse_drop_paths(raw_data: str) -> list[str]:
-        """Split a TkinterDnD ``<<Drop>>`` payload into individual path strings.
+    def paths_from_urls(urls) -> list[Path]:
+        """Convert dropped ``QUrl``s into local paths, ignoring remote ones."""
+        paths: list[Path] = []
+        for url in urls:
+            if not isinstance(url, QUrl) or not url.isLocalFile():
+                continue
+            local = url.toLocalFile()
+            if local:
+                paths.append(Path(local))
+        return paths
 
-        The payload is a brace-delimited list: paths containing spaces arrive
-        wrapped in ``{...}``, everything else is space-separated. Backslashes
-        are literal path separators and must survive untouched.
 
-        Two standard splitters are actively wrong here and both were tried in
-        earlier releases:
+class MainWindow(QMainWindow):
+    """Main application window."""
 
-        * ``shlex.split`` (POSIX mode) treats every backslash as an escape and
-          eats it - ``C:\\Users\\me\\a.mp3`` becomes ``C:Usersmea.mp3``.
-        * ``tk.splitlist`` applies Tcl backslash substitution to *unbraced*
-          items - ``C:\\a\\one.pdf`` becomes ``C:\\x07one.pdf`` (``\\a`` is the
-          bell character). Only braced items pass through intact.
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("doc2md — Document to Markdown Converter")
+        self.resize(1080, 760)
+        self.setMinimumSize(880, 620)
+        self.setWindowIcon(theme.make_icon("document"))
 
-        Either way the resulting path fails ``is_file()`` and the drop is
-        reported as "No supported files". This parser performs no escape
-        processing whatsoever, which is the only correct behaviour for Windows
-        paths, and handles non-ASCII (Thai) filenames unchanged.
-        """
-        data = raw_data.strip()
-        if not data:
-            return []
+        self._files: list[Path] = []
+        self._items: list[QTreeWidgetItem] = []
+        self._markdown: dict[int, str] = {}
+        self._results: list = []
+        self._thread: QThread | None = None
+        self._worker: ConversionWorker | None = None
 
-        # A single unbraced path that happens to contain spaces would be split
-        # incorrectly by the tokenizer below, so trust the payload as-is when it
-        # has no brace groups and names something that actually exists.
-        if "{" not in data:
-            try:
-                if Path(data).exists():
-                    return [data]
-            except OSError:
-                pass
+        self._build_ui()
+        self._update_actions()
 
-        parts = re.findall(r"\{([^{}]*)\}|(\S+)", data)
-        return [(braced or bare).strip() for braced, bare in parts if (braced or bare).strip()]
+    # --------------------------------------------------------------- UI setup
 
-    def _on_drop(self, event) -> str:
-        """Handle dropped files with robust parsing."""
-        try:
-            self.drop_zone.configure(fg_color="#1E293B")  # Back to card dark
-            self.drop_label.configure(text_color="#06B6D4")  # Back to cyan
+    def _build_ui(self) -> None:
+        central = QWidget()
+        self.setCentralWidget(central)
+        root = QVBoxLayout(central)
+        root.setContentsMargins(18, 16, 18, 12)
+        root.setSpacing(12)
 
-            raw_data = event.data if isinstance(event.data, str) else str(event.data)
-            logger.info(f"Drop event received: {raw_data[:200]}")
+        root.addLayout(self._build_header())
+        root.addWidget(self._build_settings_card())
 
-            cleaned_paths = self._parse_drop_paths(raw_data)
+        self.drop_zone = DropZone()
+        self.drop_zone.files_dropped.connect(self.add_paths)
+        self.drop_zone.clicked.connect(self._browse_files)
+        root.addWidget(self.drop_zone)
 
-            if not cleaned_paths:
-                self._log("❌ No files received")
-                return "refuse"
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter.addWidget(self._build_file_list())
+        splitter.addWidget(self._build_preview())
+        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(1, 2)
+        root.addWidget(splitter, 1)
 
-            # Validate paths
-            valid_paths = []
-            rejected: list[str] = []
-            for path_str in cleaned_paths:
-                try:
-                    path = Path(path_str)
-                    try:
-                        path = path.resolve()
-                    except OSError:
-                        pass  # Keep the unresolved path; it may still be openable
+        root.addWidget(self._build_progress())
+        root.addLayout(self._build_buttons())
 
-                    if path.is_file():
-                        if self._is_supported(path):
-                            valid_paths.append(path)
-                            self._log(f"✓ Dropped: {path}")
-                        else:
-                            rejected.append(f"{path.name} (unsupported type)")
-                    elif path.is_dir():
-                        found = 0
-                        for subfile in sorted(path.rglob("*")):
-                            if subfile.is_file() and self._is_supported(subfile):
-                                valid_paths.append(subfile)
-                                found += 1
-                        self._log(f"📁 {path.name}: {found} supported file(s)")
-                    else:
-                        rejected.append(f"{path_str} (not found)")
-                except Exception as exc:
-                    rejected.append(f"{path_str} ({exc})")
+        self.statusBar().showMessage("Ready")
 
-            for note in rejected:
-                self._log(f"⚠️ Skipped: {note}")
+    def _build_header(self) -> QVBoxLayout:
+        box = QVBoxLayout()
+        box.setSpacing(2)
+        title = QLabel("doc2md — Clean Document Converter")
+        title.setObjectName("Title")
+        subtitle = QLabel(
+            f"v{__version__}  ·  PDF · Word · Excel · PowerPoint · HTML · images → Markdown"
+        )
+        subtitle.setObjectName("Subtitle")
+        box.addWidget(title)
+        box.addWidget(subtitle)
+        return box
 
-            if valid_paths:
-                self.selected_files = valid_paths
-                self.convert_button.configure(state="normal")
-                self._log(f"✅ Ready: {len(valid_paths)} file(s)")
-                return "copy"
+    def _build_settings_card(self) -> QFrame:
+        card = QFrame()
+        card.setObjectName("Card")
+        grid = QGridLayout(card)
+        grid.setContentsMargins(16, 14, 16, 14)
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(10)
 
-            self._log("❌ No supported files in this drop")
-            return "refuse"
+        grid.addWidget(self._section_label("OUTPUT FOLDER"), 0, 0)
+        self.output_edit = QLineEdit(str(Path.home() / "Documents"))
+        self.output_edit.setToolTip(
+            "Where the .md files are written. Leave the 'next to source' box "
+            "ticked to save each result beside its original file instead."
+        )
+        grid.addWidget(self.output_edit, 1, 0, 1, 2)
 
-        except Exception as exc:
-            logger.exception(f"Drop error: {exc}")
-            self._show_error_dialog("Drop Error", f"Error processing files:\n{exc}")
-            return "refuse"
+        browse = QPushButton("Browse")
+        browse.setIcon(theme.make_icon("folder"))
+        browse.clicked.connect(self._browse_output_dir)
+        grid.addWidget(browse, 1, 2)
+
+        grid.addWidget(self._section_label("FORMAT"), 0, 3)
+        self.format_combo = QComboBox()
+        for label, _suffix in OUTPUT_FORMATS:
+            self.format_combo.addItem(label)
+        grid.addWidget(self.format_combo, 1, 3)
+
+        grid.addWidget(self._section_label("OCR LANGUAGE"), 0, 4)
+        self.ocr_combo = QComboBox()
+        for label, _code in OCR_LANGUAGES:
+            self.ocr_combo.addItem(label)
+        self.ocr_combo.setToolTip(
+            "Language models used for scanned PDFs and images. Requires "
+            "Tesseract OCR with the matching language data installed."
+        )
+        grid.addWidget(self.ocr_combo, 1, 4)
+
+        options = QHBoxLayout()
+        self.beside_source_check = QCheckBox("Save next to source file")
+        self.beside_source_check.setChecked(True)
+        self.beside_source_check.toggled.connect(self._on_beside_source_toggled)
+        self.ocr_check = QCheckBox("OCR scanned pages")
+        self.ocr_check.setChecked(True)
+        self.tables_check = QCheckBox("Extract tables")
+        self.tables_check.setChecked(True)
+        self.clipboard_check = QCheckBox("Copy result to clipboard")
+        for widget in (
+            self.beside_source_check,
+            self.ocr_check,
+            self.tables_check,
+            self.clipboard_check,
+        ):
+            options.addWidget(widget)
+        options.addStretch(1)
+        grid.addLayout(options, 2, 0, 1, 5)
+
+        grid.setColumnStretch(0, 3)
+        grid.setColumnStretch(1, 1)
+        self._on_beside_source_toggled(True)
+        return card
 
     @staticmethod
-    def _is_supported(path: Path) -> bool:
-        """Return True when the router can route *path* to a real engine."""
-        try:
-            return detect(path).kind in SUPPORTED_KINDS
-        except Exception:
-            return False
+    def _section_label(text: str) -> QLabel:
+        label = QLabel(text)
+        label.setObjectName("SectionLabel")
+        return label
+
+    def _build_file_list(self) -> QWidget:
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        layout.addWidget(self._section_label("FILES"))
+
+        self.file_tree = QTreeWidget()
+        self.file_tree.setColumnCount(4)
+        self.file_tree.setHeaderLabels(["File", "Type", "Status", "Details"])
+        self.file_tree.setRootIsDecorated(False)
+        self.file_tree.setAlternatingRowColors(False)
+        self.file_tree.setSelectionMode(
+            QAbstractItemView.SelectionMode.ExtendedSelection
+        )
+        self.file_tree.currentItemChanged.connect(self._on_row_selected)
+        header = self.file_tree.header()
+        header.setSectionResizeMode(COLUMN_FILE, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(COLUMN_KIND, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(COLUMN_STATUS, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(COLUMN_DETAIL, QHeaderView.ResizeMode.Stretch)
+        layout.addWidget(self.file_tree)
+        return container
+
+    def _build_preview(self) -> QWidget:
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        layout.addWidget(self._section_label("MARKDOWN PREVIEW"))
+        self.preview = QPlainTextEdit()
+        self.preview.setReadOnly(True)
+        self.preview.setPlaceholderText(
+            "Select a converted file to preview its Markdown here."
+        )
+        self.preview.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        layout.addWidget(self.preview)
+        return container
+
+    def _build_progress(self) -> QWidget:
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setFormat("%p%")
+        self.progress_label = QLabel("0 / 0")
+        self.progress_label.setObjectName("Subtitle")
+        layout.addWidget(self.progress_bar, 1)
+        layout.addWidget(self.progress_label)
+        return container
+
+    def _build_buttons(self) -> QHBoxLayout:
+        row = QHBoxLayout()
+        row.setSpacing(8)
+
+        self.add_button = QPushButton("Add files")
+        self.add_button.setIcon(theme.make_icon("add"))
+        self.add_button.clicked.connect(self._browse_files)
+
+        self.clear_button = QPushButton("Clear")
+        self.clear_button.setIcon(theme.make_icon("clear"))
+        self.clear_button.clicked.connect(self.clear_files)
+
+        self.convert_button = QPushButton("Convert")
+        self.convert_button.setObjectName("Primary")
+        self.convert_button.setIcon(theme.make_icon("convert", color="#04212B"))
+        self.convert_button.clicked.connect(self.start_conversion)
+
+        self.cancel_button = QPushButton("Cancel")
+        self.cancel_button.setObjectName("Danger")
+        self.cancel_button.setIcon(theme.make_icon("cancel", color=theme.DANGER))
+        self.cancel_button.clicked.connect(self.cancel_conversion)
+
+        self.copy_button = QPushButton("Copy Markdown")
+        self.copy_button.setIcon(theme.make_icon("copy"))
+        self.copy_button.clicked.connect(self.copy_markdown)
+
+        self.bridge_button = QPushButton("Send to Sandbox")
+        self.bridge_button.setIcon(theme.make_icon("bridge"))
+        self.bridge_button.setToolTip(
+            "Write the converted documents plus a manifest.json bundle into a "
+            "folder the Mediplex AI Sandbox can ingest."
+        )
+        self.bridge_button.clicked.connect(self.send_to_bridge)
+
+        row.addWidget(self.add_button)
+        row.addWidget(self.clear_button)
+        row.addStretch(1)
+        row.addWidget(self.copy_button)
+        row.addWidget(self.bridge_button)
+        row.addWidget(self.cancel_button)
+        row.addWidget(self.convert_button)
+        return row
+
+    # ----------------------------------------------------------- file intake
+
+    def add_paths(self, paths) -> None:
+        """Add dropped or browsed *paths* to the queue."""
+        accepted, rejected = collect_files(paths)
+        known = {str(p).casefold() for p in self._files}
+        added = 0
+        for path in accepted:
+            if str(path).casefold() in known:
+                continue
+            known.add(str(path).casefold())
+            self._files.append(path)
+            self._items.append(self._make_row(path))
+            added += 1
+
+        for path, reason in rejected:
+            item = QTreeWidgetItem([path.name, "—", STATUS_SKIPPED, reason])
+            item.setToolTip(COLUMN_FILE, str(path))
+            self._paint_status(item, STATUS_SKIPPED)
+            self.file_tree.addTopLevelItem(item)
+
+        if added:
+            self.statusBar().showMessage(f"Added {added} file(s) — {len(self._files)} queued")
+        elif rejected:
+            self.statusBar().showMessage(f"Nothing added — {len(rejected)} file(s) skipped")
+        else:
+            self.statusBar().showMessage("Nothing added — those files are already queued")
+        self._update_actions()
+
+    def _make_row(self, path: Path) -> QTreeWidgetItem:
+        item = QTreeWidgetItem([path.name, _kind_of(path).value, STATUS_QUEUED, ""])
+        item.setToolTip(COLUMN_FILE, str(path))
+        self._paint_status(item, STATUS_QUEUED)
+        self.file_tree.addTopLevelItem(item)
+        return item
+
+    @staticmethod
+    def _paint_status(item: QTreeWidgetItem, status: str) -> None:
+        item.setText(COLUMN_STATUS, status)
+        key = _STATUS_KEYS.get(status, "queued")
+        item.setForeground(COLUMN_STATUS, QColor(theme.STATUS_COLORS[key]))
+
+    def clear_files(self) -> None:
+        if self._is_running():
+            return
+        self._files.clear()
+        self._items.clear()
+        self._markdown.clear()
+        self._results.clear()
+        self.file_tree.clear()
+        self.preview.clear()
+        self.progress_bar.setValue(0)
+        self.progress_label.setText("0 / 0")
+        self.statusBar().showMessage("Cleared")
+        self._update_actions()
 
     def _browse_files(self) -> None:
-        """File browser dialog."""
-        try:
-            # Built from the router's own extension tables so the dialog can
-            # never drift out of sync with what the engines actually accept.
-            docs = "*.pdf *.docx *.xlsx *.xlsm *.xls *.csv *.pptx *.html *.htm *.eml *.json *.txt *.md"
-            audio = " ".join(f"*{ext}" for ext in sorted(AUDIO_EXTENSIONS))
-            video = " ".join(f"*{ext}" for ext in sorted(VIDEO_EXTENSIONS))
-            images = " ".join(f"*{ext}" for ext in sorted(IMAGE_EXTENSIONS))
-            code = " ".join(f"*{ext}" for ext in sorted(CODE_EXTENSIONS))
-
-            filetypes = [
-                ("All Supported", " ".join([docs, audio, video, images, code])),
-                ("Documents", docs),
-                ("Audio", audio),
-                ("Video", video),
-                ("Images", images),
-                ("Code", code),
-                ("All Files", "*.*"),
-            ]
-            files = filedialog.askopenfilenames(title="Select files", filetypes=filetypes)
-            if files:
-                selected = [Path(f) for f in files]
-                supported = [p for p in selected if self._is_supported(p)]
-                for skipped in (p for p in selected if p not in supported):
-                    self._log(f"⚠️ Skipped: {skipped.name} (unsupported type)")
-
-                if not supported:
-                    self._log("❌ No supported files selected")
-                    return
-
-                self.selected_files = supported
-                self.convert_button.configure(state="normal")
-                self._log(f"✅ Selected {len(supported)} file(s)")
-        except Exception as exc:
-            self._show_error_dialog("Browse Error", str(exc))
+        files, _filter = QFileDialog.getOpenFileNames(
+            self,
+            "Select documents",
+            str(Path.home()),
+            "Documents (*.pdf *.docx *.xlsx *.xlsm *.csv *.pptx *.html *.htm *.eml *.json *.txt *.md);;"
+            "Images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff *.webp *.gif);;"
+            "All files (*)",
+        )
+        if files:
+            self.add_paths([Path(f) for f in files])
 
     def _browse_output_dir(self) -> None:
-        """Browse for output directory."""
-        try:
-            current_dir = self.output_dir_var.get()
-            selected_dir = filedialog.askdirectory(title="Select Output Folder", initialdir=current_dir)
-            if selected_dir:
-                self.output_dir_var.set(selected_dir)
-                self._log(f"📁 Output folder: {selected_dir}")
-        except Exception as exc:
-            self._show_error_dialog("Browse Error", str(exc))
+        current = self.output_edit.text().strip() or str(Path.home())
+        chosen = QFileDialog.getExistingDirectory(self, "Select output folder", current)
+        if chosen:
+            self.output_edit.setText(chosen)
+            self.beside_source_check.setChecked(False)
 
-    def _start_conversion(self) -> None:
-        """Start conversion in background thread."""
-        if not self.selected_files or self.is_converting:
+    def _on_beside_source_toggled(self, checked: bool) -> None:
+        self.output_edit.setEnabled(not checked)
+
+    # ------------------------------------------------------------ conversion
+
+    def conversion_options(self) -> dict:
+        return {
+            "pdf_ocr_fallback": self.ocr_check.isChecked(),
+            "pdf_tables": self.tables_check.isChecked(),
+            "ocr_lang": OCR_LANGUAGES[max(self.ocr_combo.currentIndex(), 0)][1],
+            "inline_styles": True,
+        }
+
+    def output_suffix(self) -> str:
+        return OUTPUT_FORMATS[max(self.format_combo.currentIndex(), 0)][1]
+
+    def start_conversion(self) -> None:
+        if self._is_running() or not self._files:
             return
 
-        self.is_converting = True
-        self.cancel_event.clear()
-        self.convert_button.configure(state="disabled")
-        self.cancel_button.configure(state="normal")
-        self.progress_bar.set(0)
+        for item in self._items:
+            self._paint_status(item, STATUS_QUEUED)
+            item.setText(COLUMN_DETAIL, "")
+        self._markdown.clear()
+        self._results.clear()
+        self.preview.clear()
+        self.progress_bar.setValue(0)
+        self.progress_label.setText(f"0 / {len(self._files)}")
 
-        self.conversion_thread = threading.Thread(target=self._conversion_worker, daemon=True)
-        self.conversion_thread.start()
+        self._thread = QThread(self)
+        self._worker = ConversionWorker(self._files, self.conversion_options(), timeout=60.0)
+        self._worker.moveToThread(self._thread)
+        self._thread.started.connect(self._worker.run)
+        self._worker.file_started.connect(self._on_file_started)
+        self._worker.file_finished.connect(self._on_file_finished)
+        self._worker.progress.connect(self._on_progress)
+        self._worker.finished.connect(self._on_batch_finished)
+        self._thread.start()
 
-    def _cancel_conversion(self) -> None:
-        """Cancel the running conversion."""
-        self._log("⏹️ Cancellation requested...")
-        self.cancel_event.set()
-        self.is_converting = False
+        self.statusBar().showMessage(f"Converting {len(self._files)} file(s)…")
+        self._update_actions()
 
-    def _ui(self, fn) -> None:
-        """Run *fn* on the Tk main thread.
+    def cancel_conversion(self) -> None:
+        if self._worker is not None:
+            self._worker.cancel()
+            self.statusBar().showMessage("Cancelling after the current file…")
 
-        Tk is not thread-safe: calling widget methods from the conversion
-        worker corrupts the interpreter and shows up as random freezes or hard
-        crashes. Every UI mutation originating off the main thread must be
-        marshalled through ``after``.
-        """
-        try:
-            if threading.current_thread() is threading.main_thread():
-                fn()
-            else:
-                self.root.after(0, fn)
-        except Exception as exc:
-            logger.warning(f"UI update skipped: {exc}")
+    def _on_file_started(self, index: int, name: str) -> None:
+        if 0 <= index < len(self._items):
+            self._paint_status(self._items[index], STATUS_CONVERTING)
+        self.statusBar().showMessage(f"Converting {name}…")
 
-    def _on_duration(self, seconds: float) -> None:
-        """Record media length so progress can be shown as time, not just a %."""
-        self._media_duration = seconds
-        self._stage_started = time.monotonic()
-        self._log(f"🎵 Audio length: {self._format_clock(seconds)} - transcribing...")
-
-    def _update_progress(self, percent: int) -> None:
-        """Update progress bar with percentage from audio transcription callback."""
-        try:
-            pct = min(100, max(0, int(percent)))
-        except (TypeError, ValueError):
+    def _on_file_finished(self, index: int, ok: bool, markdown: str, error: str) -> None:
+        if not (0 <= index < len(self._items)):
             return
+        item = self._items[index]
+        if ok:
+            self._markdown[index] = markdown
+            self._paint_status(item, STATUS_SUCCESS)
+            written = self._write_output(self._files[index], markdown)
+            item.setText(COLUMN_DETAIL, written)
+            if self.file_tree.currentItem() is None:
+                self.file_tree.setCurrentItem(item)
+        else:
+            self._paint_status(item, STATUS_ERROR)
+            item.setText(COLUMN_DETAIL, error)
+            item.setToolTip(COLUMN_DETAIL, error)
 
-        label = f"{pct}%"
+    def _on_progress(self, done: int, total: int) -> None:
+        self.progress_bar.setValue(int(done * 100 / total) if total else 0)
+        self.progress_label.setText(f"{done} / {total}")
 
-        # For long recordings the percentage crawls: a 27-minute file sits on
-        # "0%" for the first half-minute of work. Showing transcribed position
-        # against total length, plus an ETA, makes it obvious the run is alive.
-        duration = self._media_duration
-        if duration > 0:
-            position = duration * pct / 100.0
-            label = f"{pct}%  ({self._format_clock(position)} / {self._format_clock(duration)})"
+    def _on_batch_finished(self, succeeded: int, failed: int, cancelled: bool) -> None:
+        self._teardown_thread()
+        if cancelled:
+            message = f"Cancelled — {succeeded} converted, {failed} failed"
+        else:
+            message = f"Done — {succeeded} converted, {failed} failed"
+        self.statusBar().showMessage(message)
 
-            elapsed = time.monotonic() - self._stage_started
-            if pct >= 1 and elapsed > 5:
-                remaining = elapsed * (100 - pct) / pct
-                label += f"  ~{self._format_clock(remaining)} left"
+        if self.clipboard_check.isChecked() and self._markdown:
+            self.copy_markdown(quiet=True)
+        self._update_actions()
 
-        def apply() -> None:
-            self.progress_bar.set(pct / 100.0)
-            self.progress_percent_label.configure(text=label)
+    def _teardown_thread(self) -> None:
+        if self._thread is not None:
+            self._thread.quit()
+            self._thread.wait(5000)
+            self._thread.deleteLater()
+        if self._worker is not None:
+            self._worker.deleteLater()
+        self._thread = None
+        self._worker = None
 
-        self._ui(apply)
+    def _is_running(self) -> bool:
+        return self._thread is not None and self._thread.isRunning()
 
-    @staticmethod
-    def _format_clock(seconds: float) -> str:
-        seconds = max(0, int(seconds))
-        hours, rest = divmod(seconds, 3600)
-        minutes, secs = divmod(rest, 60)
-        if hours:
-            return f"{hours}:{minutes:02d}:{secs:02d}"
-        return f"{minutes}:{secs:02d}"
+    # ---------------------------------------------------------------- output
 
-    def _conversion_worker(self) -> None:
-        """Background conversion worker."""
-        try:
-            self._log("🔄 Starting conversion...")
-
-            # Report the acceleration the audio engine will actually use. Asked
-            # of the engine itself so the log can never disagree with reality.
-            try:
-                from doc2md.engine.audio_engine import AudioEngine
-
-                self._log(f"⚙️ Acceleration: {AudioEngine.describe_device()}")
-                hint = AudioEngine.acceleration_hint()
-                if hint:
-                    self._log(f"💡 {hint}")
-            except Exception as e:
-                self._log(f"⚠️ Acceleration check skipped: {type(e).__name__}: {e}")
-
-            # Update converter options with language selection and progress callback
-            # for audio transcription. abort_event lets the engine stop mid-file
-            # instead of only between files.
-            self.converter.options.update({
-                "audio_model": self.audio_model_var.get(),
-                "language": self.language_var.get(),
-                "pdf_ocr_fallback": self.ocr_enabled_var.get(),
-                "progress_callback": self._update_progress,
-                "duration_callback": self._on_duration,
-                "abort_event": self.cancel_event,
-            })
-
-            for idx, file_path in enumerate(self.selected_files):
-                if self.cancel_event.is_set():
-                    self._log("⏹️ Conversion cancelled by user")
-                    break
-
-                try:
-                    self._media_duration = 0.0
-                    self._stage_started = time.monotonic()
-                    self._log(f"📄 File: {file_path.name}")
-                    self._log(f"Processing: {file_path.name}...")
-
-                    # Call convert_file with correct signature (no options argument)
-                    result = self.converter.convert_file(file_path)
-
-                    # Update progress AFTER conversion completes
-                    self._update_progress(int((idx + 1) / len(self.selected_files) * 100))
-
-                    if result.success:
-                        # Determine output format and directory
-                        try:
-                            output_dir = Path(self.output_dir_var.get())
-                            output_dir.mkdir(parents=True, exist_ok=True)
-
-                            suffix = ".txt" if self.output_format_var.get() == "Plain Text (.txt)" else ".md"
-                            output_path = self._unique_output_path(output_dir, file_path.stem, suffix)
-
-                            output_path.write_text(result.markdown, encoding="utf-8")
-                            self._log(f"✅ Saved to: {output_path}")
-                        except Exception as e:
-                            self._log(f"❌ File write error: {type(e).__name__}: {str(e)}")
-                            self._log(f"❌ Traceback:\n{traceback.format_exc()}")
-                            raise
-
-                        # Copy to clipboard if enabled
-                        if self.copy_clipboard_var.get():
-                            try:
-                                from doc2md.core.clipboard import copy_text
-                                ok, message = copy_text(result.markdown)
-                                self._log(f"📋 Copied to clipboard" if ok else f"⚠️ Clipboard: {message}")
-                            except Exception as e:
-                                self._log(f"⚠️ Clipboard failed: {type(e).__name__}: {e}")
-                    else:
-                        self._log(f"❌ {file_path.name}: {result.error}")
-
-                except ConversionError as exc:
-                    self._log(f"❌ {file_path.name}: {str(exc)}")
-                except Exception as exc:
-                    tb = traceback.format_exc()
-                    self._log(f"❌ EXCEPTION: {type(exc).__name__}")
-                    self._log(f"❌ {file_path.name}: {str(exc)}")
-                    self._log(f"❌ Traceback:\n{tb}")
-                    logger.exception(f"Conversion error: {exc}")
-
-            if not self.cancel_event.is_set():
-                self._log("✅ All conversions complete")
-                self._update_progress(100)
-
-        except Exception as exc:
-            tb = traceback.format_exc()
-            self._log(f"❌ FATAL ERROR: {type(exc).__name__}: {str(exc)}")
-            self._log(f"❌ Traceback:\n{tb}")
-            logger.exception(f"Worker error: {exc}")
-
-        finally:
-            self.is_converting = False
-            # Widget state must be restored on the Tk main thread, not here.
-            self._ui(lambda: (
-                self.convert_button.configure(state="normal"),
-                self.cancel_button.configure(state="disabled"),
-            ))
-            gc.collect()
-
-    @staticmethod
-    def _unique_output_path(output_dir: Path, stem: str, suffix: str) -> Path:
-        """Return a non-colliding path inside *output_dir*.
-
-        Converting ``a/report.pdf`` and ``b/report.docx`` in one batch would
-        otherwise write both to ``report.md``, silently discarding the first
-        result. Collisions get a ``-1``, ``-2``, ... discriminator instead.
-        """
-        candidate = output_dir / f"{stem}{suffix}"
+    def output_path_for(self, source: Path) -> Path:
+        suffix = self.output_suffix()
+        if self.beside_source_check.isChecked():
+            directory = source.parent
+        else:
+            directory = Path(self.output_edit.text().strip() or source.parent)
+        candidate = directory / f"{source.stem}{suffix}"
         counter = 1
         while candidate.exists():
-            candidate = output_dir / f"{stem}-{counter}{suffix}"
+            candidate = directory / f"{source.stem}-{counter}{suffix}"
             counter += 1
         return candidate
 
-    def _log(self, message: str) -> None:
-        """Thread-safe logging."""
+    def _write_output(self, source: Path, markdown: str) -> str:
         try:
-            def update():
-                self.log_text.configure(state="normal")
-                self.log_text.insert("end", f"{message}\n")
-                self.log_text.see("end")
-                self.log_text.configure(state="disabled")
+            destination = self.output_path_for(source)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(markdown, encoding="utf-8", newline="\n")
+        except OSError as exc:
+            return f"saved nothing — {exc}"
+        return f"saved to {destination}"
 
-            if threading.current_thread() is threading.main_thread():
-                update()
-            else:
-                self.root.after(0, update)
-        except Exception as exc:
-            logger.warning(f"Log error: {exc}")
+    def collected_markdown(self) -> str:
+        """Concatenate every successful result in queue order."""
+        return "\n\n---\n\n".join(
+            self._markdown[index] for index in sorted(self._markdown)
+        )
 
-    def _show_error_dialog(self, title: str, message: str) -> None:
-        """Thread-safe error dialog."""
-        def show():
-            messagebox.showerror(title, message)
+    def copy_markdown(self, *, quiet: bool = False) -> bool:
+        payload = self.collected_markdown()
+        if not payload.strip():
+            if not quiet:
+                self._warn("Nothing to copy", "Convert at least one document first.")
+            return False
+        clipboard = QGuiApplication.clipboard()
+        if clipboard is None:  # pragma: no cover - headless only
+            if not quiet:
+                self._warn("Clipboard unavailable", "No clipboard on this display.")
+            return False
+        clipboard.setText(payload)
+        self.statusBar().showMessage(
+            f"Copied {len(payload):,} characters from {len(self._markdown)} document(s)"
+        )
+        return True
 
-        if threading.current_thread() is threading.main_thread():
-            show()
-        else:
-            self.root.after(0, show)
+    def build_bridge_payload(self):
+        """Assemble the payload the integration bridge sends downstream."""
+        from doc2md.core.bridge import BridgeDocument, BridgePayload
 
-    def _setup_cleanup(self) -> None:
-        """Setup shutdown cleanup."""
-        def on_closing():
-            if self.is_converting:
-                if not messagebox.askyesno("Confirm", "Conversion in progress. Cancel and exit?"):
-                    return
-                self.cancel_event.set()
-                self.is_converting = False
-                if self.conversion_thread and self.conversion_thread.is_alive():
-                    self.conversion_thread.join(timeout=5)
+        documents = [
+            BridgeDocument(
+                name=self._files[index].stem,
+                markdown=markdown,
+                source=str(self._files[index]),
+                kind=_kind_of(self._files[index]).value,
+            )
+            for index, markdown in sorted(self._markdown.items())
+            if index < len(self._files)
+        ]
+        return BridgePayload(documents=documents)
 
-            try:
-                from doc2md.engine.audio_engine import AudioEngine
-                AudioEngine.kill_all_ffmpeg_processes()
-                AudioEngine.cleanup_temp_audio_chunks()
-            except Exception:
-                pass
+    def send_to_bridge(self) -> bool:
+        from doc2md.core.bridge import BridgeError, FileDropTransport
 
-            gc.collect()
-            self.root.destroy()
+        payload = self.build_bridge_payload()
+        if not payload.documents:
+            self._warn("Nothing to send", "Convert at least one document first.")
+            return False
 
-        self.root.protocol("WM_DELETE_WINDOW", on_closing)
+        inbox = QFileDialog.getExistingDirectory(
+            self, "Select the sandbox inbox folder", self.output_edit.text().strip() or str(Path.home())
+        )
+        if not inbox:
+            return False
+        try:
+            message = FileDropTransport(inbox).send(payload)
+        except BridgeError as exc:
+            self._warn("Export failed", str(exc))
+            return False
+        self.statusBar().showMessage(message)
+        return True
+
+    def _on_row_selected(self, current: QTreeWidgetItem | None, _previous) -> None:
+        if current is None:
+            return
+        try:
+            index = self._items.index(current)
+        except ValueError:
+            self.preview.setPlainText("")
+            return
+        self.preview.setPlainText(self._markdown.get(index, ""))
+
+    def _update_actions(self) -> None:
+        running = self._is_running()
+        has_files = bool(self._files)
+        has_output = bool(self._markdown)
+        self.convert_button.setEnabled(has_files and not running)
+        self.cancel_button.setEnabled(running)
+        self.add_button.setEnabled(not running)
+        self.clear_button.setEnabled(has_files and not running)
+        self.copy_button.setEnabled(has_output and not running)
+        self.bridge_button.setEnabled(has_output and not running)
+
+    def _warn(self, title: str, message: str) -> None:
+        QMessageBox.warning(self, title, message)
+
+    def closeEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        if self._is_running():
+            answer = QMessageBox.question(
+                self,
+                "Conversion in progress",
+                "A conversion is still running. Cancel it and quit?",
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                event.ignore()
+                return
+            self.cancel_conversion()
+            self._teardown_thread()
+        event.accept()
+
+
+def run_gui(argv=None) -> int:
+    """Create the ``QApplication``, show the window, and enter the event loop."""
+    import sys
+
+    from PyQt6.QtWidgets import QApplication
+
+    args = list(argv if argv is not None else sys.argv[:1])
+    app = QApplication.instance() or QApplication(args)
+    app.setApplicationName("doc2md")
+    app.setApplicationVersion(__version__)
+    app.setStyleSheet(theme.STYLESHEET)
+
+    window = MainWindow()
+    window.show()
+    return app.exec()

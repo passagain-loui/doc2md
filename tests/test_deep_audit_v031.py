@@ -87,74 +87,52 @@ class TestGUIThreadSafety:
         assert result.success
 
 
-class TestAudioEngineResilience:
-    """Audit Audio Engine for corrupted files and download interruptions."""
+class TestAudioRemoval:
+    """Audio/video support was removed in 1.1.0; pin that it stays removed.
 
-    def test_zero_byte_audio_file_error(self, tmp_path):
-        """Verify graceful handling of zero-byte audio files."""
-        from doc2md.engine.audio_engine import AudioEngine
-        from doc2md.core.router import FileKind
+    The transcription stack (faster-whisper, ctranslate2, torch, ffmpeg) was
+    the source of both the ~2 GB download and the silent failures this release
+    exists to eliminate. These tests fail loudly if it is reintroduced by
+    accident, and check that a dropped recording still gets an actionable
+    message rather than a generic "unrecognized file type".
+    """
 
-        engine = AudioEngine()
-        zero_byte_file = tmp_path / "empty.mp3"
-        zero_byte_file.write_bytes(b"")
+    def test_audio_engine_module_is_gone(self):
+        import importlib
 
-        # Should raise ConversionError, not crash
-        with pytest.raises(ConversionError):
-            engine.convert(zero_byte_file, {})
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module("doc2md.engine.audio_engine")
 
-    def test_audio_with_corrupted_header(self, tmp_path):
-        """Verify corrupted audio headers are handled gracefully."""
-        from doc2md.engine.audio_engine import AudioEngine
+    def test_no_engine_claims_audio_or_video(self):
+        from doc2md.engine import all_engines
 
-        engine = AudioEngine()
-        corrupted_file = tmp_path / "corrupted.mp3"
-        # Write fake MP3 header followed by garbage
-        corrupted_file.write_bytes(b"ID3\xff\xff\xff" + b"\x00" * 1000)
+        kinds = {kind.value for engine in all_engines() for kind in engine.supported_kinds}
+        assert "audio" not in kinds
+        assert "video" not in kinds
 
-        # Should handle gracefully (error or skip)
-        try:
-            result = engine.convert(corrupted_file, {})
-            # If it processes, output should be valid
-            assert isinstance(result, str)
-        except ConversionError:
-            # Expected for corrupted files
-            pass
+    def test_dropped_recording_reports_why_it_cannot_convert(self, tmp_path):
+        recording = tmp_path / "ประชุม.mp3"
+        recording.write_bytes(bytes([0x49, 0x44, 0x33, 3, 0, 0, 0]) + bytes(64))
 
-    def test_model_load_reuses_cached_instance(self):
-        """A second request for the same size must not rebuild the model.
+        result = Converter().convert_file(recording)
 
-        Replaces a test that asserted an unused MODEL_CACHE_DIR constant was
-        not None - it exercised no behaviour at all.
-        """
-        from doc2md.engine.audio_engine import AudioEngine
+        assert not result.success
+        assert "removed" in result.error
+        assert "1.1.0" in result.error
 
-        engine = AudioEngine()
-        sentinel = object()
-        AudioEngine._model_cache.clear()
-        AudioEngine._model_cache["small"] = sentinel
-        try:
-            assert engine._load_model("small") is sentinel
-        finally:
-            AudioEngine._model_cache.clear()
+    def test_transcription_packages_are_not_imported_anywhere(self):
+        import pkgutil
 
-    def test_audio_engine_memory_cleanup_after_conversion(self):
-        """Verify memory buffers are freed after transcription."""
-        from doc2md.engine.audio_engine import AudioEngine
+        import doc2md
 
-        engine = AudioEngine()
-
-        # Simulate conversion memory usage
-        gc.collect()
-        initial_objects = len(gc.get_objects())
-
-        # Would run conversion here (skipped due to dependencies)
-        # For now, just verify gc works
-        gc.collect()
-        final_objects = len(gc.get_objects())
-
-        # Object count should be roughly similar (allowing for pytest overhead)
-        assert abs(final_objects - initial_objects) < 1000
+        banned = {"torch", "faster_whisper", "whisper", "ctranslate2", "ffmpeg"}
+        for module in pkgutil.walk_packages(doc2md.__path__, "doc2md."):
+            source = Path(module.module_finder.path) / f"{module.name.rsplit('.', 1)[-1]}.py"
+            if not source.is_file():
+                continue
+            text = source.read_text(encoding="utf-8")
+            for name in banned:
+                assert f"import {name}" not in text, f"{module.name} imports {name}"
 
 
 class TestDocumentConverterEdgeCases:
