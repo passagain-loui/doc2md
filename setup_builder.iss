@@ -32,3 +32,24 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; Flags: unchecked
 
 [Run]
 Filename: "{app}\doc2md.exe"; Description: "Launch doc2md"; Flags: nowait postinstall skipifsilent
+
+[Code]
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  ResultCode: Integer;
+begin
+  if CurStep = ssInstall then
+  begin
+    // Forcefully terminate all running doc2md.exe instances (and child processes)
+    // /F = Force termination
+    // /IM = Image name (executable filename)
+    // /T = Terminate entire process tree (children included)
+    Exec('taskkill.exe', '/F /IM doc2md.exe /T', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+    // Forcefully terminate all background ffmpeg.exe instances
+    Exec('taskkill.exe', '/F /IM ffmpeg.exe /T', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+    // Small delay to ensure processes are fully terminated
+    Sleep(500);
+  end;
+end;

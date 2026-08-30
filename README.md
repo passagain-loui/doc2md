@@ -1,5 +1,8 @@
 # README.md
 
+```````text
+# README.md
+
 ``````text
 # README.md
 
@@ -10,7 +13,15 @@
 # README.md
 
 ```text
-# doc2md v1.0.12
+# doc2md v1.0.13
+
+## Version 1.0.13 (2026-08-30) - BRUTE-FORCE INSTALLER FIX
+
+### Critical Fixes
+- **Fix**: Forceful process termination using `taskkill /F /T` for guaranteed file release
+- **Fix**: Eliminates Windows Restart Manager reliance (PyInstaller exes ignore polite close)
+- **Fix**: Handles all child processes (FFmpeg, worker threads) via process tree termination
+- **Fix**: Seamless installation without user intervention or file locking errors
 
 ## Version 1.0.12 (2026-08-30) - INSTALLER HOTFIX
 
@@ -39,3 +50,4 @@
 ````
 `````
 ``````
+```````

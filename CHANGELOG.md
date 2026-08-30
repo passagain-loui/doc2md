@@ -1,5 +1,8 @@
 # CHANGELOG.md
 
+```````text
+# CHANGELOG.md
+
 ``````text
 # CHANGELOG.md
 
@@ -10,6 +13,14 @@
 # CHANGELOG.md
 
 ```text
+## [1.0.13] (2026-08-30)
+
+- **Fix**: Brute-force process termination - installer now uses `taskkill /F /IM doc2md.exe /T` for forceful closure
+- **Fix**: Terminates entire process trees (child processes included) to handle FFmpeg background processes
+- **Fix**: Removes reliance on Windows Restart Manager polite close (which PyInstaller exes ignore)
+- **Fix**: Guarantees file handles are released before installation begins
+- **Robustness**: Silent process termination with 500ms safety delay before file extraction
+
 ## [1.0.12] (2026-08-30)
 
 - **Fix**: Installer unable to automatically close applications - added `CloseApplications=yes` to Inno Setup
@@ -37,3 +48,4 @@
 ````
 `````
 ``````
+```````
