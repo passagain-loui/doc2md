@@ -43,6 +43,13 @@
 # CHANGELOG.md
 
 ```text
+## [1.0.24] (2026-08-30) - PYINSTALLER TKINTERDND2 BUNDLING FIX
+
+- **Critical Fix**: PyInstaller now explicitly collects tkinterdnd2 native binaries and data files via `collect_all('tkinterdnd2')`
+- **Enhancement**: Fixed native tkdnd library bundling - ensures TkinterDnD.Tk() initialization works in standalone executable
+- **Robustness**: Drag & Drop functionality now guaranteed in packaged .exe (no missing .dll issues)
+- **Build**: Updated build_exe.py with enhanced tkinterdnd2 collection logic
+
 ## [1.0.23] (2026-08-30) - ULTIMATE ARCHITECTURAL FIX
 
 - **CRITICAL FIX**: DnD was NEVER working - root window now uses `TkinterDnD.Tk()` for proper DnD support

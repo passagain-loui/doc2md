@@ -43,6 +43,12 @@
 # HISTORY.md
 
 ```text
+## [1.0.24] (2026-08-30)
+
+- **Critical Fix**: PyInstaller `--collect-all tkinterdnd2` - ensures native tkdnd library bundled in standalone .exe
+- **Build System**: Enhanced build_exe.py with explicit tkinterdnd2 collection via PyInstaller.utils.hooks.collect_all()
+- **Robustness**: Drag & Drop now guaranteed to work in packaged executable with no missing binaries
+
 ## [1.0.23] (2026-08-30)
 
 - **CRITICAL ROOT CAUSE FIX**: DnD initialization - changed from `tk.Tk()` to `TkinterDnD.Tk()` in main.py

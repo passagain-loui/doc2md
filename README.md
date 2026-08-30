@@ -43,7 +43,21 @@
 # README.md
 
 ```text
-# doc2md v1.0.21
+# doc2md v1.0.24
+
+## Version 1.0.24 (2026-08-30) - PYINSTALLER TKINTERDND2 BUNDLING FIX
+
+### Critical Fixes
+- **Critical Fix**: PyInstaller now explicitly collects tkinterdnd2 native binaries via `collect_all('tkinterdnd2')`
+- **Enhancement**: Fixed native tkdnd library bundling in standalone executable
+- **Robustness**: Drag & Drop functionality now guaranteed in packaged .exe (no missing .dll issues)
+
+## Version 1.0.23 (2026-08-30) - ULTIMATE ARCHITECTURAL FIX
+
+### Critical Fixes
+- **Critical Fix**: DnD was broken - root window now uses `TkinterDnD.Tk()` for proper DnD support
+- **Fix**: Dropped file paths now logged with absolute path for clarity
+- **Enhancement**: Added branding "by Passagain P." to window title
 
 ## Version 1.0.21 (2026-08-30) - EMERGENCY HOTFIX
 
