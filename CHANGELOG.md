@@ -1,5 +1,8 @@
 # CHANGELOG.md
 
+``````text
+# CHANGELOG.md
+
 `````text
 # CHANGELOG.md
 
@@ -7,6 +10,13 @@
 # CHANGELOG.md
 
 ```text
+## [1.0.12] (2026-08-30)
+
+- **Fix**: Installer unable to automatically close applications - added `CloseApplications=yes` to Inno Setup
+- **Fix**: Auto-restart applications after installation with `RestartApplications=yes`
+- **Fix**: Installer now properly handles file locks from running doc2md instances
+- **Robustness**: Silent application closure during upgrade without manual intervention
+
 ## [1.0.11] (2026-08-30)
 
 - **Fix**: CustomTkinter theme initialization - removed hallucinated `set_color_scheme` method
@@ -26,3 +36,4 @@
 ```
 ````
 `````
+``````

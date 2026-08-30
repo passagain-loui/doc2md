@@ -1,5 +1,8 @@
 # CLAUDE.md
 
+``````text
+# CLAUDE.md
+
 `````text
 # CLAUDE.md
 
@@ -7,7 +10,7 @@
 # CLAUDE.md
 
 ```text
-# doc2md v1.0.11
+# doc2md v1.0.12
 
 ## 1. Role & Execution Guidelines
 - **Role:** คุณคือ Execution Engine ทำหน้าที่คิดวิเคราะห์จุดแก้ไขและจุดเชื่อมโยงทั้งหมดอย่างรอบด้าน เพื่อแก้ไขโค้ดให้สมบูรณ์ครบจบในรอบเดียวและประหยัด Token
@@ -39,3 +42,4 @@
 ```
 ````
 `````
+``````

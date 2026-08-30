@@ -1,5 +1,8 @@
 # README.md
 
+``````text
+# README.md
+
 `````text
 # README.md
 
@@ -7,7 +10,14 @@
 # README.md
 
 ```text
-# doc2md v1.0.11
+# doc2md v1.0.12
+
+## Version 1.0.12 (2026-08-30) - INSTALLER HOTFIX
+
+### Critical Fixes
+- **Fix**: Installer file locking - auto-close running doc2md instances
+- **Fix**: Silent application restart after installation
+- **Fix**: Seamless upgrade without manual app closure
 
 ## Version 1.0.11 (2026-08-30) - HOTFIX
 
@@ -28,3 +38,4 @@
 ```
 ````
 `````
+``````

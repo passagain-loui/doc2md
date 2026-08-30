@@ -16,6 +16,8 @@ Compression=lzma
 SolidCompression=yes
 ShowLanguageDialog=no
 UninstallDisplayName=doc2md {#Version}
+CloseApplications=yes
+RestartApplications=yes
 
 [Files]
 Source: "dist\doc2md.exe"; DestDir: "{app}"; Flags: ignoreversion
