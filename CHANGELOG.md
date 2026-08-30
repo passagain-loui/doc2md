@@ -1,5 +1,8 @@
 # CHANGELOG.md
 
+```````````````text
+# CHANGELOG.md
+
 ``````````````text
 # CHANGELOG.md
 
@@ -34,6 +37,15 @@
 # CHANGELOG.md
 
 ```text
+## [1.0.21] (2026-08-30)
+
+- **Critical Fix**: Silent conversion crash - full traceback now logged to Status Log
+- **Critical Fix**: Output files not being written - enhanced file write error handling and logging
+- **Critical Fix**: Drag & Drop broken - now registers DnD on root window for maximum coverage
+- **Enhancement**: Comprehensive exception tracing with `traceback.format_exc()` displayed in GUI
+- **Enhancement**: Absolute path logging for output files so users know where files are saved
+- **Robustness**: All errors now visible in Status Log for debugging
+
 ## [1.0.20] (2026-08-30)
 
 - **Fix**: GPU Acceleration initialization - torch.cuda.is_available() check with device logging
@@ -140,3 +152,4 @@
 ````````````
 `````````````
 ``````````````
+```````````````

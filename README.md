@@ -1,5 +1,8 @@
 # README.md
 
+```````````````text
+# README.md
+
 ``````````````text
 # README.md
 
@@ -34,7 +37,16 @@
 # README.md
 
 ```text
-# doc2md v1.0.20
+# doc2md v1.0.21
+
+## Version 1.0.21 (2026-08-30) - EMERGENCY HOTFIX
+
+### Critical Bug Fixes
+- **Fix**: Silent conversion crash - full traceback now logged to Status Log
+- **Fix**: Output files not being written to Output Folder
+- **Fix**: Drag & Drop file ingestion restored with root window DnD binding
+
+## Version 1.0.20 (2026-08-30)
 
 ## Version 1.0.20 (2026-08-30) - DIAGNOSTIC AUDIT FIXES
 
@@ -139,3 +151,4 @@
 ````````````
 `````````````
 ``````````````
+```````````````

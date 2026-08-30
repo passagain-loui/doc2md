@@ -10,6 +10,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 from pathlib import Path
 from typing import Optional
 
@@ -216,12 +217,22 @@ class MainWindow:
         self.log_text.configure(state="disabled")
 
     def _setup_drag_drop(self) -> None:
-        """Setup DnD with robust event handling on entire drop frame and label."""
+        """Setup DnD with robust event handling on entire drop frame, label, and root window."""
         if DND_FILES is None:
             logger.warning("TkinterDnD2 not available")
             return
 
         try:
+            # Register on root window for maximum coverage
+            try:
+                self.root.drop_target_register(DND_FILES, DND_TEXT)
+                self.root.dnd_bind('<<Drop>>', self._on_drop)
+                self.root.dnd_bind('<<DragEnter>>', self._on_drag_enter)
+                self.root.dnd_bind('<<DragLeave>>', self._on_drag_leave)
+                logger.info("DnD registered on root window")
+            except Exception as e:
+                logger.warning(f"DnD root registration failed: {e}")
+
             # Register on the main drop frame and its label for complete coverage
             self.drop_zone.drop_target_register(DND_FILES, DND_TEXT)
             self.drop_zone.dnd_bind('<<Drop>>', self._on_drop)
@@ -234,7 +245,7 @@ class MainWindow:
             self.drop_label.dnd_bind('<<DragEnter>>', self._on_drag_enter)
             self.drop_label.dnd_bind('<<DragLeave>>', self._on_drag_leave)
 
-            logger.info("DnD registered successfully on drop_zone frame and label")
+            logger.info("DnD registered successfully on root, drop_zone frame, and label")
         except Exception as exc:
             logger.warning(f"DnD setup failed: {exc}")
 
@@ -409,16 +420,22 @@ class MainWindow:
 
                     if result.success:
                         # Determine output format and directory
-                        output_dir = Path(self.output_dir_var.get())
-                        output_dir.mkdir(parents=True, exist_ok=True)
+                        try:
+                            output_dir = Path(self.output_dir_var.get())
+                            output_dir.mkdir(parents=True, exist_ok=True)
+                            self._log(f"📂 Output dir: {output_dir}")
 
-                        if self.output_format_var.get() == "Plain Text (.txt)":
-                            output_path = output_dir / file_path.with_suffix(".txt").name
-                        else:
-                            output_path = output_dir / file_path.with_suffix(".md").name
+                            if self.output_format_var.get() == "Plain Text (.txt)":
+                                output_path = output_dir / file_path.with_suffix(".txt").name
+                            else:
+                                output_path = output_dir / file_path.with_suffix(".md").name
 
-                        output_path.write_text(result.markdown, encoding="utf-8")
-                        self._log(f"✅ {file_path.name} → {output_path.name}")
+                            output_path.write_text(result.markdown, encoding="utf-8")
+                            self._log(f"✅ Saved to: {output_path.absolute()}")
+                        except Exception as e:
+                            self._log(f"❌ File write error: {type(e).__name__}: {str(e)}")
+                            self._log(f"❌ Traceback:\n{traceback.format_exc()}")
+                            raise
 
                         # Copy to clipboard if enabled
                         if self.copy_clipboard_var.get():
@@ -434,7 +451,10 @@ class MainWindow:
                 except ConversionError as exc:
                     self._log(f"❌ {file_path.name}: {str(exc)}")
                 except Exception as exc:
-                    self._log(f"❌ {file_path.name}: {type(exc).__name__}: {str(exc)}")
+                    tb = traceback.format_exc()
+                    self._log(f"❌ EXCEPTION: {type(exc).__name__}")
+                    self._log(f"❌ {file_path.name}: {str(exc)}")
+                    self._log(f"❌ Traceback:\n{tb}")
                     logger.exception(f"Conversion error: {exc}")
 
             if not self.cancel_event.is_set():
@@ -443,7 +463,9 @@ class MainWindow:
                 self.root.after(0, lambda: self.progress_percent_label.configure(text="100%"))
 
         except Exception as exc:
-            self._log(f"❌ Fatal error: {exc}")
+            tb = traceback.format_exc()
+            self._log(f"❌ FATAL ERROR: {type(exc).__name__}: {str(exc)}")
+            self._log(f"❌ Traceback:\n{tb}")
             logger.exception(f"Worker error: {exc}")
 
         finally:
