@@ -1,5 +1,8 @@
 # CHANGELOG.md
 
+`````````````````text
+# CHANGELOG.md
+
 ````````````````text
 # CHANGELOG.md
 
@@ -40,6 +43,14 @@
 # CHANGELOG.md
 
 ```text
+## [1.0.23] (2026-08-30) - ULTIMATE ARCHITECTURAL FIX
+
+- **CRITICAL FIX**: DnD was NEVER working - root window now uses `TkinterDnD.Tk()` for proper DnD support
+- **Critical Fix**: Dropped file paths now logged with absolute path for clarity
+- **Enhancement**: Added branding "by Passagain P." to window title and header
+- **Robustness**: DnD fallback to standard Tk if TkinterDnD2 unavailable
+- **Architecture**: Root cause identified and fixed in `doc2md/cli/main.py`
+
 ## [1.0.22] (2026-08-30) - CRITICAL BUG FIXES
 
 - **Critical Fix**: Progress bar jumping to 100% instantly - moved progress calculation to AFTER conversion completes
@@ -165,3 +176,4 @@
 ``````````````
 ```````````````
 ````````````````
+`````````````````

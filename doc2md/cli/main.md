@@ -273,7 +273,12 @@ def gui_command() -> None:
         import tkinter as tk
         from doc2md.gui import MainWindow
 
-        root = tk.Tk()
+        try:
+            from tkinterdnd2 import Tk
+            root = Tk()
+        except ImportError:
+            root = tk.Tk()
+
         app_window = MainWindow(root)
         root.mainloop()
     except ImportError as e:

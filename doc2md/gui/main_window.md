@@ -48,7 +48,7 @@ class MainWindow:
         """Initialize the GUI window."""
         from doc2md import __version__
         self.root = root
-        self.root.title(f"doc2md v{__version__} - Document to Markdown Converter")
+        self.root.title(f"doc2md v{__version__} by Passagain P. - Document to Markdown Converter")
         self.root.geometry("950x800")
 
         # Theme setup
@@ -305,7 +305,7 @@ class MainWindow:
                     path = Path(path_str).resolve()
                     if path.is_file():
                         valid_paths.append(path)
-                        self._log(f"✓ {path.name}")
+                        self._log(f"✓ Dropped: {path.absolute()}")
                     elif path.is_dir():
                         for subfile in path.rglob("*"):
                             if subfile.is_file():

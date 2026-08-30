@@ -1,5 +1,8 @@
 # localcore_crash.md
 
+`````````````````````````````````text
+# localcore_crash.md
+
 ````````````````````````````````text
 # localcore_crash.md
 
@@ -119,3 +122,4 @@ Native Panic: cannot move state from Destroyed at C:\Users\Passagain\.cargo\regi
 ``````````````````````````````
 ```````````````````````````````
 ````````````````````````````````
+`````````````````````````````````

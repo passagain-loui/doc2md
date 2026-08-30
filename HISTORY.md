@@ -1,5 +1,8 @@
 # HISTORY.md
 
+`````````````````text
+# HISTORY.md
+
 ````````````````text
 # HISTORY.md
 
@@ -40,6 +43,15 @@
 # HISTORY.md
 
 ```text
+## [1.0.23] (2026-08-30)
+
+- **CRITICAL ROOT CAUSE FIX**: DnD initialization - changed from `tk.Tk()` to `TkinterDnD.Tk()` in main.py
+- **Critical Fix**: DnD was completely broken because root window lacked DnD support from the start
+- **Enhancement**: Dropped file paths now logged with absolute path (e.g., `C:\Users\...\file.pdf`)
+- **Enhancement**: Window title now includes branding: `doc2md v1.0.23 by Passagain P.`
+- **Robustness**: Graceful fallback to standard Tk if TkinterDnD2 import fails
+- **Architecture**: Root cause of DnD failure traced to application entry point, not GUI bindings
+
 ## [1.0.22] (2026-08-30)
 
 - **Critical Fix**: Progress bar jumping to 100% instantly - moved progress calculation from BEFORE conversion to AFTER
@@ -165,3 +177,4 @@
 ``````````````
 ```````````````
 ````````````````
+`````````````````
