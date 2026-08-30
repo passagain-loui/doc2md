@@ -370,15 +370,26 @@ class MainWindow:
         self.cancel_event.set()
         self.is_converting = False
 
+    def _update_progress(self, percent: int) -> None:
+        """Update progress bar with percentage from audio transcription callback."""
+        try:
+            percent = min(100, max(0, int(percent)))
+            self.progress_bar.set(percent / 100.0)
+            self.root.after(0, lambda p=percent: self.progress_percent_label.configure(text=f"{p}%"))
+        except Exception:
+            pass  # Never let progress updates break the conversion
+
     def _conversion_worker(self) -> None:
         """Background conversion worker."""
         try:
             self._log("🔄 Starting conversion...")
 
-            # Update converter options
+            # Update converter options with language selection and progress callback for audio transcription
             self.converter.options.update({
                 "audio_model": self.audio_model_var.get(),
+                "language": self.language_var.get(),
                 "pdf_ocr_fallback": self.ocr_enabled_var.get(),
+                "progress_callback": self._update_progress,
             })
 
             for idx, file_path in enumerate(self.selected_files):
@@ -387,6 +398,7 @@ class MainWindow:
                     break
 
                 try:
+                    self._log(f"📄 File: {file_path.name}")
                     self._log(f"Processing: {file_path.name}...")
 
                     # Update progress with percentage label

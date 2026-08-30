@@ -80,6 +80,18 @@ class AudioEngine(BaseEngine):
     MODEL_SIZES = ("tiny", "base", "small", "medium", "large-v3")
     MODEL_CACHE_DIR = Path.home() / ".cache" / "doc2md" / "models"
 
+    # Language mapping from GUI labels to ISO 639-1 codes
+    LANGUAGE_CODES = {
+        "Auto-detect": None,  # None = auto-detect by Whisper
+        "English": "en",
+        "Thai": "th",
+        "Spanish": "es",
+        "French": "fr",
+        "German": "de",
+        "Chinese": "zh",
+        "Japanese": "ja",
+    }
+
     def convert(self, source: Path | str, options: dict, abort_event: Optional[threading.Event] = None) -> str:
         """Transcribe audio/video file and return structured Markdown.
 
@@ -153,9 +165,14 @@ class AudioEngine(BaseEngine):
                 # decoding), overridable via options["beam_size"].
                 beam_size = options.get("beam_size", 1)
 
+                # Extract language from options (GUI language selection)
+                language_gui = options.get("language", "Auto-detect")
+                language_code = self.LANGUAGE_CODES.get(language_gui, None)
+                logger.info(f"🎤 Transcription: GUI language='{language_gui}' → Whisper code='{language_code}'")
+
                 try:
                     segments_gen, info = model.transcribe(
-                        str(source), language="en", beam_size=beam_size
+                        str(source), language=language_code, beam_size=beam_size
                     )
                     # faster-whisper returns a lazy generator; consume it fully here
                     # so downstream formatting can iterate plain segment objects
@@ -381,6 +398,9 @@ class AudioEngine(BaseEngine):
             model_kwargs: dict = {"device": device, "compute_type": compute_type}
             if device == "cpu":
                 model_kwargs["cpu_threads"] = os.cpu_count() or 4
+                logger.info(f"🔧 GPU not available, using CPU with {model_kwargs['cpu_threads']} threads")
+            else:
+                logger.info(f"🚀 GPU/CUDA acceleration enabled - device: {device}, compute_type: {compute_type}")
             logger.info(f"Loading '{model_size}' model with {model_kwargs}")
 
             model = WhisperModel(model_size, **model_kwargs)

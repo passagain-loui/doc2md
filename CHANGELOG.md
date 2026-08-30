@@ -1,5 +1,8 @@
 # CHANGELOG.md
 
+`````````````text
+# CHANGELOG.md
+
 ````````````text
 # CHANGELOG.md
 
@@ -28,6 +31,15 @@
 # CHANGELOG.md
 
 ```text
+## [1.0.19] (2026-08-30)
+
+- **Fix**: Thai audio transcription language bug - language selection from GUI now passed to Whisper (language="th" for Thai)
+- **Feature**: Language mapping system - supports Auto-detect, English, Thai, Spanish, French, German, Chinese, Japanese
+- **Fix**: GPU/Device logging - clear logging of CUDA detection, device type, and CPU thread count in logs
+- **Fix**: Progress callback wiring - real-time audio transcription progress updates progress bar accurately
+- **Enhancement**: Immediate file name logging when processing begins ("📄 File: ...")
+- **Enhancement**: Device acceleration info logged when loading Whisper model
+
 ## [1.0.18] (2026-08-30)
 
 - **Feature**: GPU Acceleration enabled - auto-detects CUDA and falls back to CPU (int8 compute)
@@ -113,3 +125,4 @@
 ``````````
 ```````````
 ````````````
+`````````````

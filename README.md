@@ -1,5 +1,8 @@
 # README.md
 
+`````````````text
+# README.md
+
 ````````````text
 # README.md
 
@@ -28,7 +31,16 @@
 # README.md
 
 ```text
-# doc2md v1.0.18
+# doc2md v1.0.19
+
+## Version 1.0.19 (2026-08-30) - CRITICAL BUG FIX
+
+### Critical Fixes & Enhancements
+- **Fix**: Thai audio transcription language bug - language selection now properly passed to Whisper model
+- **Feature**: Language mapping system supporting Auto-detect, Thai, Spanish, French, German, Chinese, Japanese
+- **Fix**: GPU/Device logging - clear console output showing CUDA detection and device acceleration status
+- **Fix**: Real-time progress callback wiring for accurate audio transcription progress
+- **Enhancement**: Immediate file name logging during file processing
 
 ## Version 1.0.18 (2026-08-30) - PERFORMANCE & TECH UI OVERHAUL
 
@@ -113,3 +125,4 @@
 ``````````
 ```````````
 ````````````
+`````````````
