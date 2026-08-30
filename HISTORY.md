@@ -1,9 +1,19 @@
 # HISTORY.md
 
+`````text
+# HISTORY.md
+
 ````text
 # HISTORY.md
 
 ```text
+## [1.0.11] (2026-08-30)
+
+- **Fix**: CustomTkinter theme initialization - removed hallucinated `set_color_scheme` method
+- **Fix**: Use correct CustomTkinter API: `set_default_color_theme()` instead of non-existent `set_color_scheme()`
+- **Fix**: Added try/catch around theme configuration to gracefully fallback on theme setup failure
+- **Robustness**: GUI now starts even if CustomTkinter theme customization fails
+
 ## [1.0.10] (2026-08-30)
 
 - **Fix**: TkinterDnD2 drag & drop now safely handles Unicode paths and filenames with spaces/Thai characters
@@ -15,3 +25,4 @@
 - **Hardening**: Pre-flight audio file validation guard prevents corrupt/unreadable files from reaching FFmpeg decode path
 ```
 ````
+`````

@@ -48,9 +48,13 @@ class MainWindow:
         self.root.geometry("800x600")
 
         # Configure dark/light theme if using CustomTkinter
-        if hasattr(ctk, 'set_appearance_mode'):
-            ctk.set_appearance_mode("dark")
-            ctk.set_color_scheme("blue")
+        try:
+            if hasattr(ctk, 'set_appearance_mode'):
+                ctk.set_appearance_mode("dark")
+            if hasattr(ctk, 'set_default_color_theme'):
+                ctk.set_default_color_theme("blue")
+        except Exception as exc:
+            logger.warning(f"Theme configuration failed (using fallback): {exc}")
 
         self.converter = Converter()
         self.is_converting = False

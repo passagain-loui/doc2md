@@ -1,10 +1,20 @@
 # README.md
 
+`````text
+# README.md
+
 ````text
 # README.md
 
 ```text
-# doc2md v1.0.10
+# doc2md v1.0.11
+
+## Version 1.0.11 (2026-08-30) - HOTFIX
+
+### Critical Fixes
+- **Fix**: CustomTkinter theme initialization crash - removed hallucinated `set_color_scheme` method
+- **Fix**: Use correct CustomTkinter API: `set_default_color_theme()` instead
+- **Fix**: Graceful theme fallback prevents GUI startup crashes
 
 ## Version 1.0.10 (2026-08-30)
 
@@ -17,3 +27,4 @@
 - **Hardening**: Bulletproof exception guards for native C-extension crashes
 ```
 ````
+`````
