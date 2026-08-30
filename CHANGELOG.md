@@ -1,5 +1,20 @@
 # CHANGELOG.md
 
+``````````````````````text
+# CHANGELOG.md
+
+`````````````````````text
+# CHANGELOG.md
+
+````````````````````text
+# CHANGELOG.md
+
+```````````````````text
+# CHANGELOG.md
+
+``````````````````text
+# CHANGELOG.md
+
 `````````````````text
 # CHANGELOG.md
 
@@ -43,6 +58,40 @@
 # CHANGELOG.md
 
 ```text
+## [1.0.25] (2026-08-30) - DEEP AUDIT: DRAG & DROP, PDF, AND QA GATE
+
+- **CRITICAL FIX**: Drag & drop failed for every file type - `shlex.split()` treated Windows
+ backslashes as escape characters, turning `C:\Users\me\a.mp3` into `C:Usersmea.mp3`, which
+ then failed `is_file()` and surfaced as a bogus "No supported files". Now uses the Tcl-aware
+ `tk.splitlist()`, which handles backslashes, spaces, and Thai filenames correctly.
+- **CRITICAL FIX**: PDF and OCR conversion failed from the GUI - the unpicklable
+ `progress_callback` bound method was passed into process-isolated workers and raised at
+ `Process.start()`. Options are now filtered through a pickle probe before crossing a
+ process boundary.
+- **CRITICAL FIX**: `tools/verify.ps1` was a no-op that always reported success - it contained
+ only an exit-code check with no command in front of it, so `$LASTEXITCODE` was `$null` and
+ the script fell through to `exit $null` (0). The 308-test suite was never run by the release
+ pipeline. Replaced with a real gate that runs version, import, changelog, CLI, and pytest checks.
+- **Fix**: Tk widgets were mutated directly from the conversion worker thread (progress bar,
+ button states), causing random freezes and crashes. All UI updates now marshal through `after()`.
+- **Fix**: `self.converter.processor.cpu_count` raised AttributeError on every conversion
+ (`Converter` has no `processor`), so GPU/CPU status never displayed. Uses `os.cpu_count()`.
+- **Fix**: Cancel could not stop a running transcription - `abort_event` is now passed to the
+ engine, so a 30-minute audio job stops immediately instead of only between files.
+- **Fix**: Transcription output hardcoded `**Language:** English` even for Thai. Now reports the
+ language actually used (explicit selection, or Whisper's auto-detection).
+- **Fix**: Batch output could silently overwrite - `a/report.pdf` and `b/report.docx` both wrote
+ `report.md`. Collisions now get a `-1`, `-2`, ... discriminator.
+- **Fix**: File dialog offered only 8 extensions while the router supports ~60. Filters are now
+ generated from the router's own extension tables.
+- **Fix**: Clipboard failures were reported as success - `copy_text()`'s `(ok, message)` result
+ was discarded.
+- **UI**: Version and "by Passagain P." moved out of the window titlebar into the in-app header.
+- **Cleanup**: Removed dead `doc2md/core/audio_engine.py`, which imported a nonexistent
+ `Transcriber` symbol from faster-whisper.
+- **Tests**: Added regression coverage for drop-path parsing (backslashes, spaces, Thai),
+ output collisions, and option pickling.
+
 ## [1.0.24] (2026-08-30) - PYINSTALLER TKINTERDND2 BUNDLING FIX
 
 - **Critical Fix**: PyInstaller now explicitly collects tkinterdnd2 native binaries and data files via `collect_all('tkinterdnd2')`
@@ -184,3 +233,8 @@
 ```````````````
 ````````````````
 `````````````````
+``````````````````
+```````````````````
+````````````````````
+`````````````````````
+``````````````````````

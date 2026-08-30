@@ -216,7 +216,13 @@ class AudioEngine(BaseEngine):
                         )
                     raise ConversionError(f"Transcription failed: {type(e).__name__}: {error_msg}")
 
-                return self._format_output(source, duration, segments, model_size)
+                # Report the language actually used: the explicit GUI selection
+                # when one was made, otherwise whatever Whisper auto-detected.
+                detected = getattr(info, "language", None)
+                return self._format_output(
+                    source, duration, segments, model_size,
+                    language=language_code or detected or "auto",
+                )
             except ConversionError:
                 raise
             except Exception as e:
@@ -477,7 +483,8 @@ class AudioEngine(BaseEngine):
             return False
 
     def _format_output(
-        self, source: Path, duration: float, segments: list, model_size: str
+        self, source: Path, duration: float, segments: list, model_size: str,
+        language: str = "auto",
     ) -> str:
         """Format transcription output as Markdown with timestamps."""
         lines = [
@@ -485,7 +492,7 @@ class AudioEngine(BaseEngine):
             "",
             f"- **Duration:** {self._format_time(duration)}",
             f"- **Model:** faster-whisper ({model_size})",
-            f"- **Language:** English",
+            f"- **Language:** {language}",
             "",
             "## Transcript",
             "",

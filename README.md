@@ -1,5 +1,20 @@
 # README.md
 
+``````````````````````text
+# README.md
+
+`````````````````````text
+# README.md
+
+````````````````````text
+# README.md
+
+```````````````````text
+# README.md
+
+``````````````````text
+# README.md
+
 `````````````````text
 # README.md
 
@@ -43,7 +58,25 @@
 # README.md
 
 ```text
-# doc2md v1.0.24
+# doc2md v1.0.25
+
+## Version 1.0.25 (2026-08-30) - DEEP AUDIT
+
+### Critical Fixes
+- **Drag & drop restored for all file types** - `shlex.split()` was stripping Windows
+ backslashes from dropped paths, so every drop reported "No supported files"
+- **PDF/OCR conversion restored from the GUI** - an unpicklable callback was crashing
+ spawned worker processes
+- **QA gate now real** - `tools/verify.ps1` previously ran nothing and always passed,
+ which is why regressions shipped repeatedly
+
+### Other Fixes
+- Thread-safe UI updates from the conversion worker (fixes random freezes)
+- Cancel now aborts mid-file instead of only between files
+- Thai transcriptions no longer mislabelled as English
+- Batch conversions no longer overwrite same-stem outputs
+- File dialog covers all supported extensions
+- Version and branding moved from the titlebar into the in-app header
 
 ## Version 1.0.24 (2026-08-30) - PYINSTALLER TKINTERDND2 BUNDLING FIX
 
@@ -174,3 +207,8 @@
 ```````````````
 ````````````````
 `````````````````
+``````````````````
+```````````````````
+````````````````````
+`````````````````````
+``````````````````````

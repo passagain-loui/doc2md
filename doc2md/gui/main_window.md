@@ -8,11 +8,8 @@ from __future__ import annotations
 import gc
 import logging
 import os
-import shlex
-import subprocess
-import sys
+import re
 import threading
-import time
 import traceback
 from pathlib import Path
 from typing import Optional
@@ -32,9 +29,21 @@ except ImportError:
 
 from doc2md.core.converter import Converter
 from doc2md.core.errors import ConversionError
-from doc2md.core.router import detect, FileKind
+from doc2md.core.router import (
+    AUDIO_EXTENSIONS,
+    CODE_EXTENSIONS,
+    IMAGE_EXTENSIONS,
+    VIDEO_EXTENSIONS,
+    detect,
+    FileKind,
+)
 
 logger = logging.getLogger(__name__)
+
+# Every kind the engine registry can actually convert. FileKind.UNKNOWN is
+# deliberately excluded so unsupported drops are reported up front instead of
+# failing later inside the worker.
+SUPPORTED_KINDS = frozenset(k for k in FileKind if k is not FileKind.UNKNOWN)
 
 
 class MainWindow:
@@ -48,7 +57,8 @@ class MainWindow:
         """Initialize the GUI window."""
         from doc2md import __version__
         self.root = root
-        self.root.title(f"doc2md v{__version__} by Passagain P. - Document to Markdown Converter")
+        self.version = __version__
+        self.root.title("doc2md - Document to Markdown Converter")
         self.root.geometry("950x800")
 
         # Theme setup
@@ -89,10 +99,18 @@ class MainWindow:
         main_frame = ctk.CTkFrame(self.root, fg_color=bg_dark)
         main_frame.pack(fill="both", expand=True, padx=15, pady=15)
 
-        # Title (Cyan accent)
-        title = ctk.CTkLabel(main_frame, text="doc2md - Document to Markdown Converter",
+        # Header block: product name + version/branding line (in-app, not in the
+        # window titlebar - the titlebar is reserved for the plain product name).
+        header_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        header_frame.pack(fill="x", pady=(0, 20))
+
+        title = ctk.CTkLabel(header_frame, text="doc2md - Document to Markdown Converter",
                             font=("Arial", 22, "bold"), text_color=accent_cyan)
-        title.pack(pady=(0, 20))
+        title.pack()
+
+        subtitle = ctk.CTkLabel(header_frame, text=f"v{self.version}  •  by Passagain P.",
+                                font=("Arial", 12), text_color="#64748B")
+        subtitle.pack(pady=(2, 0))
 
         # Settings panel - Grid-based layout with Tech Dark theme
         settings_frame = ctk.CTkFrame(main_frame, fg_color=card_dark, corner_radius=12)
@@ -273,6 +291,45 @@ class MainWindow:
             pass
         return "refuse"
 
+    @staticmethod
+    def _parse_drop_paths(raw_data: str) -> list[str]:
+        """Split a TkinterDnD ``<<Drop>>`` payload into individual path strings.
+
+        The payload is a brace-delimited list: paths containing spaces arrive
+        wrapped in ``{...}``, everything else is space-separated. Backslashes
+        are literal path separators and must survive untouched.
+
+        Two standard splitters are actively wrong here and both were tried in
+        earlier releases:
+
+        * ``shlex.split`` (POSIX mode) treats every backslash as an escape and
+          eats it - ``C:\\Users\\me\\a.mp3`` becomes ``C:Usersmea.mp3``.
+        * ``tk.splitlist`` applies Tcl backslash substitution to *unbraced*
+          items - ``C:\\a\\one.pdf`` becomes ``C:\\x07one.pdf`` (``\\a`` is the
+          bell character). Only braced items pass through intact.
+
+        Either way the resulting path fails ``is_file()`` and the drop is
+        reported as "No supported files". This parser performs no escape
+        processing whatsoever, which is the only correct behaviour for Windows
+        paths, and handles non-ASCII (Thai) filenames unchanged.
+        """
+        data = raw_data.strip()
+        if not data:
+            return []
+
+        # A single unbraced path that happens to contain spaces would be split
+        # incorrectly by the tokenizer below, so trust the payload as-is when it
+        # has no brace groups and names something that actually exists.
+        if "{" not in data:
+            try:
+                if Path(data).exists():
+                    return [data]
+            except OSError:
+                pass
+
+        parts = re.findall(r"\{([^{}]*)\}|(\S+)", data)
+        return [(braced or bare).strip() for braced, bare in parts if (braced or bare).strip()]
+
     def _on_drop(self, event) -> str:
         """Handle dropped files with robust parsing."""
         try:
@@ -280,19 +337,9 @@ class MainWindow:
             self.drop_label.configure(text_color="#06B6D4")  # Back to cyan
 
             raw_data = event.data if isinstance(event.data, str) else str(event.data)
-            logger.info(f"Drop event received: {raw_data[:100]}")
+            logger.info(f"Drop event received: {raw_data[:200]}")
 
-            # Parse paths robustly
-            try:
-                paths = shlex.split(raw_data)
-            except ValueError:
-                paths = raw_data.split()
-
-            cleaned_paths = []
-            for path_str in paths:
-                path_str = path_str.strip().strip('{}')
-                if path_str:
-                    cleaned_paths.append(path_str)
+            cleaned_paths = self._parse_drop_paths(raw_data)
 
             if not cleaned_paths:
                 self._log("❌ No files received")
@@ -300,56 +347,92 @@ class MainWindow:
 
             # Validate paths
             valid_paths = []
+            rejected: list[str] = []
             for path_str in cleaned_paths:
                 try:
-                    path = Path(path_str).resolve()
+                    path = Path(path_str)
+                    try:
+                        path = path.resolve()
+                    except OSError:
+                        pass  # Keep the unresolved path; it may still be openable
+
                     if path.is_file():
-                        valid_paths.append(path)
-                        self._log(f"✓ Dropped: {path.absolute()}")
+                        if self._is_supported(path):
+                            valid_paths.append(path)
+                            self._log(f"✓ Dropped: {path}")
+                        else:
+                            rejected.append(f"{path.name} (unsupported type)")
                     elif path.is_dir():
-                        for subfile in path.rglob("*"):
-                            if subfile.is_file():
-                                try:
-                                    detection = detect(subfile)
-                                    if detection.kind in [
-                                        FileKind.PDF, FileKind.DOCX, FileKind.XLSX,
-                                        FileKind.PPTX, FileKind.HTML, FileKind.IMAGE,
-                                        FileKind.AUDIO, FileKind.VIDEO, FileKind.CODE
-                                    ]:
-                                        valid_paths.append(subfile)
-                                except Exception:
-                                    pass
+                        found = 0
+                        for subfile in sorted(path.rglob("*")):
+                            if subfile.is_file() and self._is_supported(subfile):
+                                valid_paths.append(subfile)
+                                found += 1
+                        self._log(f"📁 {path.name}: {found} supported file(s)")
+                    else:
+                        rejected.append(f"{path_str} (not found)")
                 except Exception as exc:
-                    self._log(f"⚠️ {path_str}: {exc}")
+                    rejected.append(f"{path_str} ({exc})")
+
+            for note in rejected:
+                self._log(f"⚠️ Skipped: {note}")
 
             if valid_paths:
                 self.selected_files = valid_paths
                 self.convert_button.configure(state="normal")
                 self._log(f"✅ Ready: {len(valid_paths)} file(s)")
                 return "copy"
-            else:
-                self._log("❌ No supported files")
-                return "refuse"
+
+            self._log("❌ No supported files in this drop")
+            return "refuse"
 
         except Exception as exc:
             logger.exception(f"Drop error: {exc}")
             self._show_error_dialog("Drop Error", f"Error processing files:\n{exc}")
             return "refuse"
 
+    @staticmethod
+    def _is_supported(path: Path) -> bool:
+        """Return True when the router can route *path* to a real engine."""
+        try:
+            return detect(path).kind in SUPPORTED_KINDS
+        except Exception:
+            return False
+
     def _browse_files(self) -> None:
         """File browser dialog."""
         try:
+            # Built from the router's own extension tables so the dialog can
+            # never drift out of sync with what the engines actually accept.
+            docs = "*.pdf *.docx *.xlsx *.xlsm *.xls *.csv *.pptx *.html *.htm *.eml *.json *.txt *.md"
+            audio = " ".join(f"*{ext}" for ext in sorted(AUDIO_EXTENSIONS))
+            video = " ".join(f"*{ext}" for ext in sorted(VIDEO_EXTENSIONS))
+            images = " ".join(f"*{ext}" for ext in sorted(IMAGE_EXTENSIONS))
+            code = " ".join(f"*{ext}" for ext in sorted(CODE_EXTENSIONS))
+
             filetypes = [
-                ("All Supported", "*.pdf *.docx *.xlsx *.pptx *.html *.mp3 *.wav *.mp4"),
-                ("Documents", "*.pdf *.docx *.xlsx *.pptx *.html"),
-                ("Audio/Video", "*.mp3 *.wav *.m4a *.mp4 *.mkv"),
+                ("All Supported", " ".join([docs, audio, video, images, code])),
+                ("Documents", docs),
+                ("Audio", audio),
+                ("Video", video),
+                ("Images", images),
+                ("Code", code),
                 ("All Files", "*.*"),
             ]
             files = filedialog.askopenfilenames(title="Select files", filetypes=filetypes)
             if files:
-                self.selected_files = [Path(f) for f in files]
+                selected = [Path(f) for f in files]
+                supported = [p for p in selected if self._is_supported(p)]
+                for skipped in (p for p in selected if p not in supported):
+                    self._log(f"⚠️ Skipped: {skipped.name} (unsupported type)")
+
+                if not supported:
+                    self._log("❌ No supported files selected")
+                    return
+
+                self.selected_files = supported
                 self.convert_button.configure(state="normal")
-                self._log(f"✅ Selected {len(self.selected_files)} file(s)")
+                self._log(f"✅ Selected {len(supported)} file(s)")
         except Exception as exc:
             self._show_error_dialog("Browse Error", str(exc))
 
@@ -384,14 +467,34 @@ class MainWindow:
         self.cancel_event.set()
         self.is_converting = False
 
+    def _ui(self, fn) -> None:
+        """Run *fn* on the Tk main thread.
+
+        Tk is not thread-safe: calling widget methods from the conversion
+        worker corrupts the interpreter and shows up as random freezes or hard
+        crashes. Every UI mutation originating off the main thread must be
+        marshalled through ``after``.
+        """
+        try:
+            if threading.current_thread() is threading.main_thread():
+                fn()
+            else:
+                self.root.after(0, fn)
+        except Exception as exc:
+            logger.warning(f"UI update skipped: {exc}")
+
     def _update_progress(self, percent: int) -> None:
         """Update progress bar with percentage from audio transcription callback."""
         try:
-            percent = min(100, max(0, int(percent)))
-            self.progress_bar.set(percent / 100.0)
-            self.root.after(0, lambda p=percent: self.progress_percent_label.configure(text=f"{p}%"))
-        except Exception:
-            pass  # Never let progress updates break the conversion
+            pct = min(100, max(0, int(percent)))
+        except (TypeError, ValueError):
+            return
+
+        def apply() -> None:
+            self.progress_bar.set(pct / 100.0)
+            self.progress_percent_label.configure(text=f"{pct}%")
+
+        self._ui(apply)
 
     def _conversion_worker(self) -> None:
         """Background conversion worker."""
@@ -404,16 +507,21 @@ class MainWindow:
                 if torch.cuda.is_available():
                     self._log(f"🚀 GPU Acceleration: CUDA enabled ({torch.cuda.get_device_name(0)})")
                 else:
-                    self._log(f"🔧 GPU not available - using CPU ({self.converter.processor.cpu_count} threads)")
+                    self._log(f"🔧 GPU not available - using CPU ({os.cpu_count() or 4} threads)")
+            except ImportError:
+                self._log(f"🔧 GPU support not installed - using CPU ({os.cpu_count() or 4} threads)")
             except Exception as e:
-                self._log(f"⚠️ GPU check skipped: {str(e)}")
+                self._log(f"⚠️ GPU check skipped: {type(e).__name__}: {e}")
 
-            # Update converter options with language selection and progress callback for audio transcription
+            # Update converter options with language selection and progress callback
+            # for audio transcription. abort_event lets the engine stop mid-file
+            # instead of only between files.
             self.converter.options.update({
                 "audio_model": self.audio_model_var.get(),
                 "language": self.language_var.get(),
                 "pdf_ocr_fallback": self.ocr_enabled_var.get(),
                 "progress_callback": self._update_progress,
+                "abort_event": self.cancel_event,
             })
 
             for idx, file_path in enumerate(self.selected_files):
@@ -429,25 +537,19 @@ class MainWindow:
                     result = self.converter.convert_file(file_path)
 
                     # Update progress AFTER conversion completes
-                    progress = (idx + 1) / len(self.selected_files)
-                    percent = int(progress * 100)
-                    self.progress_bar.set(progress)
-                    self.root.after(0, lambda p=percent: self.progress_percent_label.configure(text=f"{p}%"))
+                    self._update_progress(int((idx + 1) / len(self.selected_files) * 100))
 
                     if result.success:
                         # Determine output format and directory
                         try:
                             output_dir = Path(self.output_dir_var.get())
                             output_dir.mkdir(parents=True, exist_ok=True)
-                            self._log(f"📂 Output dir: {output_dir}")
 
-                            if self.output_format_var.get() == "Plain Text (.txt)":
-                                output_path = output_dir / file_path.with_suffix(".txt").name
-                            else:
-                                output_path = output_dir / file_path.with_suffix(".md").name
+                            suffix = ".txt" if self.output_format_var.get() == "Plain Text (.txt)" else ".md"
+                            output_path = self._unique_output_path(output_dir, file_path.stem, suffix)
 
                             output_path.write_text(result.markdown, encoding="utf-8")
-                            self._log(f"✅ Saved to: {output_path.absolute()}")
+                            self._log(f"✅ Saved to: {output_path}")
                         except Exception as e:
                             self._log(f"❌ File write error: {type(e).__name__}: {str(e)}")
                             self._log(f"❌ Traceback:\n{traceback.format_exc()}")
@@ -457,10 +559,10 @@ class MainWindow:
                         if self.copy_clipboard_var.get():
                             try:
                                 from doc2md.core.clipboard import copy_text
-                                copy_text(result.markdown)
-                                self._log(f"📋 Copied to clipboard")
-                            except Exception:
-                                pass
+                                ok, message = copy_text(result.markdown)
+                                self._log(f"📋 Copied to clipboard" if ok else f"⚠️ Clipboard: {message}")
+                            except Exception as e:
+                                self._log(f"⚠️ Clipboard failed: {type(e).__name__}: {e}")
                     else:
                         self._log(f"❌ {file_path.name}: {result.error}")
 
@@ -475,8 +577,7 @@ class MainWindow:
 
             if not self.cancel_event.is_set():
                 self._log("✅ All conversions complete")
-                self.progress_bar.set(1.0)
-                self.root.after(0, lambda: self.progress_percent_label.configure(text="100%"))
+                self._update_progress(100)
 
         except Exception as exc:
             tb = traceback.format_exc()
@@ -486,9 +587,27 @@ class MainWindow:
 
         finally:
             self.is_converting = False
-            self.convert_button.configure(state="normal")
-            self.cancel_button.configure(state="disabled")
+            # Widget state must be restored on the Tk main thread, not here.
+            self._ui(lambda: (
+                self.convert_button.configure(state="normal"),
+                self.cancel_button.configure(state="disabled"),
+            ))
             gc.collect()
+
+    @staticmethod
+    def _unique_output_path(output_dir: Path, stem: str, suffix: str) -> Path:
+        """Return a non-colliding path inside *output_dir*.
+
+        Converting ``a/report.pdf`` and ``b/report.docx`` in one batch would
+        otherwise write both to ``report.md``, silently discarding the first
+        result. Collisions get a ``-1``, ``-2``, ... discriminator instead.
+        """
+        candidate = output_dir / f"{stem}{suffix}"
+        counter = 1
+        while candidate.exists():
+            candidate = output_dir / f"{stem}-{counter}{suffix}"
+            counter += 1
+        return candidate
 
     def _log(self, message: str) -> None:
         """Thread-safe logging."""

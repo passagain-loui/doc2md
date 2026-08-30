@@ -141,6 +141,25 @@ def _run_in_thread(payload: dict, timeout: float) -> str:
         pool.shutdown(wait=False, cancel_futures=True)
 
 
+def _picklable_options(options: dict) -> dict:
+    """Drop option values that cannot cross a spawn boundary.
+
+    Uses a real ``pickle.dumps`` probe rather than a type allowlist so any
+    unpicklable value (bound methods, threading primitives, Tk widgets, open
+    handles) is filtered regardless of how it was introduced.
+    """
+    import pickle
+
+    safe: dict = {}
+    for key, value in options.items():
+        try:
+            pickle.dumps(value)
+        except Exception:
+            continue
+        safe[key] = value
+    return safe
+
+
 class Converter:
     """High-level facade: path in, clean Markdown out."""
 
@@ -198,10 +217,21 @@ class Converter:
                 raise ConversionError(result.error)
             return result
 
+        # Options crossing a process boundary must survive pickling. GUI callers
+        # legitimately put live objects in options (a bound progress_callback, a
+        # threading.Event for cancellation); those are meaningless in a spawned
+        # worker and raise at Process.start(), which previously made every
+        # process-isolated conversion (PDF, OCR) fail outright when launched
+        # from the GUI. Strip them for isolated engines and keep them for
+        # in-thread engines, which share the caller's address space.
+        options = dict(self.options)
+        if engine.requires_process_isolation:
+            options = _picklable_options(options)
+
         payload = {
             "engine": engine.name,
             "source": str(source),
-            "options": dict(self.options),
+            "options": options,
         }
 
         try:

@@ -1,5 +1,20 @@
 # HISTORY.md
 
+``````````````````````text
+# HISTORY.md
+
+`````````````````````text
+# HISTORY.md
+
+````````````````````text
+# HISTORY.md
+
+```````````````````text
+# HISTORY.md
+
+``````````````````text
+# HISTORY.md
+
 `````````````````text
 # HISTORY.md
 
@@ -43,6 +58,24 @@
 # HISTORY.md
 
 ```text
+## [1.0.25] (2026-08-30)
+
+- **CRITICAL**: Drag & drop was broken for every file type, not just MP3 - `shlex.split()`
+ stripped Windows backslashes from dropped paths. Replaced with Tcl-aware `tk.splitlist()`.
+- **CRITICAL**: PDF/OCR conversion failed from the GUI - unpicklable `progress_callback` was
+ sent into spawned worker processes. Options are now pickle-probed before crossing processes.
+- **CRITICAL**: The QA gate (`tools/verify.ps1`) never ran anything and always reported
+ EXIT_CODE 0, which is why regressions shipped in v1.0.19 through v1.0.24. Rewritten as a
+ real gate; it immediately caught a pre-existing changelog test that had never been executed.
+- **Fix**: Thread-unsafe Tk calls from the conversion worker (random freezes/crashes)
+- **Fix**: AttributeError on `converter.processor.cpu_count` swallowed every conversion
+- **Fix**: Cancel now aborts mid-file via `abort_event`, not just between files
+- **Fix**: Thai transcriptions no longer report `Language: English`
+- **Fix**: Batch conversions no longer overwrite same-stem outputs
+- **Fix**: File dialog now covers all ~60 supported extensions instead of 8
+- **UI**: Version and branding moved from titlebar into the in-app header
+- **Cleanup**: Deleted dead `doc2md/core/audio_engine.py` (imported nonexistent `Transcriber`)
+
 ## [1.0.24] (2026-08-30)
 
 - **Critical Fix**: PyInstaller `--collect-all tkinterdnd2` - ensures native tkdnd library bundled in standalone .exe
@@ -184,3 +217,8 @@
 ```````````````
 ````````````````
 `````````````````
+``````````````````
+```````````````````
+````````````````````
+`````````````````````
+``````````````````````
