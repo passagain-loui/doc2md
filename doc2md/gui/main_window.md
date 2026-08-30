@@ -1,13 +1,18 @@
 # main_window.py
 
 ```python
-"""Main GUI window with CustomTkinter Modern Clean theme and native (windnd) drag-and-drop support."""
+"""Modern GUI dashboard for doc2md converter with drag-and-drop support."""
 
 from __future__ import annotations
 
+import gc
 import logging
 import os
+import shlex
+import subprocess
+import sys
 import threading
+import traceback
 from pathlib import Path
 from typing import Optional
 
@@ -15,766 +20,363 @@ try:
     import customtkinter as ctk
     from tkinter import messagebox, filedialog
 except ImportError:
-    raise ImportError("customtkinter is required for GUI. Install via: pip install 'doc2md[gui]'")
+    # Graceful fallback if CustomTkinter not available
+    import tkinter as ctk
+    from tkinter import messagebox, filedialog
 
-from doc2md import __version__
+try:
+    from tkinterdnd2 import DND_FILES, DND_TEXT
+except ImportError:
+    DND_FILES = None
+    DND_TEXT = None
+
 from doc2md.core.converter import Converter
-from doc2md.core.exporter import export_markdown
-from doc2md.core.router import FileKind, detect
-from doc2md.engine.audio_engine import AudioEngine
+from doc2md.core.errors import ConversionError
+from doc2md.core.router import detect, FileKind
 
 logger = logging.getLogger(__name__)
 
-# Modern Dark UI theme colors (High-contrast sleek dark mode)
-CTK_BG = "#0F172A"  # Slate 900 / Dark Charcoal main background
-CTK_CARD = "#1E2937"  # Slate 800 cards/frames background
-CTK_ACCENT_BLUE = "#2563EB"  # Blue 600 primary action buttons
-CTK_ACCENT_BLUE_HOVER = "#1D4ED8"  # Blue 700 hover
-CTK_ACCENT_CYAN = "#059669"  # Emerald 600 (reused for Start button)
-CTK_ACCENT_CYAN_HOVER = "#047857"  # Emerald 700 hover
-CTK_ACCENT_PINK = "#DC2626"  # Red 600 destructive action
-CTK_ACCENT_PINK_HOVER = "#991B1B"  # Red 800 hover
-CTK_TEXT = "#F8FAFC"  # Slate 50 - High contrast white primary text
-CTK_BORDER = "#334155"  # Slate 700 subtle borders
-CTK_SECONDARY_TEXT = "#94A3B8"  # Slate 400 muted secondary text/badges
-CTK_TEAL_TEXT = "#06B6D4"  # Cyan 500 for accent text (better contrast in dark mode)
-CTK_SUCCESS = "#059669"  # Emerald 600 success
-CTK_ERROR = "#DC2626"  # Red 600 error
-
-# Shared font family for crisp, consistently-aligned icon+text rendering
-UI_FONT = "Segoe UI"
-
 
 class MainWindow:
-    """Main application window with drag-and-drop file conversion."""
+    """Modern CustomTkinter-based GUI for doc2md converter."""
 
-    def __init__(self, root: ctk.CTk):
+    def __init__(self, root):
+        """Initialize the GUI window.
+
+        Args:
+            root: tk.Tk root window instance (or compatible)
+        """
         self.root = root
-        self.root.title(f"doc2md Converter v{__version__}")
-        self.root.geometry("900x700")
-        self.root.minsize(700, 500)
+        self.root.title("doc2md - Document to Markdown Converter")
+        self.root.geometry("800x600")
 
-        # Configure Modern Dark theme
-        ctk.set_appearance_mode("dark")
-        ctk.set_default_color_theme("blue")
+        # Configure dark/light theme if using CustomTkinter
+        if hasattr(ctk, 'set_appearance_mode'):
+            ctk.set_appearance_mode("dark")
+            ctk.set_color_scheme("blue")
 
-        self.converter = Converter(timeout=1800, options={"audio_model": "small"})
-        self.audio_engine = AudioEngine()
+        self.converter = Converter()
         self.is_converting = False
-        self.stop_requested = False
-        self.abort_event = threading.Event()
-        self.last_result = ""
-        self.staged_files: list[str] = []
-        self.convert_thread: Optional[threading.Thread] = None
-        self.spinner_frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
-        self.spinner_index = 0
-        self.spinner_id = None
+        self.conversion_thread: Optional[threading.Thread] = None
 
         self._setup_ui()
-        self._setup_dnd()
+        self._setup_drag_drop()
+        self._setup_cleanup()
 
-        # Hard Exit Protocol: catch the window-close (X) button so an active
-        # conversion never leaves an orphaned FFmpeg process or a frozen
-        # main thread behind.
-        self.root.protocol("WM_DELETE_WINDOW", self._on_exit_request)
+    def _setup_ui(self) -> None:
+        """Set up the main UI layout."""
+        # Main frame
+        main_frame = ctk.CTkFrame(self.root)
+        main_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
-        # Warm up the default audio model in the background so the first
-        # conversion doesn't pay the (multi-second) model-load cost lazily.
-        self._preload_model_async(self.model_var.get())
-
-    def _setup_ui(self):
-        """Initialize UI components with a Modern Clean (Tailwind-inspired) theme."""
-        # Root container
-        root_frame = ctk.CTkFrame(self.root, fg_color=CTK_BG)
-        root_frame.pack(fill="both", expand=True)
-
-        # Header Container with Title and Version Badge
-        header_frame = ctk.CTkFrame(root_frame, fg_color="transparent")
-        header_frame.pack(fill="x", padx=16, pady=12)
-        header_frame.grid_columnconfigure(0, weight=1)
-
-        # Title Label
+        # Title label
         title_label = ctk.CTkLabel(
-            header_frame,
-            text="📄 doc2md",
-            font=(UI_FONT, 24, "bold"),
-            text_color=CTK_TEXT,
-            anchor="w",
-            justify="left",
+            main_frame,
+            text="doc2md - Convert Documents to Markdown",
+            font=("Arial", 18, "bold")
         )
-        title_label.grid(row=0, column=0, sticky="w")
+        title_label.pack(pady=(0, 20))
 
-        # Version Badge (top-right)
-        version_badge = ctk.CTkLabel(
-            header_frame,
-            text=f"v{__version__}",
-            font=(UI_FONT, 10, "bold"),
-            text_color="#ffffff",
-            fg_color=CTK_ACCENT_BLUE,
-            padx=8,
-            pady=4,
-            corner_radius=12,
-            anchor="center",
+        # Drop zone frame
+        drop_frame = ctk.CTkFrame(main_frame, fg_color=("#e8e8e8", "#2a2a2a"), border_width=2)
+        drop_frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+        drop_label = ctk.CTkLabel(
+            drop_frame,
+            text="📁 Drag & drop files here\nor click to browse",
+            font=("Arial", 14),
+            text_color=("gray50", "gray70")
         )
-        version_badge.grid(row=0, column=1, sticky="e", padx=0)
+        drop_label.pack(expand=True)
 
-        # Subtitle
-        subtitle_label = ctk.CTkLabel(
-            header_frame,
-            text="Convert documents to optimized Markdown with AI",
-            font=(UI_FONT, 11),
-            text_color=CTK_SECONDARY_TEXT,
-            anchor="w",
-            justify="left",
-        )
-        subtitle_label.grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        self.drop_zone = drop_frame
+        self.drop_label = drop_label
 
-        # Main content frame (2 columns)
-        content_frame = ctk.CTkFrame(root_frame, fg_color="transparent")
-        content_frame.pack(fill="both", expand=True, padx=12, pady=12)
+        # Button frame
+        button_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        button_frame.pack(fill="x", padx=10, pady=10)
 
-        # Left Column: Drop Zone (using pack inside content_frame)
-        drop_card = ctk.CTkFrame(
-            content_frame, fg_color=CTK_CARD, corner_radius=12, border_width=2, border_color=CTK_BORDER
-        )
-        drop_card.pack(side="left", fill="both", expand=True, padx=(0, 6))
-        # Hover effect: change border on interaction
-        drop_card.bind("<Enter>", lambda e: drop_card.configure(border_color=CTK_ACCENT_BLUE))
-        drop_card.bind("<Leave>", lambda e: drop_card.configure(border_color=CTK_BORDER))
-
-        # Configure grid for drop zone layout
-        drop_card.grid_rowconfigure(0, weight=1)
-        drop_card.grid_columnconfigure(0, weight=1)
-
-        self.drop_label = ctk.CTkLabel(
-            drop_card,
-            text="📁 Click or Drag & Drop Files Here\n(PDF, DOCX, Images, Audio, Video)",
-            font=(UI_FONT, 13),
-            text_color=CTK_TEAL_TEXT,
-            wraplength=350,
-            anchor="center",
-            justify="center",
-        )
-        self.drop_label.grid(row=0, column=0, sticky="nsew", padx=30, pady=30)
-        self.drop_card = drop_card
-
-        # Staging status label (inside drop card, at the bottom)
-        self.staging_status_label = ctk.CTkLabel(
-            drop_card,
-            text="",
-            text_color=CTK_SUCCESS,
-            font=(UI_FONT, 9),
-            anchor="center",
-        )
-        self.staging_status_label.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 8))
-
-        # Bind click event to drop card for fallback file browser
-        drop_card.bind("<Button-1>", lambda e: self.browse_files())
-        self.drop_label.bind("<Button-1>", lambda e: self.browse_files())
-
-        # Right Column: Options & Analytics
-        right_frame = ctk.CTkScrollableFrame(content_frame, fg_color="transparent")
-        right_frame.pack(side="right", fill="both", expand=True, padx=(5, 0))
-
-        # Options Card
-        options_card = ctk.CTkFrame(right_frame, fg_color=CTK_CARD, corner_radius=8)
-        options_card.pack(fill="x", pady=(0, 10))
-        options_card.grid_columnconfigure(1, weight=1)
-
-        options_label = ctk.CTkLabel(
-            options_card,
-            text="⚙️ Options",
-            font=(UI_FONT, 13, "bold"),
-            text_color=CTK_TEXT,
-            anchor="w",
-        )
-        options_label.grid(row=0, column=0, columnspan=2, sticky="w", padx=12, pady=(8, 10))
-
-        checkbox_kwargs = dict(
-            text_color=CTK_TEXT,
-            fg_color=CTK_ACCENT_BLUE,
-            hover_color=CTK_ACCENT_BLUE_HOVER,
-            font=(UI_FONT, 12),
-            checkbox_width=20,
-            checkbox_height=20,
-        )
-
-        self.copy_var = ctk.BooleanVar(value=True)
-        copy_check = ctk.CTkCheckBox(
-            options_card,
-            text="Auto-copy to clipboard",
-            variable=self.copy_var,
-            **checkbox_kwargs,
-        )
-        copy_check.grid(row=1, column=0, columnspan=2, sticky="w", padx=12, pady=4)
-
-        self.stats_var = ctk.BooleanVar(value=True)
-        stats_check = ctk.CTkCheckBox(
-            options_card,
-            text="Show token stats",
-            variable=self.stats_var,
-            **checkbox_kwargs,
-        )
-        stats_check.grid(row=2, column=0, columnspan=2, sticky="w", padx=12, pady=4)
-
-        self.ocr_var = ctk.BooleanVar(value=True)
-        ocr_check = ctk.CTkCheckBox(
-            options_card,
-            text="Enable OCR",
-            variable=self.ocr_var,
-            **checkbox_kwargs,
-        )
-        ocr_check.grid(row=3, column=0, columnspan=2, sticky="w", padx=12, pady=4)
-
-        model_label = ctk.CTkLabel(
-            options_card,
-            text="Audio Model:",
-            text_color=CTK_TEXT,
-            font=(UI_FONT, 11),
-            anchor="w",
-        )
-        model_label.grid(row=4, column=0, sticky="w", padx=12, pady=(10, 3))
-
-        self.model_var = ctk.StringVar(value="small")
-        self.model_combo = ctk.CTkComboBox(
-            options_card,
-            values=["tiny", "base", "small", "medium", "large-v3"],
-            variable=self.model_var,
-            command=self._on_model_change,
-            fg_color=CTK_CARD,
-            border_color=CTK_BORDER,
-            button_color=CTK_ACCENT_BLUE,
-            button_hover_color=CTK_ACCENT_BLUE_HOVER,
-            text_color=CTK_TEXT,
-            text_color_disabled=CTK_TEXT,
-            font=(UI_FONT, 11),
+        browse_button = ctk.CTkButton(
+            button_frame,
+            text="Browse Files",
+            command=self._browse_files,
             width=120,
-            justify="center",
+            height=40
         )
-        self.model_combo.grid(row=4, column=1, sticky="e", padx=12, pady=(10, 3))
+        browse_button.pack(side="left", padx=5)
 
-        # Model warm-up status indicator
-        self.model_status_label = ctk.CTkLabel(
-            options_card,
-            text="",
-            text_color=CTK_SECONDARY_TEXT,
-            font=(UI_FONT, 10),
-            anchor="w",
-        )
-        self.model_status_label.grid(row=5, column=0, columnspan=2, sticky="w", padx=12, pady=(0, 8))
-
-        # Analytics Card
-        analytics_card = ctk.CTkFrame(right_frame, fg_color=CTK_CARD, corner_radius=8)
-        analytics_card.pack(fill="x", pady=(0, 10))
-
-        analytics_label = ctk.CTkLabel(
-            analytics_card,
-            text="📊 Analytics",
-            font=(UI_FONT, 13, "bold"),
-            text_color=CTK_TEXT,
-            anchor="w",
-        )
-        analytics_label.pack(anchor="w", padx=12, pady=(8, 5))
-
-        self.analytics_text = ctk.CTkLabel(
-            analytics_card,
-            text="No conversion yet",
-            font=(UI_FONT, 10),
-            text_color=CTK_SECONDARY_TEXT,
-            anchor="w",
-        )
-        self.analytics_text.pack(anchor="w", padx=12, pady=(0, 8))
-
-        # Progress Card with Embedded Percentage
-        progress_card = ctk.CTkFrame(root_frame, fg_color=CTK_CARD, corner_radius=12)
-        progress_card.pack(fill="x", padx=12, pady=(0, 12))
-        progress_card.grid_columnconfigure(0, weight=1)
-
-        # Progress bar container
-        progress_container = ctk.CTkFrame(progress_card, fg_color=CTK_CARD, corner_radius=8)
-        progress_container.grid(row=0, column=0, sticky="ew", padx=12, pady=10)
-        progress_container.grid_columnconfigure(0, weight=1)
-
-        self.progress_var = ctk.DoubleVar(value=0)
-        self.progress_bar = ctk.CTkProgressBar(
-            progress_container,
-            variable=self.progress_var,
-            fg_color=CTK_BORDER,
-            progress_color=CTK_ACCENT_BLUE,
-            height=32,
-        )
-        self.progress_bar.grid(row=0, column=0, sticky="ew")
-
-        # Percentage text embedded on the progress bar
-        self.progress_overlay = ctk.CTkLabel(
-            progress_container,
-            text="0%",
-            font=(UI_FONT, 11, "bold"),
-            text_color=CTK_TEXT,
-            fg_color="transparent",
-            anchor="center",
-        )
-        self.progress_overlay.place(relx=0.5, rely=0.5, anchor="center")
-
-        self.status_label = ctk.CTkLabel(
-            progress_card,
-            text="Ready",
-            text_color=CTK_TEAL_TEXT,
-            font=(UI_FONT, 10),
-            anchor="w",
-        )
-        self.status_label.grid(row=1, column=0, sticky="w", padx=12, pady=(0, 8))
-
-        # Bottom Action Panel - 5 buttons sharing equal grid width
-        button_frame = ctk.CTkFrame(root_frame, fg_color="transparent")
-        button_frame.pack(fill="x", padx=10, pady=(0, 10))
-        for col in range(5):
-            button_frame.grid_columnconfigure(col, weight=1)
-
-        btn_kwargs = dict(
-            font=(UI_FONT, 12, "bold"),
-            corner_radius=8,
-            text_color="#ffffff",
-            height=38,
-            anchor="center",
-        )
-
-        browse_btn = ctk.CTkButton(
+        self.convert_button = ctk.CTkButton(
             button_frame,
-            text="📂  Browse Files",
-            command=self.browse_files,
-            fg_color=CTK_ACCENT_BLUE,
-            hover_color=CTK_ACCENT_BLUE_HOVER,
-            **btn_kwargs,
-        )
-        browse_btn.grid(row=0, column=0, sticky="ew", padx=3)
-
-        self.convert_btn = ctk.CTkButton(
-            button_frame,
-            text="▶️  Start Conversion",
+            text="Convert",
             command=self._start_conversion,
-            fg_color="#059669",
-            hover_color="#047857",
-            **btn_kwargs,
+            state="disabled",
+            width=120,
+            height=40
         )
-        self.convert_btn.grid(row=0, column=1, sticky="ew", padx=3)
+        self.convert_button.pack(side="left", padx=5)
 
-        copy_btn = ctk.CTkButton(
-            button_frame,
-            text="📋  Copy Result",
-            command=self.copy_result,
-            fg_color=CTK_ACCENT_BLUE,
-            hover_color=CTK_ACCENT_BLUE_HOVER,
-            **btn_kwargs,
-        )
-        copy_btn.grid(row=0, column=2, sticky="ew", padx=3)
+        # Status and log frame
+        log_frame = ctk.CTkFrame(main_frame)
+        log_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
-        save_btn = ctk.CTkButton(
-            button_frame,
-            text="💾  Save As...",
-            command=self.save_result,
-            fg_color=CTK_ACCENT_CYAN,
-            hover_color=CTK_ACCENT_CYAN_HOVER,
-            **btn_kwargs,
-        )
-        save_btn.grid(row=0, column=3, sticky="ew", padx=3)
+        log_label = ctk.CTkLabel(log_frame, text="Status Log:", font=("Arial", 12, "bold"))
+        log_label.pack(anchor="w")
 
-        exit_btn = ctk.CTkButton(
-            button_frame,
-            text="❌  Exit",
-            command=self._on_exit_request,
-            fg_color=CTK_ACCENT_PINK,
-            hover_color=CTK_ACCENT_PINK_HOVER,
-            **btn_kwargs,
-        )
-        exit_btn.grid(row=0, column=4, sticky="ew", padx=3)
+        # Text widget for logs (compatibility with both ctk and tk)
+        try:
+            self.log_text = ctk.CTkTextbox(log_frame, height=150)
+        except AttributeError:
+            # Fallback for older CustomTkinter or pure tkinter
+            import tkinter as tk
+            self.log_text = tk.Text(log_frame, height=10, width=50)
 
-        # Developer Credit Footer
-        footer_frame = ctk.CTkFrame(root_frame, fg_color="transparent")
-        footer_frame.pack(fill="x", padx=12, pady=(5, 8))
-        footer_frame.grid_columnconfigure(0, weight=1)
+        self.log_text.pack(fill="both", expand=True, padx=5, pady=5)
+        self.log_text.configure(state="disabled")
 
-        developer_credit = ctk.CTkLabel(
-            footer_frame,
-            text="Developed by Passagain P.",
-            font=(UI_FONT, 9),
-            text_color=CTK_SECONDARY_TEXT,
-            anchor="e",
-        )
-        developer_credit.grid(row=0, column=0, sticky="e", padx=4, pady=2)
+        # Store selected files
+        self.selected_files: list[Path] = []
 
-    def _on_model_change(self, selected_model: str):
-        """Triggered when the user picks a different Whisper model size."""
-        self.converter.options["audio_model"] = selected_model
-        self._preload_model_async(selected_model)
+    def _setup_drag_drop(self) -> None:
+        """Configure drag & drop handling with Unicode & space support."""
+        if DND_FILES is None:
+            logger.warning("TkinterDnD2 not available - drag & drop disabled")
+            return
 
-    def _preload_model_async(self, model_size: str):
-        """Warm up (load + cache) the given Whisper model in a background
-        thread, updating a visual status indicator instead of blocking the UI
-        or lazily paying the load cost during the first conversion."""
-        self.model_status_label.configure(
-            text=f"⏳ Warming up '{model_size}' model...", text_color=CTK_TEAL_TEXT
-        )
+        try:
+            self.drop_zone.drop_target_register(DND_FILES, DND_TEXT)
+            self.drop_zone.dnd_bind('<<Drop>>', self._on_drop)
+            self.drop_zone.dnd_bind('<<DragEnter>>', self._on_drag_enter)
+            self.drop_zone.dnd_bind('<<DragLeave>>', self._on_drag_leave)
+        except Exception as exc:
+            logger.warning(f"Drag & drop setup failed: {exc}")
 
-        def worker():
+    def _on_drag_enter(self, event) -> str:
+        """Handle drag enter event."""
+        self.drop_zone.configure(fg_color=("#d8d8d8", "#333333"))
+        return event.action
+
+    def _on_drag_leave(self, event) -> str:
+        """Handle drag leave event."""
+        self.drop_zone.configure(fg_color=("#e8e8e8", "#2a2a2a"))
+        return event.action
+
+    def _on_drop(self, event) -> str:
+        """Handle file drop with robust path parsing for Unicode & spaces.
+
+        TkinterDnD2 wraps paths with spaces in curly braces `{}`.
+        This handler safely extracts and validates all paths.
+        """
+        try:
+            self.drop_zone.configure(fg_color=("#e8e8e8", "#2a2a2a"))
+
+            # Parse event.data safely - handle Windows/Unix path formats
+            raw_data = event.data if isinstance(event.data, str) else str(event.data)
+
+            # First, try shlex.split() for standard shell-quoted paths
             try:
-                self.audio_engine.preload_model(model_size)
-                self.root.after(
-                    0,
-                    lambda: self.model_status_label.configure(
-                        text=f"✅ '{model_size}' model ready", text_color=CTK_SUCCESS
-                    ),
-                )
-            except Exception as exc:
-                logger.warning(f"Model preload failed: {exc}")
-                self.root.after(
-                    0,
-                    lambda: self.model_status_label.configure(
-                        text=f"⚠️ Model will load on first use", text_color=CTK_SECONDARY_TEXT
-                    ),
-                )
+                paths = shlex.split(raw_data)
+            except ValueError:
+                # Fallback: split by spaces if shlex fails (malformed input)
+                paths = raw_data.split()
 
-        threading.Thread(target=worker, daemon=True).start()
+            # Strip TkinterDnD2's curly braces wrapper
+            cleaned_paths = []
+            for path_str in paths:
+                path_str = path_str.strip()
+                # Remove curly braces that TkinterDnD2 adds
+                path_str = path_str.strip('{}')
+                if path_str:
+                    cleaned_paths.append(path_str)
 
-    def _start_spinner(self):
-        """Start the animated spinner in the status label."""
-        self.spinner_index = 0
-        self._animate_spinner()
+            if not cleaned_paths:
+                self._log("❌ No valid files received")
+                return "refuse"
 
-    def _animate_spinner(self):
-        """Animate the spinner character cycling."""
-        if self.is_converting:
-            self.spinner_index = (self.spinner_index + 1) % len(self.spinner_frames)
-            frame = self.spinner_frames[self.spinner_index]
-            current_text = self.status_label.cget("text")
-            # Remove old spinner if present and append new one
-            if current_text and current_text[0] in self.spinner_frames:
-                text_without_spinner = current_text[2:] if len(current_text) > 2 else "Processing..."
+            # Resolve and validate paths
+            valid_paths = []
+            for path_str in cleaned_paths:
+                try:
+                    path = Path(path_str).resolve()
+                    if path.is_file():
+                        valid_paths.append(path)
+                        self._log(f"✓ Detected: {path.name}")
+                    elif path.is_dir():
+                        # Recursively add all supported files from directory
+                        for subfile in path.rglob("*"):
+                            if subfile.is_file():
+                                try:
+                                    detection = detect(subfile)
+                                    if detection.kind in [
+                                        FileKind.PDF, FileKind.DOCX, FileKind.XLSX,
+                                        FileKind.PPTX, FileKind.HTML, FileKind.IMAGE,
+                                        FileKind.AUDIO, FileKind.VIDEO, FileKind.CODE
+                                    ]:
+                                        valid_paths.append(subfile)
+                                except Exception:
+                                    pass
+                except Exception as exc:
+                    self._log(f"⚠️ Invalid path: {path_str} ({exc})")
+
+            if valid_paths:
+                self.selected_files = valid_paths
+                self.convert_button.configure(state="normal")
+                self._log(f"✅ Ready to convert {len(valid_paths)} file(s)")
             else:
-                text_without_spinner = current_text if current_text else "Processing..."
-            self.status_label.configure(text=f"{frame} {text_without_spinner}")
-            self.spinner_id = self.root.after(200, self._animate_spinner)
+                self._log("❌ No supported files found")
+                return "refuse"
 
-    def _stop_spinner(self):
-        """Stop the spinner animation."""
-        if self.spinner_id:
-            self.root.after_cancel(self.spinner_id)
-            self.spinner_id = None
+            return "copy"
 
-    def _setup_dnd(self):
-        """Setup native Windows drag-and-drop support (windnd) with fallback."""
-        try:
-            import windnd
-
-            windnd.hook_dropfiles(self.root, func=self._on_windnd_drop)
-            logger.info("Native drag-and-drop enabled (windnd)")
-            self.drop_label.configure(text="📁 Drag & Drop Files Here\n(PDF, DOCX, Images, Audio, Video)")
         except Exception as exc:
-            logger.warning(f"Drag-and-drop disabled: {exc}")
-            self.drop_label.configure(text="📁 Click 'Browse Files' to select documents")
+            # Catch native/C-level exceptions and show friendly error
+            error_msg = f"{type(exc).__name__}: {str(exc)}"
+            logger.exception(f"Drop handler crashed: {error_msg}")
+            self._show_error_dialog(
+                "File Drop Error",
+                f"Failed to process dropped files:\n{error_msg}\n\n"
+                "Please try again or use the Browse button."
+            )
+            return "refuse"
 
-    def _on_windnd_drop(self, filenames):
-        """Handle files dropped via windnd's native Windows drop hook."""
+    def _browse_files(self) -> None:
+        """Browse and select files."""
         try:
-            decoded = [
-                f.decode("utf-8", errors="ignore") if isinstance(f, bytes) else f
-                for f in filenames
-            ]
-            if decoded:
-                self._stage_files(decoded)
-        except Exception as exc:
-            logger.error(f"Error processing dropped files: {exc}")
-            messagebox.showerror("Error", f"Error processing dropped files: {exc}")
-
-    def browse_files(self):
-        """Open file browser to select files."""
-        files = filedialog.askopenfilenames(
-            filetypes=[
-                ("All Supported", "*.pdf *.docx *.xlsx *.pptx *.png *.jpg *.mp3 *.wav *.mp4 *.mkv"),
-                ("Documents", "*.pdf *.docx *.xlsx *.pptx"),
-                ("Images", "*.png *.jpg *.jpeg *.tiff"),
-                ("Audio", "*.mp3 *.wav *.m4a *.aac *.flac"),
-                ("Video", "*.mp4 *.mkv *.avi *.mov"),
+            filetypes = [
+                ("All Supported", "*.pdf *.docx *.xlsx *.pptx *.html *.eml *.mp3 *.wav *.mp4"),
+                ("PDF", "*.pdf"),
+                ("Word", "*.docx"),
+                ("Excel", "*.xlsx"),
+                ("PowerPoint", "*.pptx"),
+                ("HTML", "*.html"),
+                ("Audio", "*.mp3 *.wav *.m4a *.aac"),
+                ("Video", "*.mp4 *.mkv *.avi"),
                 ("All Files", "*.*"),
             ]
-        )
-        if files:
-            self._stage_files(list(files))
 
-    def _stage_files(self, files: list[str]):
-        """Stage files for conversion (store them but don't start conversion yet)."""
-        if not files:
-            return
-        self.staged_files = files
-        self._update_staging_status()
-
-    def _update_staging_status(self):
-        """Update the UI to show how many files are staged."""
-        if self.staged_files:
-            count = len(self.staged_files)
-            status = f"✓ {count} file(s) ready for conversion. Click 'Start Conversion' to begin."
-            self.staging_status_label.configure(
-                text=status,
-                text_color=CTK_SUCCESS,
+            files = filedialog.askopenfilenames(
+                title="Select files to convert",
+                filetypes=filetypes
             )
-            self.convert_btn.configure(state="normal")
-        else:
-            self.staging_status_label.configure(text="")
-            self.convert_btn.configure(state="disabled")
 
-    def _start_conversion(self):
-        """Start the conversion process using staged files."""
-        if not self.staged_files:
-            messagebox.showwarning("No Files", "Please select files to convert")
+            if files:
+                self.selected_files = [Path(f) for f in files]
+                self.convert_button.configure(state="normal")
+                self._log(f"✅ Selected {len(self.selected_files)} file(s)")
+        except Exception as exc:
+            self._show_error_dialog("Browse Error", f"Failed to open file dialog: {exc}")
+
+    def _start_conversion(self) -> None:
+        """Start conversion in a background thread."""
+        if not self.selected_files:
+            self._log("❌ No files selected")
             return
-        self.stop_requested = False
-        # Update button to show "Stop Conversion" during conversion
-        self.convert_btn.configure(
-            text="🟥 Stop Conversion",
-            command=self._stop_conversion,
-            fg_color="#dc2626",
-            hover_color="#b91c1c"
-        )
-        # Lock the model selector during conversion to prevent mid-run changes
-        self.model_combo.configure(state="disabled")
-        self.root.update_idletasks()
-        self.convert_files(self.staged_files)
 
-    def _stop_conversion(self):
-        """Request cancellation of the ongoing conversion and restore UI state immediately."""
-        self.stop_requested = True
-        self.abort_event.set()
-        self.staged_files.clear()
-
-        # Update status to show cancellation
-        self.status_label.configure(text="Conversion cancelled by user", text_color=CTK_SECONDARY_TEXT)
-
-        # Stop spinner animation if running
-        self._stop_spinner()
-
-        # Reset progress bar to 0
-        self.progress_var.set(0.0)
-        self.progress_overlay.configure(text="0%")
-
-        # Restore button to Start Conversion immediately (don't wait for finally)
-        self.convert_btn.configure(
-            text="▶️  Start Conversion",
-            command=self._start_conversion,
-            fg_color="#059669",
-            hover_color="#047857"
-        )
-        self.model_combo.configure(state="normal")
-        self._update_staging_status()
-        self.root.update_idletasks()
-
-    def convert_files(self, files: list[str]):
-        """Convert files in background thread."""
         if self.is_converting:
-            messagebox.showwarning("Busy", "Conversion already in progress")
+            self._log("⏳ Conversion already in progress")
             return
-
-        if not files:
-            messagebox.showwarning("No Files", "Please select files to convert")
-            return
-
-        # Ensure previous thread is fully terminated before starting new one
-        if self.convert_thread is not None and self.convert_thread.is_alive():
-            logger.warning("Previous conversion thread still running, waiting for termination...")
-            self.convert_thread.join(timeout=5)
 
         self.is_converting = True
-        self.abort_event.clear()
-        self.convert_thread = threading.Thread(target=self._convert_worker, args=(files,), daemon=True)
-        self.convert_thread.start()
+        self.convert_button.configure(state="disabled")
+        self.conversion_thread = threading.Thread(target=self._conversion_worker, daemon=True)
+        self.conversion_thread.start()
 
-    def _update_progress_display(self, percent: int):
-        """Update the progress bar fill and its centered numeric percentage label."""
-        percent = max(0, min(100, percent))
-        self.progress_var.set(percent / 100.0)
-        self.progress_overlay.configure(text=f"{percent}%")
-
-    def _convert_worker(self, files: list[str]):
-        """Background worker for file conversion with bulletproof crash guard."""
+    def _conversion_worker(self) -> None:
+        """Worker thread for file conversion."""
         try:
-            try:
-                # Reset abort event at start of conversion
-                self.abort_event.clear()
-                self.stop_requested = False
+            self._log("🔄 Starting conversion...")
 
-                total = len(files)
-                self.status_label.configure(text=f"Converting {total} file(s)...", text_color=CTK_TEAL_TEXT)
-                self._update_progress_display(0)
-                self.root.update()
+            results = []
+            for file_path in self.selected_files:
+                if self.is_converting is False:
+                    break
 
-                results = []
-                errors = []
+                try:
+                    self._log(f"Processing: {file_path.name}...")
+                    result = self.converter.convert_file(file_path)
 
-                def make_progress_callback(file_index: int):
-                    def _report(percent_in_file: int):
-                        overall = int(((file_index + (percent_in_file / 100)) / total) * 100)
-                        overall = max(0, min(99, overall))
-                        self.root.after(0, lambda p=overall: self._update_progress_display(p))
-                    return _report
-
-                for i, file_path in enumerate(files):
-                    # Allow user to stop conversion
-                    if self.stop_requested or self.abort_event.is_set():
-                        break
-
-                    # Numeric progress at the start of this file's slot
-                    self._update_progress_display(int((i / total) * 100))
-                    self.root.update()
-
-                    try:
-                        # Pass abort_event to converter for audio processing cancellation
-                        self.converter.options["abort_event"] = self.abort_event
-                        # Only attach the progress callback for audio/video files;
-                        # PDF/OCR engines run in a spawned process and cannot
-                        # pickle a local closure.
-                        detection = detect(Path(file_path))
-                        if detection.kind in (FileKind.AUDIO, FileKind.VIDEO):
-                            self.converter.options["progress_callback"] = make_progress_callback(i)
-                        else:
-                            self.converter.options.pop("progress_callback", None)
-
-                        result = self.converter.convert_file(Path(file_path))
-                        if result.success:
-                            results.append(result.markdown)
-                            logger.info(f"✅ Converted: {file_path}")
-                        else:
-                            error_msg = f"{Path(file_path).name}: {result.error}"
-                            errors.append(error_msg)
-                            logger.error(f"❌ Failed: {error_msg}")
-                    except Exception as exc:
-                        error_msg = f"{Path(file_path).name}: {type(exc).__name__}: {str(exc)}"
-                        errors.append(error_msg)
-                        logger.exception(f"❌ Error converting {file_path}: {exc}")
-
-                    # Mark this file's slot complete with a real numeric percentage
-                    self._update_progress_display(int(((i + 1) / total) * 100))
-
-                # Mark completion with full progress bar
-                self._update_progress_display(100)
-
-                if results:
-                    self.last_result = "\n\n---\n\n".join(results)
-                    status_msg = f"✅ Success: {len(results)} file(s) converted"
-                    if errors:
-                        status_msg += f" ({len(errors)} failed)"
-                    self.status_label.configure(text=status_msg, text_color=CTK_SUCCESS)
-                    self.analytics_text.configure(text=f"Files: {len(results)} | Ready to export")
-
-                    # Show errors if any
-                    if errors:
-                        error_summary = "\n".join(errors[:5])
-                        if len(errors) > 5:
-                            error_summary += f"\n... and {len(errors) - 5} more errors"
-                        messagebox.showwarning("Partial Conversion", f"Some files failed to convert:\n\n{error_summary}")
-                else:
-                    self.status_label.configure(text="❌ No files converted", text_color=CTK_ERROR)
-                    if errors:
-                        error_summary = "\n".join(errors[:5])
-                        if len(errors) > 5:
-                            error_summary += f"\n... and {len(errors) - 5} more errors"
-                        messagebox.showerror("Conversion Failed", f"All files failed to convert:\n\n{error_summary}")
+                    if result.success:
+                        output_path = file_path.with_suffix(".md")
+                        output_path.write_text(result.markdown, encoding="utf-8")
+                        self._log(f"✅ {file_path.name} → {output_path.name}")
+                        results.append((True, file_path.name))
                     else:
-                        messagebox.showerror("Conversion Failed", "No files were converted. Please check your files and try again.")
+                        self._log(f"❌ {file_path.name}: {result.error}")
+                        results.append((False, file_path.name))
 
-            except Exception as exc:
-                # Audio/Conversion Error Handler
-                logger.exception(f"Conversion worker error: {exc}")
-                self.status_label.configure(text=f"❌ Error: {type(exc).__name__}", text_color=CTK_ERROR)
-                error_detail = f"An unexpected error occurred during conversion:\n\n{type(exc).__name__}: {str(exc)}"
-                messagebox.showerror("Conversion Error", error_detail)
+                except ConversionError as exc:
+                    self._log(f"❌ {file_path.name}: {str(exc)}")
+                    results.append((False, file_path.name))
+                except Exception as exc:
+                    error_msg = f"{type(exc).__name__}: {str(exc)}"
+                    self._log(f"❌ {file_path.name}: {error_msg}")
+                    logger.exception(f"Conversion error: {error_msg}")
+                    results.append((False, file_path.name))
 
-        except BaseException as e:
-            # Bulletproof outer crash guard - catches CTranslate2, FFmpeg, Whisper crashes
-            logger.critical(f"BULLETPROOF CRASH GUARD: Caught critical exception - {type(e).__name__}: {str(e)}", exc_info=True)
-            self.status_label.configure(text="❌ Critical Error", text_color=CTK_ERROR)
-            error_msg = (
-                "A critical audio processing error occurred but the application is safe:\n\n"
-                f"{type(e).__name__}: {str(e)[:200]}\n\n"
-                "The application will continue normally. Please try again or check your audio files."
-            )
-            messagebox.showerror("Critical Audio Error", error_msg)
+            # Summary
+            successes = sum(1 for ok, _ in results if ok)
+            total = len(results)
+            self._log(f"✅ Conversion complete: {successes}/{total} succeeded")
+
+        except Exception as exc:
+            error_msg = f"{type(exc).__name__}: {str(exc)}"
+            self._log(f"❌ Fatal conversion error: {error_msg}")
+            logger.exception(f"Worker error: {error_msg}")
 
         finally:
-            # ALWAYS execute cleanup - guaranteed to run even on crash
             self.is_converting = False
-            self.stop_requested = False
-            self.staged_files.clear()
-            self.converter.options.pop("progress_callback", None)
-            self._update_staging_status()
-            # Reset button to show "Start Conversion"
-            self.convert_btn.configure(
-                text="▶️  Start Conversion",
-                command=self._start_conversion,
-                fg_color="#059669",
-                hover_color="#047857"
-            )
-            self.model_combo.configure(state="normal")
-            self.root.update_idletasks()
-            logger.info("Conversion worker cleanup complete")
+            self.convert_button.configure(state="normal")
+            # Force garbage collection to release resources
+            gc.collect()
 
-    def copy_result(self):
-        """Copy last conversion result to clipboard."""
-        if not self.last_result:
-            messagebox.showinfo("Info", "No conversion result to copy. Convert files first.")
-            return
-
+    def _log(self, message: str) -> None:
+        """Append message to log text widget (thread-safe)."""
         try:
-            from doc2md.core.clipboard import copy_text
+            def update_log():
+                self.log_text.configure(state="normal")
+                self.log_text.insert("end", f"{message}\n")
+                self.log_text.see("end")
+                self.log_text.configure(state="disabled")
 
-            ok, msg = copy_text(self.last_result)
-            if ok:
-                messagebox.showinfo("Success", "Conversion result copied to clipboard!")
+            # Schedule on main thread if called from worker thread
+            if threading.current_thread() is threading.main_thread():
+                update_log()
             else:
-                messagebox.showerror("Error", f"Clipboard error: {msg}")
+                self.root.after(0, update_log)
         except Exception as exc:
-            messagebox.showerror("Error", f"Failed to copy: {exc}")
+            logger.warning(f"Failed to log message: {exc}")
 
-    def save_result(self):
-        """Save conversion result in selected format."""
-        if not self.last_result:
-            messagebox.showinfo("Info", "No conversion result to save. Convert files first.")
-            return
+    def _show_error_dialog(self, title: str, message: str) -> None:
+        """Show error dialog (thread-safe)."""
+        def show_dialog():
+            messagebox.showerror(title, message)
 
-        output_path = filedialog.asksaveasfilename(
-            defaultextension=".md",
-            filetypes=[
-                ("Markdown", "*.md"),
-                ("Word Document", "*.docx"),
-                ("Plain Text", "*.txt"),
-                ("All Files", "*.*"),
-            ],
-        )
+        if threading.current_thread() is threading.main_thread():
+            show_dialog()
+        else:
+            self.root.after(0, show_dialog)
 
-        if not output_path:
-            return
+    def _setup_cleanup(self) -> None:
+        """Setup cleanup handlers for graceful shutdown."""
+        def on_closing():
+            if self.is_converting:
+                if messagebox.askyesno("Confirm", "Conversion in progress. Cancel and exit?"):
+                    self.is_converting = False
+                    # Wait for thread to finish (with timeout)
+                    if self.conversion_thread and self.conversion_thread.is_alive():
+                        self.conversion_thread.join(timeout=5)
+                else:
+                    return
 
-        try:
-            path = Path(output_path)
-            ext_map = {".md": "md", ".txt": "txt", ".docx": "docx"}
-            format_type = ext_map.get(path.suffix, "md")
+            # Cleanup: release resources
+            try:
+                from doc2md.engine.audio_engine import AudioEngine
+                AudioEngine.kill_all_ffmpeg_processes()
+                AudioEngine.cleanup_temp_audio_chunks()
+            except Exception:
+                pass
 
-            success, msg = export_markdown(self.last_result, path, format_type=format_type)
-            if success:
-                messagebox.showinfo("Success", f"✅ {msg}")
-                logger.info(f"Exported to {path}")
-            else:
-                messagebox.showerror("Error", f"❌ {msg}")
-        except Exception as exc:
-            messagebox.showerror("Error", f"Export failed: {exc}")
+            gc.collect()
+            self.root.destroy()
 
-    def _on_exit_request(self):
-        """Hard Exit Protocol: if a conversion is active, forcefully kill any
-        spawned FFmpeg processes and delete leftover temp audio chunks before
-        instantly terminating the process, so a frozen main thread (stuck in
-        a native transcription call) can never block application shutdown."""
-        if self.is_converting:
-            self.abort_event.set()
-            self.stop_requested = True
-            AudioEngine.kill_all_ffmpeg_processes()
-            AudioEngine.cleanup_temp_audio_chunks()
-        os._exit(0)
+        self.root.protocol("WM_DELETE_WINDOW", on_closing)
 ```

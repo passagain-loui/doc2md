@@ -5,8 +5,10 @@
 
 from __future__ import annotations
 
+import gc
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -85,12 +87,29 @@ class AudioEngine(BaseEngine):
             source: Path to audio/video file
             options: Conversion options dict (can include 'abort_event' key)
             abort_event: Optional threading.Event to signal cancellation during transcription
+
+        This method is synchronous and stateless per the BaseEngine contract
+        (it is invoked from a worker thread/process by Converter, never from
+        a caller's main thread). Callers that need non-blocking UI progress
+        should not call this directly from a GUI main thread; instead run it
+        from a background worker and supply options['progress_callback'] as
+        a queue-pushing function, e.g. `lambda pct: result_queue.put(("PROGRESS", pct))`,
+        so the worker never touches UI state directly.
         """
         try:
             try:
                 source = Path(source)
                 if not source.is_file():
                     raise ConversionError(f"Audio file not found: {source}")
+
+                # Pre-flight validation guard: catch corrupt/unreadable files
+                # before ever reaching FFmpeg decoding or Whisper inference.
+                # The GUI also calls validate_audio_file() directly at staging
+                # time for immediate feedback; this call is defense-in-depth
+                # for CLI/API callers that bypass GUI staging entirely.
+                is_valid, reason = self.validate_audio_file(source)
+                if not is_valid:
+                    raise ConversionError(f"Invalid or unreadable audio file: {reason}")
 
                 # Extract abort_event from options if not provided directly
                 if abort_event is None:
@@ -128,8 +147,16 @@ class AudioEngine(BaseEngine):
                 duration = self._get_duration(source)
                 model = self._load_model(model_size, options.get("download_progress"))
 
+                # Speed optimization: faster-whisper defaults beam_size to 5,
+                # which is significantly slower for a negligible accuracy
+                # gain in most transcription use cases. Default to 1 (greedy
+                # decoding), overridable via options["beam_size"].
+                beam_size = options.get("beam_size", 1)
+
                 try:
-                    segments_gen, info = model.transcribe(str(source), language="en")
+                    segments_gen, info = model.transcribe(
+                        str(source), language="en", beam_size=beam_size
+                    )
                     # faster-whisper returns a lazy generator; consume it fully here
                     # so downstream formatting can iterate plain segment objects
                     # instead of accidentally iterating the (generator, info) tuple.
@@ -182,37 +209,161 @@ class AudioEngine(BaseEngine):
             # Re-raise ConversionError as-is (already properly handled)
             raise
         except BaseException as e:
-            # Bulletproof outer crash guard for CTranslate2, Whisper, FFmpeg crashes
+            # Bulletproof outer crash guard for CTranslate2/Whisper/FFmpeg
+            # failures: pybind11 translates most C++ exceptions raised by
+            # CTranslate2 into ordinary Python exceptions, which this guard
+            # converts into a clean ConversionError instead of letting the
+            # process die - this is what "returns an error instead of
+            # terminating the process" means for the overwhelming majority
+            # of real-world native failures (bad codec params, malformed
+            # streams, driver errors, etc).
+            #
+            # Honest limitation: a genuine hard native crash (segfault/access
+            # violation) is not a Python exception at all - it's an OS signal
+            # that terminates the process unconditionally, and no amount of
+            # try/except at any nesting level can catch it. True immunity to
+            # that class of failure requires running the risky call in a
+            # separate OS process. That tradeoff was evaluated for this
+            # engine and rejected: it would force reloading the (multi-
+            # hundred-MB) Whisper model from scratch on every single
+            # conversion, since a loaded model instance cannot cross a
+            # process boundary - directly undoing the model-caching
+            # performance work from v1.0.8. validate_audio_file() is the
+            # primary defense instead: it catches the corrupt/malformed
+            # files that are the leading real-world cause of native crashes,
+            # before the risky decode path is ever reached.
             logger.critical(f"BULLETPROOF AUDIO CRASH GUARD: {type(e).__name__}: {str(e)}", exc_info=True)
             raise ConversionError(
                 f"Critical audio engine failure: {type(e).__name__}. "
                 f"The audio engine encountered an unexpected error. Try again with a different audio file."
             )
 
-    def _get_duration(self, source: Path) -> float:
-        """Get audio/video duration in seconds."""
+    def validate_audio_file(self, source: Path | str) -> tuple[bool, str]:
+        """Pre-flight validation of an audio/video file, run BEFORE FFmpeg
+        decoding or Whisper model inference is ever attempted.
+
+        Probes container integrity and audio stream presence with a single
+        lightweight `ffmpeg -i <file>` call (header parse only - no frame
+        decoding, so this stays fast even for large files) and inspects the
+        printed stream info for known corruption/format-error markers and
+        the presence of a readable audio stream.
+
+        Returns (is_valid, reason) - reason is empty when valid. Fails OPEN
+        (returns valid) when FFmpeg itself can't be located or the probe
+        errors out for a reason unrelated to the file's own integrity, so a
+        validator bug or missing binary never blocks a conversion attempt
+        that might otherwise have succeeded.
+        """
         try:
-            import ffmpeg
+            source = Path(source)
+            if not source.is_file():
+                return False, f"File not found: {source.name}"
+            if source.stat().st_size == 0:
+                return False, "File is empty (0 bytes)."
 
-            # Ensure bundled FFmpeg is in PATH for ffmpeg-python
             ffmpeg_path = _get_ffmpeg_path()
-            if ffmpeg_path != "ffmpeg":
-                # Prepend bundled FFmpeg directory to PATH
-                ffmpeg_dir = os.path.dirname(ffmpeg_path)
-                os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
+            if ffmpeg_path == "ffmpeg":
+                # No bundled/system FFmpeg available to probe with; let the
+                # normal conversion pipeline attempt it and surface its own error.
+                return True, ""
 
-            probe = ffmpeg.probe(str(source))
-            return float(probe["format"]["duration"])
-        except Exception:
+            kwargs: dict = {}
+            if sys.platform == "win32":
+                kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+
+            result = subprocess.run(
+                [ffmpeg_path, "-i", str(source)],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=15,
+                **kwargs,
+            )
+            output = result.stderr.decode("utf-8", errors="ignore")
+
+            corruption_markers = (
+                "Invalid data found when processing input",
+                "could not find codec parameters",
+                "moov atom not found",
+                "Unsupported codec",
+                "No such file or directory",
+                "Format not recognized",
+            )
+            if any(marker in output for marker in corruption_markers):
+                return False, "File appears to be corrupted or in an unsupported format."
+
+            if "Audio:" not in output:
+                return False, "No readable audio stream found in this file."
+
+            return True, ""
+        except subprocess.TimeoutExpired:
+            return False, "File validation timed out (file may be corrupted or unreadable)."
+        except Exception as exc:
+            logger.warning(f"Audio pre-flight validation error (allowing conversion attempt): {exc}")
+            return True, ""
+
+    def _get_duration(self, source: Path) -> float:
+        """Get audio/video duration in seconds using the bundled ffmpeg.exe
+        directly (via `-i <file>` and parsing the "Duration: HH:MM:SS.ss"
+        line from stderr).
+
+        Deliberately does NOT use ffmpeg-python's `ffmpeg.probe()`: that
+        function shells out to a bare `"ffprobe"` executable, which is never
+        bundled (imageio_ffmpeg only ships ffmpeg.exe) and is not expected to
+        be on a user's PATH, so probing always failed silently and returned
+        0.0 - which meant `progress_callback` was never invoked (its guard
+        requires duration > 0), leaving the GUI progress bar stuck at 0% for
+        the entire transcription even though work was proceeding normally.
+        """
+        try:
+            ffmpeg_path = _get_ffmpeg_path()
+            if ffmpeg_path == "ffmpeg":
+                return 0.0
+
+            kwargs: dict = {}
+            if sys.platform == "win32":
+                kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+
+            result = subprocess.run(
+                [ffmpeg_path, "-i", str(source)],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=15,
+                **kwargs,
+            )
+            # ffmpeg -i with no output file exits non-zero by design; the
+            # stream info (including Duration) is printed to stderr.
+            output = result.stderr.decode("utf-8", errors="ignore")
+            match = re.search(r"Duration:\s*(\d+):(\d+):(\d+)\.(\d+)", output)
+            if not match:
+                return 0.0
+            hours, minutes, seconds, centiseconds = (int(g) for g in match.groups())
+            return hours * 3600 + minutes * 60 + seconds + centiseconds / 100
+        except Exception as exc:
+            logger.debug(f"Duration probe failed (progress bar will show 0% only): {exc}")
             return 0.0
 
     def _load_model(self, model_size: str, progress_callback=None):
-        """Load or download faster-whisper model, reusing a cached instance
-        (e.g. one warmed up via `preload_model`) when available."""
+        """Lazily load a Whisper model as a singleton instance: only ONE
+        model is ever resident in memory at a time, keyed by model_size.
+
+        Switching to a different model_size evicts the previously cached
+        instance and runs gc.collect() to actually release its memory
+        (Whisper models range from ~75MB to ~3GB) before loading the new
+        one, instead of letting an instance for every size the user has
+        ever selected accumulate in `_model_cache` indefinitely.
+        """
         try:
             if model_size in self._model_cache:
-                logger.debug(f"Reusing preloaded model: {model_size}")
+                logger.debug(f"Reusing cached model instance: {model_size}")
                 return self._model_cache[model_size]
+
+            if self._model_cache:
+                evicted = list(self._model_cache.keys())
+                self._model_cache.clear()
+                gc.collect()
+                logger.info(f"Evicted cached model(s) {evicted} before loading '{model_size}'")
 
             try:
                 from faster_whisper import WhisperModel
@@ -223,16 +374,16 @@ class AudioEngine(BaseEngine):
 
             self.MODEL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
-            model_path = self.MODEL_CACHE_DIR / model_size
+            # Auto Hardware Detection: prefer CUDA (float16) when available,
+            # otherwise fall back to CPU (int8) using all available cores.
             device = "cuda" if self._has_gpu() else "cpu"
             compute_type = "float16" if device == "cuda" else "int8"
+            model_kwargs: dict = {"device": device, "compute_type": compute_type}
+            if device == "cpu":
+                model_kwargs["cpu_threads"] = os.cpu_count() or 4
+            logger.info(f"Loading '{model_size}' model with {model_kwargs}")
 
-            if not model_path.exists():
-                logger.info(f"Downloading {model_size} model to {model_path}...")
-                # WhisperModel auto-downloads to cache_dir
-                model = WhisperModel(model_size, device=device, compute_type=compute_type)
-            else:
-                model = WhisperModel(model_size, device=device, compute_type=compute_type)
+            model = WhisperModel(model_size, **model_kwargs)
 
             self._model_cache[model_size] = model
             return model
@@ -254,14 +405,25 @@ class AudioEngine(BaseEngine):
     def kill_all_ffmpeg_processes() -> None:
         """Forcefully terminate any FFmpeg processes spawned during
         transcription. Used by the GUI's Hard Exit Protocol to prevent
-        zombie ffmpeg.exe processes from lingering after a forced shutdown."""
+        zombie ffmpeg.exe processes from lingering after a forced shutdown.
+
+        stdin is explicitly set to DEVNULL and CREATE_NO_WINDOW is passed on
+        Windows: a --windowed PyInstaller build has no console (sys.stdin is
+        None), and spawning a subprocess that tries to inherit a
+        nonexistent/invalid std handle can hang instead of raising - which
+        would block this call on the GUI main thread (it runs synchronously
+        from the WM_DELETE_WINDOW handler) and make the window impossible to
+        close while a conversion is active.
+        """
         if sys.platform != "win32":
             return
         try:
             subprocess.run(
                 ["taskkill", "/F", "/IM", "ffmpeg.exe", "/T"],
+                stdin=subprocess.DEVNULL,
                 capture_output=True,
                 timeout=5,
+                creationflags=subprocess.CREATE_NO_WINDOW,
             )
         except Exception as exc:
             logger.warning(f"Failed to kill FFmpeg processes: {exc}")
@@ -282,12 +444,16 @@ class AudioEngine(BaseEngine):
             logger.warning(f"Failed to clean up temp audio chunks: {exc}")
 
     def _has_gpu(self) -> bool:
-        """Check if NVIDIA GPU is available."""
+        """Check if NVIDIA GPU/CUDA is available for hardware acceleration."""
         try:
             import torch
 
             return torch.cuda.is_available()
-        except ImportError:
+        except Exception as exc:
+            # Broader than ImportError: a present-but-broken CUDA driver can
+            # raise other exceptions from torch.cuda.is_available(); treat
+            # any failure here as "no usable GPU" and fall back to CPU.
+            logger.debug(f"GPU detection failed, falling back to CPU: {exc}")
             return False
 
     def _format_output(
