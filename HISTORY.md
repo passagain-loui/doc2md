@@ -1,5 +1,8 @@
 # HISTORY.md
 
+````````````````text
+# HISTORY.md
+
 ```````````````text
 # HISTORY.md
 
@@ -37,6 +40,14 @@
 # HISTORY.md
 
 ```text
+## [1.0.22] (2026-08-30)
+
+- **Critical Fix**: Progress bar jumping to 100% instantly - moved progress calculation from BEFORE conversion to AFTER
+- **Enhancement**: Version number now visible in window title
+- **Enhancement**: GPU/CUDA detection status logged to Status Log at conversion start
+- **Enhancement**: Drag & Drop verification message shown at startup in Status Log
+- **Robustness**: Progress tracking now reflects actual work done, preventing false 100% signals
+
 ## [1.0.21] (2026-08-30)
 
 - **Critical Fix**: Silent conversion crash - full traceback now logged to Status Log
@@ -153,3 +164,4 @@
 `````````````
 ``````````````
 ```````````````
+````````````````

@@ -43,8 +43,9 @@ class MainWindow:
 
     def __init__(self, root):
         """Initialize the GUI window."""
+        from doc2md import __version__
         self.root = root
-        self.root.title("doc2md - Document to Markdown Converter")
+        self.root.title(f"doc2md v{__version__} - Document to Markdown Converter")
         self.root.geometry("950x800")
 
         # Theme setup
@@ -219,6 +220,7 @@ class MainWindow:
     def _setup_drag_drop(self) -> None:
         """Setup DnD with robust event handling on entire drop frame, label, and root window."""
         if DND_FILES is None:
+            self._log("⚠️ TkinterDnD2 not available - drag & drop disabled")
             logger.warning("TkinterDnD2 not available")
             return
 
@@ -245,6 +247,7 @@ class MainWindow:
             self.drop_label.dnd_bind('<<DragEnter>>', self._on_drag_enter)
             self.drop_label.dnd_bind('<<DragLeave>>', self._on_drag_leave)
 
+            self._log("✅ Drag & Drop enabled - ready for file drops")
             logger.info("DnD registered successfully on root, drop_zone frame, and label")
         except Exception as exc:
             logger.warning(f"DnD setup failed: {exc}")
@@ -392,6 +395,16 @@ class MainWindow:
         try:
             self._log("🔄 Starting conversion...")
 
+            # Check GPU availability
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    self._log(f"🚀 GPU Acceleration: CUDA enabled ({torch.cuda.get_device_name(0)})")
+                else:
+                    self._log(f"🔧 GPU not available - using CPU ({self.converter.processor.cpu_count} threads)")
+            except Exception as e:
+                self._log(f"⚠️ GPU check skipped: {str(e)}")
+
             # Update converter options with language selection and progress callback for audio transcription
             self.converter.options.update({
                 "audio_model": self.audio_model_var.get(),
@@ -409,14 +422,14 @@ class MainWindow:
                     self._log(f"📄 File: {file_path.name}")
                     self._log(f"Processing: {file_path.name}...")
 
-                    # Update progress with percentage label
+                    # Call convert_file with correct signature (no options argument)
+                    result = self.converter.convert_file(file_path)
+
+                    # Update progress AFTER conversion completes
                     progress = (idx + 1) / len(self.selected_files)
                     percent = int(progress * 100)
                     self.progress_bar.set(progress)
                     self.root.after(0, lambda p=percent: self.progress_percent_label.configure(text=f"{p}%"))
-
-                    # Call convert_file with correct signature (no options argument)
-                    result = self.converter.convert_file(file_path)
 
                     if result.success:
                         # Determine output format and directory

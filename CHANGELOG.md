@@ -1,5 +1,8 @@
 # CHANGELOG.md
 
+````````````````text
+# CHANGELOG.md
+
 ```````````````text
 # CHANGELOG.md
 
@@ -37,6 +40,14 @@
 # CHANGELOG.md
 
 ```text
+## [1.0.22] (2026-08-30) - CRITICAL BUG FIXES
+
+- **Critical Fix**: Progress bar jumping to 100% instantly - moved progress calculation to AFTER conversion completes
+- **Enhancement**: Version number now displayed in window title (v1.0.22)
+- **Enhancement**: GPU/CUDA status now logged to Status Log at conversion start
+- **Enhancement**: Drag & Drop startup verification message shown in Status Log
+- **Robustness**: Real-time progress tracking now reflects actual conversion work, not file count
+
 ## [1.0.21] (2026-08-30)
 
 - **Critical Fix**: Silent conversion crash - full traceback now logged to Status Log
@@ -153,3 +164,4 @@
 `````````````
 ``````````````
 ```````````````
+````````````````
