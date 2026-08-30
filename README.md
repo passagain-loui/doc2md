@@ -1,5 +1,8 @@
 # README.md
 
+``````````````text
+# README.md
+
 `````````````text
 # README.md
 
@@ -31,7 +34,16 @@
 # README.md
 
 ```text
-# doc2md v1.0.19
+# doc2md v1.0.20
+
+## Version 1.0.20 (2026-08-30) - DIAGNOSTIC AUDIT FIXES
+
+### Architectural Fixes
+- **Fix**: GPU Acceleration initialization with torch.cuda.is_available() check
+- **Fix**: Immediate Status Log updates for file selection/drop events
+- **Fix**: Real-time progress bar updates from audio transcription chunks
+- **Fix**: Robust Drag & Drop with Unicode path handling
+- **Fix**: Explicit Thai language parameter passed to Whisper model
 
 ## Version 1.0.19 (2026-08-30) - CRITICAL BUG FIX
 
@@ -126,3 +138,4 @@
 ```````````
 ````````````
 `````````````
+``````````````

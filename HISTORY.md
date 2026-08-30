@@ -1,5 +1,8 @@
 # HISTORY.md
 
+``````````````text
+# HISTORY.md
+
 `````````````text
 # HISTORY.md
 
@@ -31,6 +34,16 @@
 # HISTORY.md
 
 ```text
+## [1.0.20] (2026-08-30)
+
+- **Fix**: GPU Acceleration initialization - torch.cuda.is_available() check with device logging
+- **Fix**: Immediate Status Log updates upon file selection/drop ("📄 File: ...")
+- **Fix**: Real-time progress bar percentage updates wired to audio transcription chunks
+- **Fix**: Robust Drag & Drop with shlex.split() and stripping for Unicode paths
+- **Fix**: Explicit Thai language parameter (language='th') passed to Whisper model
+- **Enhancement**: Clear device acceleration logging (GPU/CUDA or CPU with thread count)
+- **Robustness**: All architectural fixes validated and verified
+
 ## [1.0.19] (2026-08-30)
 
 - **Fix**: Thai audio transcription language bug - language selection from GUI now passed to Whisper (language="th" for Thai)
@@ -126,3 +139,4 @@
 ```````````
 ````````````
 `````````````
+``````````````
