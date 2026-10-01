@@ -32,7 +32,7 @@ def test_isolated_entry_reports_ok_and_closes(tmp_path):
     _isolated_convert_entry({"engine": "code", "source": str(p), "options": {}}, sender)
     assert sender.closed
     assert sender.sent[0][0] == "ok"
-    assert "```text" in sender.sent[0][1]
+    assert "```text" in sender.sent[0][1].markdown
 
 
 def test_isolated_entry_reports_error_without_raising(tmp_path):

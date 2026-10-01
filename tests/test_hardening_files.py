@@ -103,7 +103,7 @@ def test_concurrent_process_workers_isolated_and_temp_clean(simple_pdf):
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
         futures = [pool.submit(_run_in_process, p, 30) for p in payloads]
         outs = [f.result(timeout=60) for f in futures]
-    assert all("Hello doc2md" in o for o in outs)
+    assert all("Hello doc2md" in o.markdown for o in outs)
 
 
 def test_concurrent_ocr_threads_isolated_tempdirs(tmp_path, monkeypatch):

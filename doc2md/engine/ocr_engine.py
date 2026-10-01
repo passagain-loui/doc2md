@@ -23,7 +23,8 @@ import tempfile
 import threading
 from pathlib import Path
 
-from doc2md.core.errors import ConversionError, EngineUnavailableError
+from doc2md.core.errors import ConversionError, EngineUnavailableError, wrap_warning
+from doc2md.core.quality import EngineOutput, QualityMetrics
 from doc2md.core.router import FileKind
 from doc2md.engine.base import BaseEngine
 
@@ -44,13 +45,71 @@ class OcrEngine(BaseEngine):
     _rapidocr_lock = threading.Lock()
 
     def convert(self, source: Path, options: dict) -> str:
+        return self._convert_impl(source, options, None)
+
+    def convert_structured(self, source: Path, options: dict) -> EngineOutput:
+        metrics = QualityMetrics()
+        markdown = self._convert_impl(source, options, metrics)
+        return EngineOutput(markdown=markdown, metrics=metrics)
+
+    def _convert_impl(
+        self, source: Path, options: dict, metrics: QualityMetrics | None
+    ) -> str:
         self.validate_source(source)
         parts = self._metadata_markdown(source)
 
-        if shutil.which("tesseract") is not None:
+        if self._tesseract_usable():
+            if metrics is not None:
+                metrics.pages_total = 1
+                metrics.ocr_backend = "tesseract"
+                metrics.ocr_language = self.language(options)
             text = self._run_tesseract(source, options)
-            return self._assemble(parts, text)
-        return self._assemble(parts, self._run_rapidocr(source))
+            markdown, warning = self._plain_assemble(parts, text)
+            if metrics is not None:
+                metrics.ocr_pages_success = 0 if warning else 1
+                metrics.ocr_pages_empty = 1 if warning else 0
+                metrics.ocr_pages_failed = 0
+            return wrap_warning(markdown, warning) if warning else markdown
+
+        try:
+            text = self._run_rapidocr(source)
+        except EngineUnavailableError as exc:
+            # OCR never ran here - it must not read like it did. The body
+            # text a user actually sees (not just the internal `warning`
+            # field) previously reused the "completed but no readable text"
+            # sentence for this case too, which is false: no backend means
+            # no attempt was made at all.
+            note = f"OCR was not run: no OCR backend is available ({exc})."
+            body = "\n".join([*parts, f"> {note}"])
+            if metrics is not None:
+                metrics.pages_total = 1
+                metrics.ocr_backend = None
+                metrics.ocr_pages_success = 0
+                metrics.ocr_pages_empty = 0
+                metrics.ocr_pages_failed = 0
+            return wrap_warning(body, f"OCR unavailable: {exc}")
+
+        if metrics is not None:
+            metrics.pages_total = 1
+            metrics.ocr_backend = "rapidocr"
+        markdown, warning = self._plain_assemble(parts, text)
+        if metrics is not None:
+            metrics.ocr_pages_success = 0 if warning else 1
+            metrics.ocr_pages_empty = 1 if warning else 0
+            metrics.ocr_pages_failed = 0
+        return wrap_warning(markdown, warning) if warning else markdown
+
+    @staticmethod
+    def _tesseract_usable() -> bool:
+        """Binary on PATH *and* pytesseract importable - the same test the setup
+        assistant uses, so a half-installed Tesseract falls through to RapidOCR."""
+        if shutil.which("tesseract") is None:
+            return False
+        try:
+            import pytesseract  # noqa: F401
+        except ImportError:
+            return False
+        return True
 
     @staticmethod
     def language(options: dict) -> str:
@@ -177,17 +236,10 @@ class OcrEngine(BaseEngine):
         return cls._rapidocr_engine
 
     def _run_rapidocr(self, source: Path) -> str | None:
-        try:
-            engine = self._get_rapidocr()
-        except EngineUnavailableError as exc:
-            hint = str(exc)
-            if "rapidocr" in hint.lower() and "tesseract" in hint.lower():
-                return (
-                    "> OCR unavailable: neither Tesseract nor RapidOCR is available. "
-                    "Install Tesseract OCR (with the Thai language data for Thai "
-                    "documents) or run pip install rapidocr-onnxruntime."
-                )
-            raise
+        # No backend at all: let EngineUnavailableError propagate to convert(),
+        # which turns it into a warning result instead of embedding the hint
+        # as ordinary Markdown that a caller could mistake for real content.
+        engine = self._get_rapidocr()
         cls = type(self)
         try:
             with cls._rapidocr_lock:
@@ -202,10 +254,17 @@ class OcrEngine(BaseEngine):
             raise ConversionError(f"RapidOCR returned malformed output: {exc}") from exc
         return "\n".join(lines) if lines else None
 
-    def _assemble(self, parts: list[str], text: str | None) -> str:
+    def _plain_assemble(self, parts: list[str], text: str | None) -> tuple[str, str | None]:
+        """Build the markdown without applying the warning wrap.
+
+        Returns ``(markdown, warning_or_none)`` so a caller (``convert``) that
+        needs to attach a *different* warning - e.g. "OCR unavailable" rather
+        than "no text found" - can do so without double-wrapping the result.
+        """
         cleaned = (text or "").strip()
         if not cleaned:
-            parts.append("> OCR completed but no readable text was found in the image.")
-            return "\n".join(parts)
-        parts.extend(["## Extracted text", "", cleaned])
-        return "\n".join(parts)
+            note = "OCR completed but no readable text was found in the image."
+            body = "\n".join([*parts, f"> {note}"])
+            return body, note
+        body = "\n".join([*parts, "## Extracted text", "", cleaned])
+        return body, None

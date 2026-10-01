@@ -1,7 +1,79 @@
-# HISTORY.md
-
-```text
 # History
+
+## [1.2.0] - 2026-10-01 - Product hardening and UX improvement
+
+1.1.0 made doc2md a document converter again. This round asks a different
+question: once a conversion finishes, can the user actually trust the
+result without opening the output file to check?
+
+Most of the underlying data already existed - the PDF engine already knew
+how many pages it read and how many tables pdfplumber found, the Excel
+engine already knew whether a sheet was truncated - it just never left the
+engine. `doc2md.core.quality` gives that a stable shape (`QualityMetrics`,
+carried on every `ConversionResult`) that the CLI (`--report`) and the GUI
+(a Quality Summary strip, an Export Report button) read from the same
+object, so the two surfaces cannot disagree about what happened. A field is
+`null` rather than a guessed `0` for any engine that has not been migrated
+to report it - DOCX, PPTX, HTML, EML, JSON, code and plain text stay
+string-only and simply report nothing measured, which was the explicit
+design goal: extending the pipeline must not force every engine to change
+at once, and must never let an unmeasured fact masquerade as a measured
+zero.
+
+Output collisions were the other trust gap: the existing `-1`/`-2`
+numbering only prevented overwriting, it never gave the user a choice.
+`doc2md.core.exporter.OutputPolicy` makes that choice explicit - `unique`
+(the old default, unchanged), `fail`, `overwrite` (which still refuses the
+one truly dangerous case, overwriting the source file itself), and
+`converted-folder` (the new GUI default, since a dedicated subfolder cannot
+collide with anything the user did not just convert). Every write in the
+application - the main output, chunk parts, both JSON reports - now goes
+through one atomic writer, so a failure partway through a write can no
+longer leave a half-written file where a reader would find it.
+
+Retry needed the GUI's worker to stop being all-or-nothing. Previously
+"Convert" always meant "convert every queued file from scratch"; Retry
+Failed/Warnings needed to re-run a *subset* of rows and land each result
+back on the same row it came from, not a new one at the end. The fix was
+smaller than it sounds: the worker's file list became `{original_row_index:
+path}` instead of a plain list, so `file_finished` already carries the
+right row index regardless of which subset is running. Building the two
+test files for this actually surfaced two unrelated test-harness bugs
+worth naming: a PyQt signal spy installed *after* the connection it was
+meant to intercept never fires (Qt captures the callable at `.connect()`
+time), and a "corrupted file" fixture that used an unsupported extension
+never reached the converter at all - the GUI's own pre-filter rejected it
+as Skipped before conversion, which produces a different status than
+Error. Neither was a product bug; both were fixed in the tests.
+
+The OCR Setup Assistant exists because "the package imported" and "OCR
+actually works" are not the same fact, and every prior status message in
+this codebase already knew that distinction for individual conversions
+(the OCR-warning work from the previous release). `doc2md.core.
+ocr_diagnostics` applies the same discipline to the up-front readiness
+check: it does not report Ready because `pytesseract` imported, and it
+does not report a RapidOCR backend as active unless `RapidOCR()` actually
+constructed successfully - importing the package is necessary but not
+sufficient, so `rapidocr_initializes` stays `None` ("not attempted") right
+up until a real construction is tried.
+
+A review of this round's own work before release found problems worth
+recording, because each was a place where the tool would have said something
+untrue. A document that converted but failed to save showed Error in the table
+yet Success in the exported reports. A failure partway through a chunked
+write left the main output behind while reporting that nothing was written.
+A spreadsheet with a huge declared range reported a million rows. Table pages
+in Thai PDFs took their prose from a different text extractor than the rest of
+the document. Each is fixed and has a test.
+
+The largest change is a subtraction: the output writer had grown a placeholder
+and polling protocol to stay race-safe. A temp file plus a no-clobber rename
+gives the same guarantee with no placeholder to leave behind after a crash, at
+roughly half the code.
+
+Dragging a file onto the window only worked on the small drop zone; any
+other part of the window showed the no-drop cursor. The whole window accepts
+drops now, and dropped folders are scanned off the UI thread.
 
 ## [1.1.0] - 2026-08-30
 
@@ -246,4 +318,3 @@ numbers exist; defaults are unchanged in this release.
 - **Feature**: GUI now shows real-time conversion progress with thread-safe logging
 - **Hardening**: Added bulletproof exception guard for native C-extension crashes (CTranslate2, FFmpeg, pybind11)
 - **Hardening**: Pre-flight audio file validation guard prevents corrupt/unreadable files from reaching FFmpeg decode path
-```

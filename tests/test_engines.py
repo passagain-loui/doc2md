@@ -32,6 +32,58 @@ def test_code_engine_invalid_json_warns(tmp_path):
     assert "{not valid" in out
 
 
+# --- .md passthrough (Bug #9 root cause) -------------------------------------
+
+
+def test_md_source_is_passed_through_unchanged(tmp_path):
+    """A .md file is already Markdown - it must not be wrapped in a fenced
+    'text' block with a synthetic '# filename' heading. Fencing an already-
+    Markdown file was the root cause of the documentation-mirror corruption
+    bug: a tool re-scanning its own .md output as input would re-wrap it
+    every run, nesting indefinitely (file-1-1-1-1.md)."""
+    p = tmp_path / "notes.md"
+    original = "# My Notes\n\nSome *italic* text and a list:\n\n- one\n- two\n"
+    p.write_text(original, encoding="utf-8", newline="")
+
+    out = get_engine(FileKind.TEXT).convert(p, {})
+
+    assert out == original
+    assert "```" not in out
+    assert not out.startswith("# notes.md")
+
+
+def test_md_source_conversion_is_idempotent(tmp_path):
+    """Converting a .md file's own output again must produce byte-identical
+    content, not a second layer of wrapping - this is what makes repeated
+    runs (e.g. a mirror/watch process) safe instead of compounding."""
+    p = tmp_path / "doc.md"
+    p.write_text("# Doc\n\nbody text\n", encoding="utf-8", newline="")
+
+    engine = get_engine(FileKind.TEXT)
+    first_pass = engine.convert(p, {})
+
+    p.write_text(first_pass, encoding="utf-8", newline="")
+    second_pass = engine.convert(p, {})
+
+    assert first_pass == second_pass
+    assert "DOC2MD-WARNING" not in first_pass
+    assert first_pass.count("```") == 0
+
+
+def test_md_source_containing_its_own_fences_is_untouched(tmp_path):
+    """A .md file that legitimately contains code fences (e.g. a README with
+    install instructions) must not have its fence count changed by
+    conversion - the old bug grew the fence length every pass."""
+    p = tmp_path / "README.md"
+    original = "# Title\n\n```bash\npip install x\n```\n\nMore text.\n"
+    p.write_text(original, encoding="utf-8", newline="")
+
+    out = get_engine(FileKind.TEXT).convert(p, {})
+
+    assert out == original
+    assert out.count("```") == 2
+
+
 def test_excel_engine_normal_table(simple_xlsx):
     out = get_engine(FileKind.XLSX).convert(simple_xlsx, {})
     assert "| col_a | col_b |" in out
@@ -40,6 +92,11 @@ def test_excel_engine_normal_table(simple_xlsx):
 
 
 def test_excel_engine_truncated_summary_guard(tmp_path):
+    """sample_rows=5 must show exactly 5 rows total (header + 4 data rows).
+
+    Previously an off-by-one (`len(rows) <= sample_rows` before appending)
+    collected sample_rows + 1 rows; this asserts the corrected count.
+    """
     import openpyxl
 
     p = tmp_path / "big.xlsx"
@@ -52,17 +109,19 @@ def test_excel_engine_truncated_summary_guard(tmp_path):
     out = get_engine(FileKind.XLSX).convert(p, {"max_rows": 100, "sample_rows": 5})
     assert "Truncated Summary" in out
     assert "| id | payload |" in out
-    assert "| 4 " in out
-    assert "| 5 " not in out.replace("Truncated", "")
+    assert "| 3 " in out
+    assert "| 4 " not in out.replace("Truncated", "")
 
 
 def test_excel_engine_csv_streaming_limit(tmp_path):
+    """sample_rows=3 must show exactly 3 rows total (header + 2 data rows)."""
     p = tmp_path / "wide.csv"
     lines = ["a,b"] + [f"{i},row{i}" for i in range(500)]
     p.write_text("\n".join(lines), encoding="utf-8")
     out = get_engine(FileKind.XLSX).convert(p, {"max_rows": 50, "sample_rows": 3})
     assert "Truncated Summary" in out
-    assert "row2" in out
+    assert "row1" in out
+    assert "row2" not in out
     assert "row400" not in out
 
 

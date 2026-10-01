@@ -1,7 +1,141 @@
-# CHANGELOG.md
-
-```text
 # Changelog
+
+## [1.2.0] (2026-10-01) - PRODUCT HARDENING & UX IMPROVEMENT
+
+Trust and transparency pass on top of 1.1.0: every conversion now reports
+what it actually did, output can no longer silently collide with an
+existing file, a failed batch can be retried without redoing the whole run,
+OCR readiness is a real check instead of an assumption, and the review
+panel shows enough to judge a result without opening the output file.
+
+### Added
+
+- **Structured quality report** (`doc2md.core.quality`). Every conversion now
+ carries a `QualityMetrics` object - pages read/failed, tables detected,
+ sheets/rows detected vs. exported, truncation, and OCR backend/language/
+ outcome - alongside the Markdown. A field is `null` when an engine has not
+ been migrated to report it, never a guessed `0`. PDF, Excel/CSV and OCR
+ engines populate real numbers; DOCX/PPTX/HTML/EML/JSON/code/text engines
+ report `null` metrics and are otherwise unaffected.
+ - CLI: `--report <path.json>` writes one JSON object per document
+ (status, source/output paths, engine, duration, token estimate, plus the
+ metrics above), written atomically. A report write failure is a hard
+ error (non-zero exit) and never mixes into `--stdout`.
+ - GUI: a Quality Summary strip above the preview shows a colour-coded
+ Success/Warning/Error badge plus the measured facts for the selected
+ file, and an **Export Report** button writes the same JSON for the whole
+ batch.
+- **Safe output policy** (`doc2md.core.exporter.OutputPolicy`), one resolver
+ shared by the CLI, the GUI and chunked output:
+ - `unique` - never overwrites; appends `-1`, `-2`, ... (the GUI's safe
+ default is `converted-folder`; the CLI default stays `overwrite`, as in
+ 1.1.0, so re-running refreshes `<name>.md` - except that a `.md` source is
+ numbered rather than overwritten).
+ - `fail` - refuses to write if the destination already exists.
+ - `overwrite` - writes over an existing file, but **never** over the
+ source file itself, even when the destination path would coincide with
+ it (e.g. converting a `.md` file to `.md` in place).
+ - `converted-folder` - writes into a `Converted` subfolder, which by
+ construction cannot collide with a document the user did not just
+ convert. This is the GUI's default.
+ Every write (main output, chunk parts, the quality/error report) now goes
+ through one atomic writer (`atomic_write_text` / `write_report_atomic`):
+ content is written to a temp file next to the destination and moved into
+ place with `os.replace`, so a failure mid-write never leaves a partial
+ file - the destination is either the old content or the complete new
+ content, nothing in between.
+ - CLI: `--output-policy unique|fail|overwrite|converted-folder`.
+ - GUI: an Output Policy dropdown (remembered across restarts via
+ `QSettings`), a live destination preview per queued row before Convert
+ is pressed, and a status-bar note when the output folder is nested
+ inside a folder being converted.
+- **Retry and batch recovery** (GUI). **Retry Failed** and **Retry
+ Warnings** re-run only the matching rows and update them in place - a
+ retry never adds a duplicate row, and a prior round's result for a
+ retried row is discarded before the retry starts, so it can never reach
+ Copy Markdown / Send to Sandbox / Export Report if the retry fails again.
+ **Clear Completed** removes clean Success rows only, leaving Warning and
+ Error rows in place so they stay retryable. **Export Error Report** writes
+ a JSON quality report scoped to the rows currently showing Error.
+- **OCR Setup Assistant** (`doc2md.core.ocr_diagnostics`, GUI **OCR
+ Diagnostics…** dialog). Every fact is a real, live check - a package
+ importing successfully is never reported as "Ready": the Tesseract binary
+ must actually be found on PATH, and RapidOCR must actually construct its
+ engine. The dialog reports, in Thai: "พร้อมอ่านภาษาไทยและอังกฤษ" (Tesseract
+ found with both `tha` and `eng` language data), "อ่านได้เฉพาะภาษาอังกฤษ"
+ (Tesseract found, but no Thai language data), or "ยังไม่มี OCR backend" (no
+ working backend at all) - plus which backend the program will actually
+ use, the real installed Tesseract language list, and a Refresh / Copy
+ Diagnostics pair.
+- **Conversion presets** (`doc2md.core.presets`): Balanced AI, High
+ Fidelity, Fast Text, and Thai Scanned Document, each a fixed OCR
+ language/resolution/table-extraction bundle. Selecting one applies its
+ values to the GUI's existing controls; editing any of those controls by
+ hand switches the preset selector to Custom automatically.
+- **Review experience** additions to the GUI preview pane:
+ - A Warning banner above the preview when the selected row is a Warning
+ (OCR unavailable/disabled/found nothing) - separate from, and more
+ visible than, the quality badge.
+ - **Open Original** and **Open Output** buttons (via the OS's default
+ application) and a per-row **Copy Markdown** that copies only the
+ selected file, distinct from the batch-wide Copy Markdown.
+ - **Compare Metadata**: source size vs. output size, page/sheet count,
+ extracted rows/tables, and the warning (if any), for the selected file.
+ - A first-page-only thumbnail for PDF (rendered with pymupdf, already a
+ dependency) and images (Qt's own image loader) - no new dependency
+ added. Never shown as a stand-in for the rest of the document; hidden
+ outright if it cannot be generated, rather than showing a placeholder.
+ - A folder scan that finds only `.md` files (or a mix that includes some)
+ now says so explicitly - "folder contains only Markdown file(s) - N
+ skipped" / "N Markdown file(s) in this folder were skipped" - instead of
+ the misleading "folder contains no files" for the all-Markdown case, or
+ silence for the mixed case.
+
+### Fixed
+
+- **Drag & drop onto the window.** Only the small drop zone accepted files;
+ dropping on the file list, the preview or anywhere else showed the no-drop
+ cursor. The whole window accepts drops now.
+- **GUI reports after a write failure.** A document converted but not saved
+ (unwritable folder, full disk) showed Error in the table yet appeared as
+ Success in the quality report and error report. The stored result is now
+ flipped to failed with the write error.
+- **Output writing simplified.** `doc2md.core.exporter` no longer reserves a
+ destination with a placeholder file and a polling/identity protocol (about
+ 700 lines). Content is written to a hidden temp file and published with a
+ no-clobber rename (`os.rename` on Windows, `os.link` on POSIX), so unique and
+ fail stay race-safe, and a crash can leave only a hidden `.tmp` file, never
+ a token-only file at the real name. A failure while writing any chunk now
+ removes the main output and earlier chunks.
+- **Bridge schema 1.1.** The HTTP body's `contents` map is keyed by the
+ manifest `file` name; the schema version is bumped accordingly, and
+ `to_manifest` rejects a dict for `filenames` with a clear error.
+- **XLSX/CSV row counting.** Trailing blank rows are no longer counted, and the
+ walk stops after 1000 consecutive blank rows (reported as inexact) instead
+ of iterating to row 1,048,576.
+- **Dropping a large folder** is scanned on a background thread (no frozen
+ window) and no longer does a quadratic filter.
+- **Table pages in Thai PDFs** keep PyMuPDF's text for the non-table area
+ (words outside the table boxes) instead of switching to pdfplumber's
+ glyph-by-glyph reconstruction.
+- **`tables_detected`** is `null`, not `0`, when pdfplumber is not installed.
+- **OCR backend choice** uses Tesseract only when both the binary and
+ pytesseract are present, otherwise falls through to RapidOCR, matching the
+ setup assistant.
+
+### Notes
+
+- No Office-document renderer was added this round (PDF/DOCX/XLSX/PPTX are
+ still reviewed as their converted Markdown, plus the new PDF/image
+ thumbnail) - scope explicitly deferred, tracked as a roadmap item rather
+ than attempted partially.
+- Known limitations carried over from 1.1.0, unchanged: PDF table
+ extraction requires `pdfplumber`; OCR requires either the Tesseract binary
+ on PATH (with the `tha` language pack for Thai) or `rapidocr-onnxruntime`
+ installed separately - neither is bundled, and this release does not
+ install them automatically. The OCR Setup Assistant surfaces which of
+ these is missing instead of letting a scan silently produce metadata-only
+ output.
 
 ## [1.1.0] (2026-08-30) - CLEAN DOCUMENT CONVERTER
 
@@ -348,4 +482,3 @@ not a configuration change.
 - **Feature**: GUI now shows real-time conversion progress with thread-safe logging
 - **Hardening**: Added bulletproof exception guard for native C-extension crashes (CTranslate2, FFmpeg, pybind11)
 - **Hardening**: Pre-flight audio file validation guard prevents corrupt/unreadable files from reaching FFmpeg decode path
-```

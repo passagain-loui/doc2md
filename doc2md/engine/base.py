@@ -6,6 +6,7 @@ import abc
 from pathlib import Path
 
 from doc2md.core.errors import ConversionError
+from doc2md.core.quality import EngineOutput
 from doc2md.core.router import FileKind
 
 
@@ -25,6 +26,19 @@ class BaseEngine(abc.ABC):
     @abc.abstractmethod
     def convert(self, source: Path, options: dict) -> str:
         """Convert the document at *source* into Markdown."""
+
+    def convert_structured(self, source: Path, options: dict) -> EngineOutput:
+        """Same conversion, with structured quality metrics attached.
+
+        Default implementation just calls ``convert()`` and wraps its string
+        with an empty ``QualityMetrics`` (every field ``None`` - "not
+        measured"), so a plain string-returning engine needs no change to
+        keep working through this path. Engines that can measure real
+        extraction facts (pages, tables, rows, OCR outcome) override this.
+        This is what ``Converter`` actually calls; ``convert()`` stays the
+        stable, directly-testable, string-only contract it always was.
+        """
+        return EngineOutput(markdown=self.convert(source, options))
 
     def validate_source(self, source: Path) -> None:
         if not source.is_file():

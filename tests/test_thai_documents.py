@@ -125,7 +125,7 @@ def test_scanned_pdf_is_routed_to_ocr(tmp_path, monkeypatch):
 
     def record(self, source, document, options):
         taken.append(options.get("ocr_lang", "default"))
-        return ["## Page 1 (OCR)", "", "ใบเสร็จรับเงิน"]
+        return ["## Page 1 (OCR)", "", "ใบเสร็จรับเงิน"], None
 
     monkeypatch.setattr(pdf_engine.PdfEngine, "_render_scanned_pdf", record)
     out = pdf_engine.PdfEngine().convert(path, {"ocr_lang": "tha+eng"})

@@ -1,6 +1,3 @@
-# CLAUDE.md
-
-```text
 # doc2md v1.0.21
 
 ## 1. Role & Execution Guidelines
@@ -30,4 +27,3 @@
 - ห้าม Claude เขียนสคริปต์อื่นมาสวมรอยแทนการตรวจของ LocalCore CLI
 - ห้ามอ้างเหตุผลด้าน Environment/Sandbox เพื่อข้ามไป Step 5 โดยไม่มีผล `EXIT_CODE: 0` ของจริง
 - ทุกการแก้ไขโค้ดใน Step 1 บังคับต้องวนกลับมาสั่งรัน Step 3 ตรวจซ้ำให้อัตโนมัติทันที
-```

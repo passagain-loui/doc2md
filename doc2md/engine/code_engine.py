@@ -27,9 +27,25 @@ class CodeEngine(BaseEngine):
             raise ConversionError(f"Unreadable file: {source} ({exc})") from exc
 
         suffix = source.suffix.lower()
+        if suffix == ".md":
+            return self._passthrough_markdown(text)
         if suffix == ".json" or (suffix == "" and text.lstrip()[:1] in ("{", "[")):
             return self._convert_json(source, text)
         return self._fence(source, text)
+
+    @staticmethod
+    def _passthrough_markdown(text: str) -> str:
+        """A ``.md`` source is already Markdown - wrapping it in a fenced
+        ``text`` block plus a synthetic ``# filename`` heading was the root
+        cause of a real corruption bug: a repository "documentation mirror"
+        tool that re-scans its own generated ``.md`` files as input would
+        re-fence an already-fenced file every run, nesting arbitrarily deep
+        (``file-1-1-1-1.md``) and, when the output path ever coincided with
+        the source, overwriting project docs with progressively wrapped
+        copies of themselves. Returning the content unchanged makes
+        converting Markdown idempotent - repeat runs never compound.
+        """
+        return text if text.endswith("\n") else text + "\n"
 
     def _convert_json(self, source: Path, text: str) -> str:
         header = f"# {Path(source).name}"

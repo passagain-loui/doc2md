@@ -24,7 +24,9 @@ from doc2md.core.errors import (
     ConversionError,
     ConversionTimeoutError,
     EngineUnavailableError,
+    split_warning,
 )
+from doc2md.core.quality import EngineOutput, QualityMetrics
 from doc2md.core.router import Detection, FileKind, detect
 from doc2md.engine import get_engine, get_engine_by_name
 
@@ -51,6 +53,15 @@ class ConversionResult:
     kind: str = FileKind.UNKNOWN.value
     duration_s: float = 0.0
     meta: dict = field(default_factory=dict)
+    warning: str | None = None
+    """Set when the conversion technically succeeded (there is output) but it
+    does not represent the document's actual content - OCR unavailable, OCR
+    switched off, or OCR completed with no readable text. Callers must treat
+    this as distinct from a full Success, not fold it into the same status."""
+    quality: QualityMetrics = field(default_factory=QualityMetrics)
+    """Structured extraction facts (pages, tables, rows, OCR outcome). Every
+    field is ``None`` ("not measured") for engines that have not been
+    migrated to :meth:`~doc2md.engine.base.BaseEngine.convert_structured`."""
 
     @property
     def token_estimate(self) -> int:
@@ -59,7 +70,7 @@ class ConversionResult:
         return estimate_tokens(self.markdown)
 
 
-def _execute_payload(payload: dict) -> str:
+def _execute_payload(payload: dict) -> "str | EngineOutput":
     """Runs inside worker process OR worker thread."""
     target = payload.get("target")
     if target is not None:
@@ -71,7 +82,7 @@ def _execute_payload(payload: dict) -> str:
     engine = get_engine_by_name(payload["engine"])
     if engine is None:
         raise EngineUnavailableError(f"Unknown engine {payload['engine']!r}")
-    return engine.convert(Path(payload["source"]), dict(payload["options"]))
+    return engine.convert_structured(Path(payload["source"]), dict(payload["options"]))
 
 
 def _isolated_convert_entry(payload: dict, sender) -> None:
@@ -260,9 +271,16 @@ class Converter:
                 effective_timeout = max(self.timeout, OCR_TIMEOUT_S)
 
             if engine.requires_process_isolation:
-                raw_markdown = _run_in_process(payload, effective_timeout)
+                raw_result = _run_in_process(payload, effective_timeout)
             else:
-                raw_markdown = _run_in_thread(payload, effective_timeout)
+                raw_result = _run_in_thread(payload, effective_timeout)
+            if isinstance(raw_result, EngineOutput):
+                raw_markdown = raw_result.markdown
+                quality = raw_result.metrics
+            else:
+                raw_markdown = raw_result
+                quality = QualityMetrics()
+            warning, raw_markdown = split_warning(raw_markdown)
             optimized = cleaner.optimize(raw_markdown)
             return ConversionResult(
                 source=source,
@@ -272,6 +290,8 @@ class Converter:
                 kind=detection.kind.value,
                 duration_s=time.perf_counter() - started,
                 meta={"mime": detection.mime, "confidence": detection.confidence},
+                warning=warning,
+                quality=quality,
             )
         except ConversionTimeoutError as exc:
             if strict:

@@ -139,7 +139,8 @@ def test_ocr_disabled_from_config(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "doc2md.cli.main.load_config",
         lambda on_error=None: {"timeout": 60.0, "max_rows": 10000, "default_copy": False,
-                               "stats": False, "chunk": None, "ocr_enabled": False},
+                               "stats": False, "chunk": None, "ocr_enabled": False,
+                               "ocr_lang": "tha+eng", "pdf_tables": True},
     )
     import doc2md.cli.main as cli_mod
 
@@ -151,3 +152,72 @@ def test_ocr_disabled_from_config(tmp_path, monkeypatch):
         cli_mod.Converter = original
     assert result.exit_code == 0
     assert captured["options"]["pdf_ocr_fallback"] is False
+
+
+# --- pdf_tables / ocr_lang precedence: CLI > config > default ---------------
+
+
+def _spy_convert(tmp_path, monkeypatch, cli_args, config_overrides):
+    p = tmp_path / "x.txt"
+    p.write_text("hello", encoding="utf-8")
+    captured = {}
+
+    class SpyConverter:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def convert_file(self, target):
+            from doc2md.core.converter import ConversionResult
+
+            return ConversionResult(source=p, success=True, markdown="# spy\n")
+
+    base_config = {
+        "timeout": 60.0, "max_rows": 10000, "default_copy": False,
+        "stats": False, "chunk": None, "ocr_enabled": True,
+        "ocr_lang": "tha+eng", "pdf_tables": True,
+    }
+    base_config.update(config_overrides)
+    monkeypatch.setattr("doc2md.cli.main.load_config", lambda on_error=None: base_config)
+
+    import doc2md.cli.main as cli_mod
+
+    original = cli_mod.Converter
+    cli_mod.Converter = SpyConverter
+    try:
+        result = runner.invoke(app, ["convert", str(p), *cli_args])
+    finally:
+        cli_mod.Converter = original
+    assert result.exit_code == 0, result.output
+    return captured["options"]
+
+
+def test_pdf_tables_from_config_used_when_cli_flag_absent(tmp_path, monkeypatch):
+    """doc2md.toml's pdf_tables=false must take effect when --no-tables is not given."""
+    options = _spy_convert(tmp_path, monkeypatch, [], {"pdf_tables": False})
+    assert options["pdf_tables"] is False
+
+
+def test_no_tables_cli_flag_overrides_config_pdf_tables_true(tmp_path, monkeypatch):
+    options = _spy_convert(tmp_path, monkeypatch, ["--no-tables"], {"pdf_tables": True})
+    assert options["pdf_tables"] is False
+
+
+def test_pdf_tables_default_true_with_no_config_and_no_cli_flag(tmp_path, monkeypatch):
+    options = _spy_convert(tmp_path, monkeypatch, [], {"pdf_tables": True})
+    assert options["pdf_tables"] is True
+
+
+def test_ocr_lang_from_config_used_when_cli_option_absent(tmp_path, monkeypatch):
+    """doc2md.toml's ocr_lang must take effect when --ocr-lang is not given."""
+    options = _spy_convert(tmp_path, monkeypatch, [], {"ocr_lang": "eng"})
+    assert options["ocr_lang"] == "eng"
+
+
+def test_ocr_lang_cli_option_overrides_config(tmp_path, monkeypatch):
+    options = _spy_convert(tmp_path, monkeypatch, ["--ocr-lang", "tha"], {"ocr_lang": "eng"})
+    assert options["ocr_lang"] == "tha"
+
+
+def test_ocr_lang_default_when_no_config_and_no_cli_option(tmp_path, monkeypatch):
+    options = _spy_convert(tmp_path, monkeypatch, [], {"ocr_lang": "tha+eng"})
+    assert options["ocr_lang"] == "tha+eng"

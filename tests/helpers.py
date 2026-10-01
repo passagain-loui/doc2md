@@ -88,6 +88,11 @@ class FakeEngine:
             time.sleep(float(options.get("sleep", 30)))
         return "# fake ok\n"
 
+    def convert_structured(self, source, options):
+        from doc2md.core.quality import EngineOutput
+
+        return EngineOutput(markdown=self.convert(source, options))
+
 
 def make_fake_pytesseract(text="OCR ENGINE TEXT", error=None):
     import types

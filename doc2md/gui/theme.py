@@ -32,6 +32,7 @@ STATUS_COLORS = {
     "success": SUCCESS,
     "skipped": WARNING,
     "error": DANGER,
+    "warning": WARNING,
 }
 
 _ICONS: dict[str, str] = {
@@ -151,6 +152,34 @@ QLabel#DropTitle {{
     color: {ACCENT};
     font-size: 17px;
     font-weight: 600;
+}}
+
+QLabel#QualityBadge {{
+    padding: 3px 10px;
+    border-radius: 10px;
+    font-weight: 600;
+    font-size: 11px;
+    background-color: {SURFACE_ALT};
+    color: {TEXT_MUTED};
+}}
+QLabel#QualityBadge[status="success"] {{ background-color: rgba(16, 185, 129, 0.15); color: {SUCCESS}; }}
+QLabel#QualityBadge[status="warning"] {{ background-color: rgba(245, 158, 11, 0.15); color: {WARNING}; }}
+QLabel#QualityBadge[status="error"] {{ background-color: rgba(239, 68, 68, 0.15); color: {DANGER}; }}
+QLabel#QualityBadge[status="skipped"] {{ background-color: rgba(245, 158, 11, 0.15); color: {WARNING}; }}
+
+QLabel#WarningBanner {{
+    background-color: rgba(245, 158, 11, 0.12);
+    border: 1px solid {WARNING};
+    border-radius: 8px;
+    padding: 8px 12px;
+    color: {WARNING};
+    font-weight: 600;
+}}
+
+QLabel#Thumbnail {{
+    background-color: {SURFACE_ALT};
+    border: 1px solid {BORDER};
+    border-radius: 8px;
 }}
 
 QPushButton {{

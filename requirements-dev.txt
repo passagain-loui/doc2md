@@ -3,4 +3,10 @@
 
 pytest>=8.0
 pytest-cov>=5.0
+# Dev-only: enables real per-test timeouts (--timeout=N) so a hung test fails
+# the run instead of hanging the whole suite. Also makes the pre-existing
+# `@pytest.mark.timeout(...)` decorator in tests/test_converter.py actually
+# enforce (previously an unrecognized, no-op mark). Never a runtime
+# dependency - the application itself does not use it.
+pytest-timeout>=2.3
 pyinstaller>=6.6

@@ -195,11 +195,12 @@ class TestMissingEngineSafety:
             "doc2md.engine.ocr_engine.shutil.which", lambda n: "C:/fake/tesseract.exe"
         )
         monkeypatch.setitem(sys.modules, "pytesseract", None)
+        monkeypatch.setitem(sys.modules, "rapidocr_onnxruntime", None)
         p = make_png(tmp_path / "nopkg.png")
-        with pytest.raises(ConversionError) as caught:
-            ENGINE().convert(p, {})
-        assert "NameError" not in type(caught.value).__name__
-        assert "pytesseract package is missing" in str(caught.value)
+        # A Tesseract binary without pytesseract is not usable: the engine falls
+        # through to RapidOCR, and with that absent reports OCR as not run.
+        output = ENGINE().convert(p, {})
+        assert "OCR was not run" in output
 
 
 class TestConcurrency:

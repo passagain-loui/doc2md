@@ -1,6 +1,3 @@
-# README.md
-
-```text
 # doc2md v1.1.0
 
 Drag a document in, get clean Markdown out. PDF, Word, Excel, PowerPoint, HTML,
@@ -20,7 +17,26 @@ correctly throughout.
 | `.pptx` | python-pptx | slide titles, bullet nesting, tables, speaker notes |
 | `.html` `.htm` `.eml` | BeautifulSoup | article text, links, tables |
 | `.png` `.jpg` `.jpeg` `.bmp` `.tif` `.webp` | Tesseract | Thai + English OCR |
-| source files, `.json`, `.txt`, `.md` | built in | fenced with the right language |
+| source files, `.json`, `.txt` | built in | fenced with the right language |
+| `.md` | built in | passed through unchanged - it is already Markdown |
+
+**Converting a `.md` file directly still works** - `doc2md convert notes.md`
+converts it (unchanged, since it's already Markdown) like any other explicit
+file argument.
+
+**A recursive folder or `bridge` conversion skips `.md` files it finds along
+the way.** `doc2md convert some_folder` (or dropping a folder in the GUI)
+walks the folder and converts everything it recognizes *except* `.md` - those
+are skipped, not converted, and the GUI says how many ("N Markdown file(s) in
+this folder were skipped"). This is deliberate: without it, a folder that
+already contains this tool's own previous output (or output from a
+repeated/automated re-run) would be re-ingested as input on the next pass,
+and the output collision resolver would keep appending another `-1`,
+producing an unbounded `file-1-1-1-....md` chain. A folder containing only
+`.md` files therefore has **nothing to convert** when scanned recursively -
+the GUI reports this explicitly ("folder contains only Markdown file(s)"),
+not as a generic empty-folder message; convert each one explicitly by name
+instead if that's genuinely what you want.
 
 ## Install
 
@@ -32,7 +48,25 @@ OCR needs [Tesseract](https://github.com/UB-Mannheim/tesseract/wiki) on PATH.
 Install the Thai language data (`tha`) as well - without it, scanned Thai
 documents fall back to English and say so in the output. Tesseract is
 deliberately **not** bundled: the Thai model alone is larger than the rest of
-the application.
+the application. The GUI's **OCR Diagnostics…** dialog (see below) tells you
+exactly what is and is not installed, in plain language, rather than letting
+a scan silently produce metadata-only output.
+
+### Known limitations
+
+- **PDF table extraction requires `pdfplumber`** (in `requirements.txt`).
+ Without it, PDFs still convert - through the fast PyMuPDF text path - but
+ without table formatting; `--no-tables` requests the same degraded-but-fast
+ behaviour deliberately.
+- **OCR requires an external backend that is not bundled**: either the
+ Tesseract binary on PATH (with the `tha` language pack for Thai) or
+ `rapidocr-onnxruntime` installed separately. Neither is installed
+ automatically by this project or its GUI; a scanned document converts to
+ metadata plus an explanatory Warning until one is available.
+- **RapidOCR does not have verified Thai support** in this project; its
+ readiness is reported as "has a backend" rather than folded into the
+ Thai/English readiness message, which is specific to Tesseract's installed
+ language data.
 
 ## Use
 
@@ -42,10 +76,35 @@ Desktop interface:
 python -m doc2md gui
 ```
 
-Drag in any number of files or whole folders. Each row shows its own status -
-Queued, Converting, Success, Skipped or Error - with the reason when something
-goes wrong, so nothing fails quietly. `Copy Markdown` puts the whole batch on
-the clipboard; `Send to Sandbox` writes an ingest bundle (see below).
+Drag in any number of files or whole folders. Each row shows its own status,
+with the reason when something goes wrong, so nothing fails quietly:
+
+| Status | Meaning |
+| --- | --- |
+| Queued | Accepted, not converted yet. |
+| Converting | The worker thread is on this file right now. |
+| Success | Converted and written to disk - a genuine read of the document. |
+| Warning | Converted and written, but **not** a full read - OCR was unavailable, switched off, or ran and found no text. Shown with a banner above the preview when selected; never presented as Success. |
+| Error | Failed - conversion itself, or the write to disk afterwards. |
+| Skipped | Never queued - unsupported file type, audio/video (removed in 1.1.0), or (for a folder) nothing convertible found. |
+
+Selecting a row shows its Markdown, a Quality Summary (pages read, tables
+found, OCR outcome - see *Quality report* below), Compare Metadata
+(source/output size, page or sheet count), and a first-page thumbnail for
+PDFs and images. `Open Original` / `Open Output` launch the file in its
+default application; the per-row `Copy Markdown` copies just that file, while
+the toolbar's `Copy Markdown` copies the whole batch. `Send to Sandbox` writes
+an ingest bundle (see below); `Export Report` writes the JSON quality report
+for the whole batch.
+
+**Retry and recovery.** `Retry Failed` and `Retry Warnings` re-run only the
+matching rows in place - a retry updates its row's existing result rather
+than adding a new one, and a row's previous result is discarded the moment
+its retry starts, so a failed retry can never leave stale content reachable
+through Copy Markdown, Send to Sandbox, or Export Report. `Clear Completed`
+removes clean Success rows only, so Warning/Error rows stay in the list to
+retry. `Export Error Report` writes a JSON report scoped to the rows
+currently showing Error.
 
 Command line:
 
@@ -54,6 +113,8 @@ python -m doc2md convert report.pdf
 python -m doc2md convert "C:/docs" --output "C:/out" --stats
 python -m doc2md convert scan.pdf --ocr-lang tha+eng
 python -m doc2md convert big.pdf --no-tables --chunk 4000
+python -m doc2md convert "C:/docs" --output-policy converted-folder
+python -m doc2md convert report.pdf --report report-quality.json
 ```
 
 Hand a batch to a downstream tool:
@@ -66,7 +127,96 @@ This writes the `.md` files plus a `manifest.json` describing them - schema
 version, producer, per-document SHA-256 and token counts. The manifest is
 written last, so a watcher triggering on it never sees a half-written bundle.
 An HTTP transport is available with `--endpoint` for an explicit URL; nothing
-here touches the network unless you ask it to.
+here touches the network unless you ask it to. **A document whose conversion
+only produced a Warning (OCR unavailable/disabled/no text found) is excluded
+from the bundle by default** - it is metadata, not a real read of the
+content, and the Sandbox would otherwise ingest it as if it were. Pass
+`--include-warnings` to send it anyway; the manifest still carries the
+`warning` field so a downstream consumer can filter or flag it.
+
+## Output policy
+
+Where a conversion's result actually lands, and what happens if something is
+already there, is controlled by one policy - the same resolver is used by
+the CLI, the GUI, and chunked output:
+
+| Policy | Behaviour |
+| --- | --- |
+| `unique` | **Default. Unchanged from before this existed.** Never overwrites; `report.md` that already exists becomes `report-1.md`, `report-2.md`, ... |
+| `fail` | Refuses to write if the destination already exists - the file becomes an Error row/CLI failure instead. |
+| `overwrite` | Writes over an existing file. **Always** refuses to write over the *source* file itself, even when the destination path would coincide with it (for example converting a `.md` file to `.md` in the same folder) - this is not user-selectable away. |
+| `converted-folder` | Writes into a `Converted` subfolder of the output directory, numbered the same way `unique` is *within* that subfolder. Cannot collide with a document you did not just convert. **GUI default.** |
+
+`--output-policy unique|fail|overwrite|converted-folder` on the CLI (default
+`unique`, so a script written before this flag existed keeps behaving
+identically). The GUI has an Output Policy dropdown that remembers your last
+choice between runs and previews each queued file's destination before you
+press Convert.
+
+Every file this application writes - the converted output, chunk parts, and
+both JSON reports below - is written atomically: to a temporary file next to
+the destination, then moved into place. A write that fails partway through
+never leaves a half-written file behind.
+
+## Quality report
+
+`--report <path.json>` (CLI) or `Export Report` / `Export Error Report`
+(GUI) writes one JSON object per document:
+
+```jsonc
+{
+ "source": "C:/docs/report.pdf",
+ "output": "C:/docs/Converted/report.md",
+ "kind": "pdf",
+ "engine": "pdf",
+ "status": "Warning", // Success | Warning | Error | Skipped
+ "error": null,
+ "warning": "OCR unavailable: the Tesseract binary is not on PATH ...",
+ "duration_s": 0.42,
+ "token_estimate": 812,
+ "pages_total": 3, "pages_read": 3, "pages_failed": 0, "pages_with_content": 0,
+ "tables_detected": 1,
+ "sheets_detected": null, "rows_detected": null,
+ "rows_detected_is_exact": null, "rows_exported": null,
+ "truncated": null,
+ "ocr_backend": null, "ocr_language": null,
+ "ocr_pages_success": null, "ocr_pages_empty": null, "ocr_pages_failed": null
+}
+```
+
+`pages_read` and `pages_with_content` answer different questions -
+`pages_read` is "how many pages did extraction not error on" (a scanned PDF
+with OCR off still has `pages_read == pages_total`, since nothing failed);
+`pages_with_content` is "how many pages actually ended up with real text in
+the output" (`0` in that same scanned/OCR-off case). Never read `pages_read`
+alone as "the document was fully read". `rows_detected_is_exact` is `false`
+only for an engine that had to stop counting early (none currently do -
+both CSV and XLSX count every row even past the retention limit); `null`
+means not measured.
+
+Every metrics field is `null` when it was not measured - never a guessed
+`0`. DOCX, PPTX, HTML, EML, JSON, code and plain-text conversions report
+`null` for every metrics field (those engines have not been extended to
+measure them); PDF reports page/table facts and, on the scanned/OCR path,
+`ocr_*`; Excel/CSV reports sheet/row facts. `status` is never `Success` for a
+result that carries a `warning`.
+
+## OCR readiness
+
+The GUI's **OCR Diagnostics…** button runs real checks, not an import test:
+whether the Tesseract binary is actually on PATH, whether `pytesseract` is
+installed, which language data files Tesseract itself reports having, and
+whether RapidOCR (if installed) can actually construct its engine - a
+package importing successfully is never reported as ready. It shows, in
+Thai: "พร้อมอ่านภาษาไทยและอังกฤษ" (ready for both languages), "อ่านได้เฉพาะ
+ภาษาอังกฤษ" (Tesseract found, but no Thai language data), or "ยังไม่มี OCR
+backend" (no working backend) - plus which backend a conversion will
+actually use, and Refresh / Copy Diagnostics.
+
+Presets (Balanced AI / High Fidelity / Fast Text / Thai Scanned Document)
+apply a fixed OCR language + resolution + table-extraction bundle to the
+existing controls; editing any of those controls by hand switches the
+selector to Custom.
 
 ## Configuration
 
@@ -292,4 +442,3 @@ GPU Pack to those users.
 - **Hardening**: Deep audit applied - subprocess zombie process prevention on Windows
 - **Hardening**: Singleton pattern for WhisperModel caching with memory release
 - **Hardening**: Bulletproof exception guards for native C-extension crashes
-```

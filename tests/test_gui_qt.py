@@ -17,6 +17,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 pytest.importorskip("PyQt6.QtWidgets")
 
+from PyQt6.QtCore import QSettings  # noqa: E402
 from PyQt6.QtWidgets import QApplication  # noqa: E402
 
 from doc2md.core.bridge import MANIFEST_NAME  # noqa: E402
@@ -26,6 +27,7 @@ from doc2md.gui.main_window import (  # noqa: E402
     STATUS_QUEUED,
     STATUS_SKIPPED,
     STATUS_SUCCESS,
+    STATUS_WARNING,
     ConversionWorker,
     MainWindow,
 )
@@ -42,8 +44,12 @@ def qapp():
 
 
 @pytest.fixture
-def window(qapp):
-    win = MainWindow()
+def window(qapp, tmp_path):
+    # Isolated, temp-file-backed QSettings - a MainWindow constructed
+    # without one falls back to the real %APPDATA%\doc2md\doc2md.ini, which
+    # a test suite must never write to.
+    settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
+    win = MainWindow(settings=settings)
     yield win
     win.close()
     win.deleteLater()
@@ -74,6 +80,12 @@ def run_batch(window: MainWindow, qapp, timeout_ms: int = 30_000) -> None:
     while not finished and not deadline.hasExpired():
         qapp.processEvents(QEventLoop.ProcessEventsFlag.AllEvents, 50)
     assert finished, "conversion did not finish within the timeout"
+
+
+def select_policy(window: MainWindow, value: str) -> None:
+    """Pin the output policy so a test unrelated to Milestone 2's policy
+    feature is not affected by the GUI's Converted-folder default."""
+    window.policy_combo.setCurrentIndex(window._policy_index(value))
 
 
 # --- construction ------------------------------------------------------------
@@ -162,6 +174,7 @@ def test_batch_conversion_marks_every_row_and_writes_output(window, qapp, tmp_pa
     window.add_paths(sources)
     window.beside_source_check.setChecked(False)
     window.output_edit.setText(str(out_dir))
+    select_policy(window, "unique")
 
     run_batch(window, qapp)
 
@@ -183,6 +196,7 @@ def test_output_is_written_next_to_the_source_when_requested(window, qapp, tmp_p
     source = make_txt(folder, "บันทึก.txt")
     window.add_paths([source])
     window.beside_source_check.setChecked(True)
+    select_policy(window, "unique")
 
     run_batch(window, qapp)
 
@@ -221,10 +235,177 @@ def test_colliding_output_names_do_not_overwrite_each_other(window, qapp, tmp_pa
     window.add_paths([first / "report.txt", second / "report.txt"])
     window.beside_source_check.setChecked(False)
     window.output_edit.setText(str(out_dir))
+    select_policy(window, "unique")
 
     run_batch(window, qapp)
 
     assert sorted(p.name for p in out_dir.glob("*.md")) == ["report-1.md", "report.md"]
+
+
+def test_write_failure_shows_error_not_success_and_is_excluded_from_summary(
+    window, qapp, tmp_path, monkeypatch
+):
+    """A document that converts cleanly but can't be written to disk must be
+    an Error row, must not count toward the succeeded total, and must not be
+    silently offered up for clipboard/bridge (Bug A3)."""
+    good = make_txt(tmp_path, "good.txt", "fine content")
+    unwritable = make_txt(tmp_path, "unwritable.txt", "will not save")
+    window.add_paths([good, unwritable])
+
+    import doc2md.gui.main_window as gui_main_window
+
+    original_claim_and_publish_text = gui_main_window.claim_and_publish_text
+
+    def flaky_claim_and_publish_text(source, *args, **kwargs):
+        if source.stem == "unwritable":
+            raise OSError("simulated permission denied")
+        return original_claim_and_publish_text(source, *args, **kwargs)
+
+    monkeypatch.setattr(gui_main_window, "claim_and_publish_text", flaky_claim_and_publish_text)
+
+    run_batch(window, qapp)
+
+    rows = {
+        window.file_tree.topLevelItem(i).text(0): window.file_tree.topLevelItem(i)
+        for i in range(2)
+    }
+    assert rows["good.txt"].text(COLUMN_STATUS) == STATUS_SUCCESS
+    assert rows["unwritable.txt"].text(COLUMN_STATUS) == STATUS_ERROR
+    assert "saved nothing" in rows["unwritable.txt"].text(COLUMN_DETAIL)
+
+    # The write failure must not be reported as a converted success anywhere,
+    # and the document must not have entered the clipboard/bridge payload.
+    unwritable_index = window._files.index(unwritable)
+    assert unwritable_index not in window._markdown
+    good_index = window._files.index(good)
+    assert good_index in window._markdown
+
+
+def test_ocr_backend_status_reflects_real_environment():
+    """Bug B2: the GUI must know, before any conversion, whether an OCR
+    backend is actually usable - not discover it only after a scan comes
+    back empty."""
+    import shutil
+
+    from doc2md.gui.main_window import MainWindow as _MW
+
+    available, message = _MW._ocr_backend_status()
+    real_tesseract = shutil.which("tesseract") is not None
+    try:
+        import rapidocr_onnxruntime  # noqa: F401
+
+        real_rapidocr = True
+    except ImportError:
+        real_rapidocr = False
+
+    assert available == (real_tesseract or real_rapidocr)
+    assert isinstance(message, str) and message
+
+
+def test_ocr_backend_label_is_populated_on_window_creation(window):
+    """The status must be visible before the user ever presses Convert."""
+    text = window.ocr_backend_label.text()
+    assert text.strip()
+    assert text.startswith(("✓", "⚠"))
+
+
+def test_warning_result_shows_warning_status_not_success(window, qapp, tmp_path, monkeypatch):
+    """A file that converts with a warning (e.g. OCR unavailable) must be a
+    distinct Warning row, not indistinguishable from Success, and must be
+    called out in the batch summary (Bug B2)."""
+    source = make_txt(tmp_path, "scan.txt", "placeholder")
+    window.add_paths([source])
+
+    class FakeResult:
+        success = True
+        markdown = "# scan.txt\n\n> OCR unavailable\n"
+        error = ""
+        warning = "OCR unavailable: neither Tesseract nor RapidOCR is available"
+
+    class FakeConverter:
+        def __init__(self, **kwargs):
+            pass
+
+        def convert_file(self, path):
+            return FakeResult()
+
+    monkeypatch.setattr("doc2md.gui.main_window.Converter", FakeConverter)
+
+    run_batch(window, qapp)
+
+    row = window.file_tree.topLevelItem(0)
+    assert row.text(COLUMN_STATUS) == STATUS_WARNING
+    assert "OCR unavailable" in row.text(COLUMN_DETAIL)
+    assert window.statusBar().currentMessage().count("with warnings") == 1
+
+
+def test_closing_window_during_conversion_does_not_force_delete_thread(
+    window, qapp, tmp_path, monkeypatch
+):
+    """Bug B3: closeEvent must not blindly wait(5000) then deleteLater() the
+    thread/worker regardless of whether run() actually finished. It must
+    instead defer teardown until the worker's own `finished` signal proves
+    run() has returned, and only close the window then."""
+    import threading
+
+    from PyQt6.QtWidgets import QMessageBox
+
+    release = threading.Event()
+    entered_conversion = threading.Event()
+
+    class SlowResult:
+        success = True
+        markdown = "# slow\n"
+        error = ""
+        warning = None
+
+    class SlowConverter:
+        def __init__(self, **kwargs):
+            pass
+
+        def convert_file(self, path):
+            entered_conversion.set()
+            release.wait(timeout=10)
+            return SlowResult()
+
+    monkeypatch.setattr("doc2md.gui.main_window.Converter", SlowConverter)
+    monkeypatch.setattr(
+        QMessageBox, "question",
+        staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes),
+    )
+
+    source = make_txt(tmp_path, "slow.txt")
+    window.add_paths([source])
+    window.start_conversion()
+
+    assert entered_conversion.wait(timeout=5), "conversion never started"
+    assert window._is_running()
+
+    from PyQt6.QtGui import QCloseEvent
+
+    event = QCloseEvent()
+    window.closeEvent(event)
+
+    # The close must be deferred, not forced: the event is ignored, the
+    # thread/worker are still alive, and cancellation was requested.
+    assert not event.isAccepted()
+    assert window._close_after_cancel is True
+    assert window._thread is not None
+    assert window._worker is not None
+    assert window._worker._cancelled is True
+
+    # Let the in-flight "conversion" finish; the batch's own completion path
+    # must now perform the real teardown and close the window.
+    release.set()
+    from PyQt6.QtCore import QDeadlineTimer, QEventLoop
+
+    deadline = QDeadlineTimer(5000)
+    while window._thread is not None and not deadline.hasExpired():
+        qapp.processEvents(QEventLoop.ProcessEventsFlag.AllEvents, 50)
+
+    assert window._thread is None
+    assert window._worker is None
+    assert window._close_after_cancel is False
 
 
 def test_txt_output_format_is_honoured(window, qapp, tmp_path):
@@ -233,6 +414,7 @@ def test_txt_output_format_is_honoured(window, qapp, tmp_path):
     window.add_paths([source])
     window.format_combo.setCurrentIndex(1)
     window.beside_source_check.setChecked(True)
+    select_policy(window, "unique")
 
     assert window.output_suffix() == ".txt"
     run_batch(window, qapp)
@@ -371,11 +553,33 @@ def test_cancelled_worker_stops_early(tmp_path):
 # --- entry point -------------------------------------------------------------
 
 
-def test_run_gui_builds_and_shows_the_window(qapp, monkeypatch):
-    """Exercise the real entry point, including stylesheet application."""
-    from PyQt6.QtCore import QTimer
+def test_run_gui_builds_and_shows_the_window(qapp, monkeypatch, tmp_path):
+    """Exercise the real entry point, including stylesheet application.
+
+    run_gui() constructs MainWindow() with no explicit `settings`, which
+    would otherwise fall back to the real %APPDATA%\\doc2md\\doc2md.ini -
+    the QSettings class itself is patched (not just an instance) so that
+    fallback also lands on a temp file, not the user's real profile.
+    """
+    from PyQt6.QtCore import QSettings, QTimer
 
     from doc2md.gui import run_gui
+    import doc2md.gui.main_window as gui_main_window
+
+    isolated_settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
+
+    class _FakeSettingsFactory:
+        # MainWindow.__init__ reads QSettings.Format.IniFormat /
+        # QSettings.Scope.UserScope as class attributes before constructing
+        # one - a plain lambda replacement would lose those, so this keeps
+        # them while redirecting construction to the isolated instance.
+        Format = QSettings.Format
+        Scope = QSettings.Scope
+
+        def __call__(self, *args, **kwargs):
+            return isolated_settings
+
+    monkeypatch.setattr(gui_main_window, "QSettings", _FakeSettingsFactory())
 
     shown: list[bool] = []
 
@@ -391,3 +595,103 @@ def test_run_gui_builds_and_shows_the_window(qapp, monkeypatch):
     assert run_gui([]) == 0
     assert shown == [True]
     assert theme.ACCENT in qapp.styleSheet()
+
+
+# --- drag & drop anywhere on the window --------------------------------------
+
+
+@pytest.mark.parametrize("target", ["window", "file_tree", "preview", "drop_zone"])
+def test_files_dropped_anywhere_on_the_window_are_queued(window, qapp, tmp_path, target):
+    from PyQt6.QtCore import QMimeData, QPointF, Qt, QUrl
+    from PyQt6.QtGui import QDragEnterEvent, QDropEvent
+
+    source = make_txt(tmp_path, "ลาก.txt")
+    widget = {
+        "window": window,
+        "file_tree": window.file_tree,
+        "preview": window.preview,
+        "drop_zone": window.drop_zone,
+    }[target]
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile(str(source))])
+
+    enter = QDragEnterEvent(
+        widget.rect().center(), Qt.DropAction.CopyAction, mime,
+        Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+    )
+    qapp.sendEvent(widget, enter)
+    assert enter.isAccepted() or widget is window.preview
+
+    drop = QDropEvent(
+        QPointF(widget.rect().center()), Qt.DropAction.CopyAction, mime,
+        Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+    )
+    # Mirror Qt's dispatch: walk up to the first widget that accepts drops.
+    receiver = widget
+    while receiver is not None and not receiver.acceptDrops():
+        receiver = receiver.parentWidget()
+    assert receiver is not None, "no widget on the path accepts drops"
+    qapp.sendEvent(receiver, drop)
+
+    assert window.file_tree.topLevelItemCount() == 1
+
+
+# --- write failures must not look like successes in the reports --------------
+
+
+def test_write_failure_is_an_error_in_every_report(window, qapp, tmp_path):
+    blocker = tmp_path / "blocker"
+    blocker.write_text("not a directory", encoding="utf-8")
+    window.add_paths([make_txt(tmp_path, "a.txt")])
+    window.beside_source_check.setChecked(False)
+    window.output_edit.setText(str(blocker / "sub"))
+
+    run_batch(window, qapp)
+
+    assert window.file_tree.topLevelItem(0).text(COLUMN_STATUS) == STATUS_ERROR
+    quality = window.build_quality_report()
+    assert [entry["status"] for entry in quality] == ["Error"]
+    assert quality[0]["error"]
+    assert [entry["status"] for entry in window.build_error_report()] == ["Error"]
+
+
+# --- folders are scanned off the GUI thread ------------------------------------
+
+
+def test_dropped_folder_is_scanned_in_the_background_and_queued(window, qapp, tmp_path):
+    from PyQt6.QtCore import QDeadlineTimer, QEventLoop
+
+    folder = tmp_path / "ชุดเอกสาร"
+    (folder / "sub").mkdir(parents=True)
+    make_txt(folder, "a.txt")
+    make_txt(folder / "sub", "b.txt")
+    (folder / "old.md").write_text("# already converted", encoding="utf-8")
+
+    window.add_paths([folder])
+    assert window.file_tree.topLevelItemCount() == 0, "the scan must not block the caller"
+
+    deadline = QDeadlineTimer(10_000)
+    while window._scan_thread is not None and not deadline.hasExpired():
+        qapp.processEvents(QEventLoop.ProcessEventsFlag.AllEvents, 50)
+
+    names = sorted(path.name for path in window._files)
+    assert names == ["a.txt", "b.txt"]
+
+
+def test_two_folder_drops_in_a_row_are_both_scanned(window, qapp, tmp_path):
+    from PyQt6.QtCore import QDeadlineTimer, QEventLoop
+
+    first, second = tmp_path / "one", tmp_path / "two"
+    first.mkdir()
+    second.mkdir()
+    make_txt(first, "x.txt")
+    make_txt(second, "y.txt")
+
+    window.add_paths([first])
+    window.add_paths([second])
+
+    deadline = QDeadlineTimer(10_000)
+    while (window._scan_thread is not None or window._scan_queue) and not deadline.hasExpired():
+        qapp.processEvents(QEventLoop.ProcessEventsFlag.AllEvents, 50)
+
+    assert sorted(path.name for path in window._files) == ["x.txt", "y.txt"]

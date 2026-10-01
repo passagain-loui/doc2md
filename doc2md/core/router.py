@@ -257,6 +257,19 @@ def _detect_extension(p: Path) -> Detection | None:
     return None
 
 
+# A recursive directory scan (CLI folder conversion, GUI drag-drop of a
+# folder) excludes these suffixes even though they are otherwise convertible.
+# Without this, a folder that already contains generated Markdown - this
+# tool's own previous output, or a "documentation mirror" process re-running
+# over the same tree - gets re-ingested as input on every pass: each pass
+# treats the last run's *.md as a new source, and the destination collision
+# resolver appends another -1, producing an unbounded file-1-1-1-...-1.md
+# chain. Naming a .md file explicitly (a direct argument, a drag-dropped
+# file, or a glob pattern) is unaffected - only the implicit "convert
+# everything under this folder" path excludes it.
+RECURSIVE_SCAN_EXCLUDED_SUFFIXES = frozenset({".md"})
+
+
 def guess_language(path: Path | str) -> str:
     """Best-effort programming-language guess used by the code engine."""
     suffix = Path(path).suffix.lower()
