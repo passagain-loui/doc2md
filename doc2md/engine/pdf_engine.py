@@ -24,6 +24,7 @@ from doc2md.core.errors import ConversionError, EngineUnavailableError, wrap_war
 from doc2md.core.quality import EngineOutput, QualityMetrics
 from doc2md.core.ocr_setup import find_tesseract, prepare_tesseract
 from doc2md.core.ocr_text import recognize
+from doc2md.core.pdf_text import find_sara_bug_fonts, page_lines, text_in
 from doc2md.core.router import FileKind
 from doc2md.core.tables import render_table
 from doc2md.engine.base import BaseEngine
@@ -55,15 +56,15 @@ def _safe_extract(table) -> list:
         return []
 
 
-def _text_outside_tables(page, tables) -> str | None:
-    """PyMuPDF text for the words positioned outside every table's bounding box.
+def _text_outside_tables(page, tables, buggy=frozenset()) -> str | None:
+    """The page's own text for characters positioned outside every table box.
 
-    Words come from PyMuPDF - the same extractor the rest of the document
-    uses - rather than pdfplumber, whose per-glyph line rebuilding can split
-    Thai combining vowels and tone marks from their base consonants. Cells are
-    excluded by position, never by string comparison. Returns ``None`` (leave
-    the page's original text alone rather than guess) for a rotated page or
-    if anything required is unavailable.
+    Characters come from PyMuPDF - the extractor the rest of the document uses,
+    with the Thai repair of :mod:`doc2md.core.pdf_text` - rather than from
+    pdfplumber, whose per-glyph line rebuilding splits Thai combining marks from
+    their base consonants. Cells are excluded by position, never by comparing
+    strings. Returns ``None`` (leave the page's text alone rather than guess) for
+    a rotated page or if anything required is unavailable.
     """
     if page is None:
         return None
@@ -71,31 +72,26 @@ def _text_outside_tables(page, tables) -> str | None:
         boxes = [t.bbox for t in tables]
         if not boxes or page.rotation:
             return None
-        words = page.get_text("words")
+        lines = page_lines(page, buggy)
     except Exception:
         return None
+    return text_in(lines, exclude=boxes).strip()
 
-    def _inside_any_box(word) -> bool:
-        cx = (word[0] + word[2]) / 2
-        cy = (word[1] + word[3]) / 2
-        return any(x0 <= cx <= x1 and top <= cy <= bottom for x0, top, x1, bottom in boxes)
 
+def _grid_from_page_text(table, lines) -> list[list[str]] | None:
+    """Table cells filled with the PDF's own text clipped to each cell.
+
+    pdfplumber finds the cell boxes; its text for the cells is not used, because
+    pdfminer inserts spaces inside Thai words and inside numbers ("1 0,400.00").
+    """
     try:
-        lines: dict[tuple[int, int], list[tuple[int, str]]] = {}
-        for word in words:
-            if _inside_any_box(word):
-                continue
-            lines.setdefault((word[5], word[6]), []).append((word[7], word[4]))
+        grid = [
+            [text_in(lines, include=cell, merge_lines=True) if cell else "" for cell in row.cells]
+            for row in table.rows
+        ]
     except Exception:
         return None
-    out: list[str] = []
-    previous_block = None
-    for block, line in sorted(lines):
-        if previous_block is not None and block != previous_block:
-            out.append("")
-        out.append(" ".join(text for _, text in sorted(lines[(block, line)])))
-        previous_block = block
-    return "\n".join(out).strip()
+    return grid if any(any(cell for cell in row) for row in grid) else None
 
 
 class PdfEngine(BaseEngine):
@@ -122,7 +118,10 @@ class PdfEngine(BaseEngine):
                     f"Password-protected PDF cannot be converted: {source}"
                 )
 
-            pages, unreadable = self._read_text_layer(doc)
+            buggy = find_sara_bug_fonts(doc)
+            pages, unreadable = (
+                self._read_text_layer(doc, buggy) if buggy else self._read_text_layer(doc)
+            )
             if doc.page_count and unreadable == doc.page_count:
                 raise ConversionError(
                     f"PDF conversion failed: {source} "
@@ -139,7 +138,9 @@ class PdfEngine(BaseEngine):
             if has_text:
                 if metrics is not None:
                     metrics.pages_with_content = sum(1 for text in pages if text.strip())
-                tables_by_page, outside_text_by_page = self._extract_tables(source, options, doc)
+                tables_by_page, outside_text_by_page = self._extract_tables(
+                    source, options, doc, buggy
+                )
                 if metrics is not None and options.get("pdf_tables", True) and _pdfplumber_available():
                     # Only a genuine "we looked and found N" is 0/N - when
                     # table extraction itself was switched off, the dicts
@@ -191,7 +192,7 @@ class PdfEngine(BaseEngine):
             ) from exc
 
     @staticmethod
-    def _read_text_layer(doc) -> tuple[list[str], int]:
+    def _read_text_layer(doc, buggy=frozenset()) -> tuple[list[str], int]:
         """Return per-page text plus the number of pages that could not be read.
 
         One page failing must not lose the other 199, so failures are recorded
@@ -202,7 +203,10 @@ class PdfEngine(BaseEngine):
         unreadable = 0
         for page in doc:
             try:
-                pages.append(page.get_text("text").strip())
+                if buggy:
+                    pages.append(text_in(page_lines(page, buggy)).strip())
+                else:
+                    pages.append(page.get_text("text").strip())
             except Exception:
                 unreadable += 1
                 pages.append("")
@@ -249,7 +253,7 @@ class PdfEngine(BaseEngine):
         return out
 
     def _extract_tables(
-        self, source: Path, options: dict, doc=None
+        self, source: Path, options: dict, doc=None, buggy=frozenset()
     ) -> tuple[dict[int, list[str]], dict[int, str | None]]:
         """Recover tables per page as Markdown, keyed by 1-based page number.
 
@@ -285,17 +289,23 @@ class PdfEngine(BaseEngine):
                         continue
                     if not tables:
                         continue
-                    rendered = [
-                        markdown
-                        for t in tables
-                        if (markdown := render_table(_safe_extract(t)))
-                    ]
+                    fitz_page = doc[index - 1] if doc is not None else None
+                    lines = None
+                    if fitz_page is not None and not fitz_page.rotation:
+                        try:
+                            lines = page_lines(fitz_page, buggy)
+                        except Exception:
+                            lines = None
+                    rendered = []
+                    for t in tables:
+                        grid = _grid_from_page_text(t, lines) if lines is not None else None
+                        markdown = render_table(grid if grid is not None else _safe_extract(t))
+                        if markdown:
+                            rendered.append(markdown)
                     if not rendered:
                         continue
                     found[index] = rendered
-                    outside_text[index] = _text_outside_tables(
-                        doc[index - 1] if doc is not None else None, tables
-                    )
+                    outside_text[index] = _text_outside_tables(fitz_page, tables, buggy)
         except Exception:
             return found, outside_text
         return found, outside_text

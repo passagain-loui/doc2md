@@ -26,7 +26,7 @@ from pathlib import Path
 from doc2md.core.errors import ConversionError, EngineUnavailableError, wrap_warning
 from doc2md.core.quality import EngineOutput, QualityMetrics
 from doc2md.core.ocr_setup import find_tesseract, prepare_tesseract
-from doc2md.core.ocr_text import recognize
+from doc2md.core.ocr_text import recognize_image
 from doc2md.core.router import FileKind
 from doc2md.engine.base import BaseEngine
 
@@ -182,12 +182,12 @@ class OcrEngine(BaseEngine):
             with tempfile.TemporaryDirectory(prefix="doc2md_ocr_") as tmpdir:
                 normalized = self._normalized_rgb(source, Path(tmpdir))
                 try:
-                    return recognize(normalized, language)
+                    return recognize_image(normalized, language)
                 except Exception as exc:
                     fallback = self._language_fallback(language, exc)
                     if fallback is None:
                         raise
-                    text = recognize(normalized, fallback)
+                    text = recognize_image(normalized, fallback)
                     return (
                         f"> The `{language}` Tesseract language data is not installed; "
                         f"this image was read with `{fallback}` instead.\n\n{text}"

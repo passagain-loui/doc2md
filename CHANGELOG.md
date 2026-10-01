@@ -1,5 +1,36 @@
 # Changelog
 
+## [1.3.3] (2026-10-02) - BROKEN THAI IN EXCEL PDFS, POSTERS
+
+### Fixed
+
+- **Thai in PDFs exported from Excel with AngsanaUPC was garbled** even though
+  the PDF has a text layer: every sara aa came out as sara am ("ค่าขนส่ง" as
+  "ค่ำขนส่ง", "บางโฉลง" as "บำงโฉลง"), a real sara am as a space plus sara am
+  ("ต ำบล"), and table numbers had spaces in them ("1 0,400.00"). The font maps
+  the sara aa glyph to sara am and draws a real sara am as a zero-width space
+  plus that glyph. The pattern is decidable from the characters, so a font is
+  repaired only when the pattern is actually seen in it; correctly encoded PDFs
+  are untouched. Table cells are now filled from the PDF's own text clipped to
+  the cell, not from pdfminer's, which also removes the spaces inside words and
+  numbers, and fragments on one visual row (a label and a right-aligned note)
+  stay on one line so neighbouring cells line up. On the sample price quote
+  every Thai word and every figure now matches the page.
+- **Posters and photographs read more of their text.** Text scattered over a
+  picture is read differently by each Tesseract page mode, and no single setting
+  read more than about 70% of the phrases on a product poster. Images are now
+  read in three ways (auto layout, sparse text, and an enlarged contrast-
+  stretched copy), the readings pooled, and the more confident one kept wherever
+  two cover the same region; lines that are mostly symbols are dropped. On that
+  poster the phrases matched rose from 64% to 77%.
+
+### Known limits
+
+- Large decorative display type (the poster's title) and wide-spaced headings on
+  photographs are still often missed.
+- A table cell's vertical alignment is by text line, so a cell with a heading
+  line above its items is one line longer than its neighbours.
+
 ## [1.3.2] (2026-10-02) - TABLE HEADER ROWS ON SCANNED PAGES
 
 ### Fixed

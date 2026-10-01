@@ -18,6 +18,9 @@ worse than before.
 
 from __future__ import annotations
 
+import math
+import unicodedata
+from dataclasses import dataclass
 from pathlib import Path
 
 MIN_LINE_CONFIDENCE = 40.0
@@ -212,3 +215,177 @@ def _is_missing_language(exc: Exception) -> bool:
         marker in message
         for marker in ("failed loading language", "could not initialize tesseract", "tessdata")
     )
+
+
+# --------------------------------------------------------------------------
+# Posters and photographs: several readings, merged
+# --------------------------------------------------------------------------
+#
+# Text scattered over a picture (a product poster: a title, a ring of short
+# claims, a footer) is read differently by each Tesseract page mode and by each
+# scale. Measured on one such poster, "auto layout" got the footer but missed
+# "ต้านการอักเสบ"; "sparse text" got that but garbled "ลดน้ำตาลในเลือด"; and no
+# single setting read more than about 70% of the phrases. Each reading finds
+# lines the others miss, so the readings are pooled and, where two cover the same
+# part of the image, the more confident one wins.
+
+IMAGE_MIN_LINE_CONFIDENCE = 45.0
+MIN_WORDLIKE_RATIO = 0.6
+IMAGE_SPACE_GAP_RATIO = 0.55
+IMAGE_UPSCALE_BELOW = 1500  # px on the short side
+OVERLAP_REJECT = 0.5
+
+
+@dataclass
+class _Reading:
+    text: str
+    confidence: float
+    left: float
+    top: float
+    right: float
+    bottom: float
+
+    @property
+    def quality(self) -> float:
+        return self.confidence * math.sqrt(max(1, len(_normalized(self.text))))
+
+    @property
+    def area(self) -> float:
+        return max(1.0, (self.right - self.left) * (self.bottom - self.top))
+
+
+def _join_pieces(pieces: list[tuple[str, float, float, float]]) -> str:
+    """Join word pieces, spacing Latin words and wide Thai gaps (see ``prepare_for_ocr``)."""
+    out = ""
+    previous_end = None
+    for text, left, width, height in pieces:
+        if previous_end is not None:
+            both_latin = out[-1:].isascii() and text[:1].isascii()
+            if both_latin or left - previous_end > IMAGE_SPACE_GAP_RATIO * height:
+                out += " "
+        out += text
+        previous_end = left + width
+    return out
+
+
+def _readings(data: dict, scale: float) -> list[_Reading]:
+    lines: dict[tuple, list[int]] = {}
+    for index, text in enumerate(data.get("text", [])):
+        if (text or "").strip():
+            key = (data["block_num"][index], data["par_num"][index], data["line_num"][index])
+            lines.setdefault(key, []).append(index)
+    readings: list[_Reading] = []
+    for indexes in lines.values():
+        confidences = []
+        pieces = []
+        for index in indexes:
+            try:
+                value = float(data["conf"][index])
+            except (ValueError, TypeError):
+                continue
+            if value >= 0:
+                confidences.append(value)
+            pieces.append((
+                data["text"][index].strip(), data["left"][index],
+                data["width"][index], data["height"][index],
+            ))
+        if not confidences or not pieces:
+            continue
+        mean = sum(confidences) / len(confidences)
+        text = _join_pieces(pieces)
+        floor = MIN_SHORT_LINE_CONFIDENCE if len(_normalized(text)) <= SHORT_LINE_CHARS else IMAGE_MIN_LINE_CONFIDENCE
+        if mean < floor or _wordlike_ratio(text) < MIN_WORDLIKE_RATIO:
+            continue
+        left = min(p[1] for p in pieces)
+        right = max(p[1] + p[2] for p in pieces)
+        top = min(data["top"][i] for i in indexes)
+        bottom = max(data["top"][i] + data["height"][i] for i in indexes)
+        readings.append(_Reading(text, mean, left / scale, top / scale, right / scale, bottom / scale))
+    return readings
+
+
+def _wordlike_ratio(text: str) -> float:
+    """Share of characters that are letters, digits or the marks that belong to letters."""
+    compact = _normalized(text)
+    if not compact:
+        return 0.0
+    return sum(1 for char in compact if unicodedata.category(char)[0] in "LNM") / len(compact)
+
+
+def _overlap(a: _Reading, b: _Reading) -> float:
+    width = min(a.right, b.right) - max(a.left, b.left)
+    height = min(a.bottom, b.bottom) - max(a.top, b.top)
+    if width <= 0 or height <= 0:
+        return 0.0
+    return width * height / min(a.area, b.area)
+
+
+def merge_readings(readings: list[_Reading]) -> str:
+    """Keep the most confident reading for each region, then lay them out top to bottom."""
+    accepted: list[_Reading] = []
+    for reading in sorted(readings, key=lambda item: item.quality, reverse=True):
+        if all(_overlap(reading, kept) <= OVERLAP_REJECT for kept in accepted):
+            accepted.append(reading)
+    if not accepted:
+        return ""
+    accepted.sort(key=lambda item: (item.top + item.bottom) / 2)
+    rows: list[list[_Reading]] = []
+    for reading in accepted:
+        centre = (reading.top + reading.bottom) / 2
+        height = reading.bottom - reading.top
+        for row in rows:
+            anchor = row[0]
+            if abs((anchor.top + anchor.bottom) / 2 - centre) <= 0.5 * max(anchor.bottom - anchor.top, height):
+                row.append(reading)
+                break
+        else:
+            rows.append([reading])
+    return "\n".join(
+        " ".join(item.text for item in sorted(row, key=lambda item: item.left)) for row in rows
+    )
+
+
+def recognize_image(image_path: str | Path, language: str) -> str:
+    """Text of a poster or photograph: several readings pooled (see above).
+
+    Falls back to :func:`recognize` when word data is unavailable.
+    """
+    import pytesseract
+
+    if not hasattr(pytesseract, "image_to_data") or not hasattr(pytesseract, "Output"):
+        return recognize(image_path, language)
+    try:
+        from PIL import Image, ImageOps
+
+        with Image.open(image_path) as opened:
+            base = opened.convert("RGB")
+    except Exception:
+        return recognize(image_path, language)
+
+    scale = 2.0 if min(base.size) < IMAGE_UPSCALE_BELOW else 1.0
+    enlarged = base
+    if scale != 1.0:
+        enlarged = base.resize((int(base.size[0] * scale), int(base.size[1] * scale)), Image.LANCZOS)
+    flattened = ImageOps.autocontrast(enlarged.convert("L"), cutoff=2)
+
+    passes = [
+        (base, "--psm 3", 1.0),
+        (base, "--psm 11", 1.0),
+        (flattened, "--psm 11", scale),
+    ]
+    readings: list[_Reading] = []
+    failures = 0
+    for image, config, factor in passes:
+        try:
+            data = pytesseract.image_to_data(
+                image, lang=language, config=config, output_type=pytesseract.Output.DICT
+            )
+        except Exception as exc:
+            if _is_missing_language(exc):
+                raise
+            failures += 1
+            continue
+        readings.extend(_readings(data, factor))
+    if failures == len(passes):
+        return recognize(image_path, language)
+    return merge_readings(readings)

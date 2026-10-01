@@ -1,5 +1,17 @@
 # History
 
+## [1.3.3] - 2026-10-02 - When the text layer lies
+
+A PDF with a real text layer is supposed to be the easy case. This one - a price
+quote exported from Excel - extracted to wrong Thai with plausible-looking
+letters, and nothing in the output said so. The first guess (fix the extractor)
+was wrong; the PDF's own font table was wrong, and the two bugs in it cancelled
+into a pattern that can be recognised from the characters themselves. A repair
+that rewrites text has to be as narrow as the evidence, so it fires only for a
+font in which the pattern was seen. The same afternoon's poster was a reminder
+of the opposite: when one reading of an image is unreliable, several are more
+honest than a better-tuned one.
+
 ## [1.3.2] - 2026-10-02 - The missing header row
 
 Reading the brochure's table output a second time turned up what the first fix

@@ -216,3 +216,130 @@ def test_dark_pages_are_returned_unchanged():
     image = Image.new("RGB", (400, 200), (10, 10, 20))
 
     assert ocr_text.prepare_for_ocr(image) is image
+
+
+# ------------------------------------------------------------- poster readings
+
+
+def _reading(text, conf, left, top, right, bottom):
+    return ocr_text._Reading(text, conf, left, top, right, bottom)
+
+
+def test_the_more_confident_reading_of_a_region_wins():
+    merged = ocr_text.merge_readings([
+        _reading("ลดน้ำตาลในเลือด", 60, 10, 10, 200, 30),
+        _reading("สดุนําตาลในเล็จด", 30, 12, 11, 198, 31),
+    ])
+
+    assert merged == "ลดน้ำตาลในเลือด"
+
+
+def test_readings_of_different_regions_are_all_kept_in_reading_order():
+    merged = ocr_text.merge_readings([
+        _reading("footer", 90, 10, 300, 100, 320),
+        _reading("title", 90, 10, 10, 100, 30),
+        _reading("right", 90, 150, 12, 220, 32),
+    ])
+
+    assert merged == "title right\nfooter"
+
+
+def test_a_long_line_beats_a_fragment_of_itself():
+    merged = ocr_text.merge_readings([
+        _reading("ต้านแบคทีเรีย", 70, 10, 10, 200, 30),
+        _reading("ต้าน", 80, 10, 10, 60, 30),
+    ])
+
+    assert merged == "ต้านแบคทีเรีย"
+
+
+def test_nothing_readable_gives_an_empty_string():
+    assert ocr_text.merge_readings([]) == ""
+
+
+def test_wordlike_ratio_separates_text_from_symbols():
+    assert ocr_text._wordlike_ratio("ช่วยการนอนหลับ") == 1.0
+    assert ocr_text._wordlike_ratio("=) ”)") == 0.0
+    assert ocr_text._wordlike_ratio("50 เท่า") == 1.0
+
+
+def _poster_data(words):
+    """``words``: ``(text, conf, left, top, width, height)`` as one line each."""
+    data = {k: [] for k in ("text", "conf", "block_num", "par_num", "line_num", "left", "top", "width", "height")}
+    for line, (text, conf, left, top, width, height) in enumerate(words, start=1):
+        data["text"].append(text)
+        data["conf"].append(conf)
+        data["block_num"].append(1)
+        data["par_num"].append(1)
+        data["line_num"].append(line)
+        data["left"].append(left)
+        data["top"].append(top)
+        data["width"].append(width)
+        data["height"].append(height)
+    return data
+
+
+def test_readings_drop_low_confidence_and_symbol_lines():
+    data = _poster_data([
+        ("ช่วยการนอนหลับ", 88, 10, 10, 200, 20),
+        ("ไม่แน่ใจ", 20, 10, 50, 100, 20),
+        ("=)”)", 90, 10, 90, 40, 20),
+    ])
+
+    texts = [reading.text for reading in ocr_text._readings(data, 1.0)]
+
+    assert texts == ["ช่วยการนอนหลับ"]
+
+
+def test_readings_are_mapped_back_to_the_original_scale():
+    data = _poster_data([("ข้อความ", 90, 200, 100, 400, 60)])
+
+    (reading,) = ocr_text._readings(data, 2.0)
+
+    assert (reading.left, reading.top, reading.right, reading.bottom) == (100, 50, 300, 80)
+
+
+def test_recognize_image_pools_the_passes(tmp_path, monkeypatch):
+    image_path = tmp_path / "poster.png"
+    Image.new("RGB", (800, 800), "white").save(image_path)
+    by_config = {
+        "--psm 3": _poster_data([("ข้อความหนึ่ง", 90, 10, 10, 200, 20)]),
+        "--psm 11": _poster_data([("ข้อความสอง", 90, 10, 100, 200, 20)]),
+    }
+
+    class Fake(_FakeTesseract):
+        def image_to_data(self, target, lang="eng", config="", output_type=None):
+            return by_config[config]
+
+    monkeypatch.setitem(sys.modules, "pytesseract", Fake("", {}))
+
+    text = ocr_text.recognize_image(image_path, "tha")
+
+    assert "ข้อความหนึ่ง" in text
+    assert "ข้อความสอง" in text
+
+
+def test_recognize_image_without_word_data_uses_the_plain_reader(tmp_path, monkeypatch):
+    image_path = tmp_path / "p.png"
+    Image.new("RGB", (400, 200), "white").save(image_path)
+    fake = types.ModuleType("pytesseract")
+    fake.image_to_string = lambda target, lang="eng": "plain only"
+    monkeypatch.setitem(sys.modules, "pytesseract", fake)
+
+    assert ocr_text.recognize_image(image_path, "eng") == "plain only"
+
+
+def test_recognize_image_still_reports_a_missing_language(tmp_path, monkeypatch):
+    image_path = tmp_path / "p.png"
+    Image.new("RGB", (400, 200), "white").save(image_path)
+
+    class Fake(_FakeTesseract):
+        def image_to_data(self, target, lang="eng", config="", output_type=None):
+            raise RuntimeError("Failed loading language 'tha'")
+
+    monkeypatch.setitem(sys.modules, "pytesseract", Fake("", {}))
+
+    import pytest as _pytest
+
+    with _pytest.raises(RuntimeError, match="Failed loading language"):
+        ocr_text.recognize_image(image_path, "tha+eng")
