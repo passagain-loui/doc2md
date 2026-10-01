@@ -231,6 +231,11 @@ def convert(
         None, "--no-tables", help="Skip PDF table extraction (faster, text only). "
              "Overrides doc2md.toml's pdf_tables when given.",
     ),
+    include_hidden: bool = typer.Option(
+        False, "--include-hidden",
+        help="Also convert worksheets that are hidden in an Excel file "
+             "(skipped by default, with a note naming them).",
+    ),
     stdout: bool = typer.Option(False, "--stdout", help="Print Markdown to stdout instead of writing files."),
     ignore_errors: bool = typer.Option(False, "--ignore-errors", help="Exit 0 even if some files fail."),
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress progress output."),
@@ -282,6 +287,7 @@ def convert(
             "pdf_ocr_fallback": bool(cfg["ocr_enabled"]),
             "pdf_tables": effective_pdf_tables,
             "ocr_lang": effective_ocr_lang,
+            "include_hidden_sheets": include_hidden,
         },
     )
     targets = _expand_targets(resolved_inputs, output=output)

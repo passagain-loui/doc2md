@@ -20,6 +20,8 @@ rows that slide sideways.
 from __future__ import annotations
 
 import csv
+import datetime as _dt
+import re
 from pathlib import Path
 
 from doc2md.core.errors import ConversionError, EngineUnavailableError
@@ -31,6 +33,48 @@ from doc2md.engine.base import BaseEngine
 DEFAULT_MAX_ROWS = 10_000
 DEFAULT_SAMPLE_ROWS = 25
 BLANK_RUN_LIMIT = 1000
+# A sheet's declared range can run to column XFC (16383); nothing real is wider.
+MAX_COLUMNS = 1024
+# Leading rows holding a single value are a title or caption, not a header.
+MAX_TITLE_ROWS = 5
+# A real header row has at least this many values; two-column rows stay as-is.
+MIN_HEADER_VALUES = 3
+
+_PERCENT_DECIMALS_RE = re.compile(r"\.(0+)")
+_FIXED_DECIMALS_RE = re.compile(r"^[#,0]*\.(0+)$")
+
+
+def format_cell_value(value, number_format: str = "General"):
+    """Render one spreadsheet value the way a reader of the sheet sees it.
+
+    Midnight datetimes become plain dates, percentages keep their percent form,
+    floats lose binary noise, and strings lose the padding Excel users leave.
+    """
+    if isinstance(value, str):
+        value = value.strip()
+        return value or None
+    if isinstance(value, bool) or value is None:
+        return value
+    if isinstance(value, _dt.datetime):
+        if value.time() == _dt.time(0):
+            return value.date().isoformat()
+        return value.replace(microsecond=0).isoformat(sep=" ")
+    if isinstance(value, _dt.date):
+        return value.isoformat()
+    if isinstance(value, _dt.time):
+        return value.replace(microsecond=0).isoformat()
+    if isinstance(value, float):
+        if value.is_integer() and "%" not in number_format:
+            return str(int(value))
+        if "%" in number_format:
+            match = _PERCENT_DECIMALS_RE.search(number_format)
+            decimals = len(match.group(1)) if match else 0
+            return f"{value * 100:.{decimals}f}%"
+        match = _FIXED_DECIMALS_RE.match(number_format)
+        if match:
+            return f"{value:.{len(match.group(1))}f}"
+        return format(value, ".12g")
+    return value
 
 
 class ExcelEngine(BaseEngine):
@@ -118,16 +162,29 @@ class ExcelEngine(BaseEngine):
             ) from exc
 
         parts: list[str] = [f"# {source.name}", ""]
+        include_hidden = bool(options.get("include_hidden_sheets", False))
+        all_sheets = list(workbook.worksheets)
+        visible = [sheet for sheet in all_sheets if sheet.sheet_state == "visible"]
+        # A workbook whose every sheet is hidden still has to produce output.
+        selected = all_sheets if include_hidden or not visible else visible
+        skipped = [sheet.title.strip() for sheet in all_sheets if sheet not in selected]
+        if skipped:
+            parts.extend([
+                f"> {len(skipped)} hidden sheet(s) were not converted: "
+                + ", ".join(f"`{name}`" for name in skipped)
+                + ". Enable hidden sheets to include them.",
+                "",
+            ])
         sheets_detected = 0
         rows_detected_total = 0
         rows_exported_total = 0
         any_truncated = False
         all_exact = True
         try:
-            for sheet in workbook.worksheets:
+            for sheet in selected:
                 sheets_detected += 1
                 rows, total, sheet_exact = self._scan_rows(
-                    sheet.iter_rows(values_only=True), max_rows
+                    self._formatted_rows(sheet), max_rows
                 )
                 all_exact = all_exact and sheet_exact
                 truncated = total > max_rows
@@ -138,7 +195,7 @@ class ExcelEngine(BaseEngine):
                 any_truncated = any_truncated or truncated
                 parts.append(
                     self._sheet_markdown(
-                        sheet.title, rows, total_rows=total, truncated=truncated
+                        sheet.title.strip(), rows, total_rows=total, truncated=truncated
                     )
                 )
                 parts.append("")
@@ -156,6 +213,16 @@ class ExcelEngine(BaseEngine):
             truncated=any_truncated,
         )
         return markdown, metrics
+
+    @staticmethod
+    def _formatted_rows(sheet):
+        """Yield each row as a list of display values, trailing blanks removed."""
+        max_col = min(sheet.max_column or 1, MAX_COLUMNS)
+        for cells in sheet.iter_rows(max_col=max_col):
+            row = [format_cell_value(cell.value, cell.number_format) for cell in cells]
+            while row and row[-1] is None:
+                row.pop()
+            yield row
 
     @staticmethod
     def _row_is_blank(row) -> bool:
@@ -213,6 +280,26 @@ class ExcelEngine(BaseEngine):
             return rows
         return [row[:last_used] for row in rows]
 
+    def _split_titles(self, rows: list[list]) -> tuple[list[str], list[list]]:
+        """Separate leading title rows from the table that follows them.
+
+        A sheet usually opens with a report name (often one merged cell). Taken
+        as the header it would push the real header row into the data and
+        invent ``col2..colN`` names. Leading rows with at most one value, up to
+        ``MAX_TITLE_ROWS``, become text lines when a row with at least
+        ``MIN_HEADER_VALUES`` values follows; otherwise the rows are left alone.
+        """
+        titles: list[str] = []
+        for index, row in enumerate(rows[:MAX_TITLE_ROWS + 1]):
+            values = [str(v) for v in row if v is not None and str(v).strip()]
+            if len(values) >= MIN_HEADER_VALUES:
+                return titles, rows[index:]
+            if len(values) >= 2 or index >= MAX_TITLE_ROWS:
+                return [], rows
+            if values:
+                titles.append(" ".join(values[0].split()))
+        return [], rows
+
     def _sheet_markdown(
         self, title: str, rows, *, total_rows: int, truncated: bool
     ) -> str:
@@ -225,14 +312,18 @@ class ExcelEngine(BaseEngine):
                 f"({total_rows:,} rows detected in total)."
             )
 
+        titles, rows = self._split_titles(list(rows))
         table = render_table(
-            self._trim_trailing_blanks(list(rows)), name_empty_headers=True
+            self._trim_trailing_blanks(rows), name_empty_headers=True
         )
         if not table:
-            lines.append("_(empty sheet)_")
+            lines.extend(titles)
+            lines.append("_(empty sheet)_" if not titles else "")
             lines.extend(note_lines)
             return "\n".join(lines)
 
+        for title in titles:
+            lines.extend([title, ""])
         lines.append(table)
         lines.append("")
         lines.extend(note_lines)

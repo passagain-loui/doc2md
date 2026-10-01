@@ -695,3 +695,11 @@ def test_two_folder_drops_in_a_row_are_both_scanned(window, qapp, tmp_path):
         qapp.processEvents(QEventLoop.ProcessEventsFlag.AllEvents, 50)
 
     assert sorted(path.name for path in window._files) == ["x.txt", "y.txt"]
+
+
+def test_hidden_sheets_checkbox_feeds_the_conversion_options(window):
+    assert window.conversion_options()["include_hidden_sheets"] is False
+
+    window.hidden_sheets_check.setChecked(True)
+
+    assert window.conversion_options()["include_hidden_sheets"] is True

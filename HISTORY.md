@@ -1,5 +1,14 @@
 # History
 
+## [1.2.1] - 2026-10-01 - Spreadsheet output
+
+A real workbook showed what the earlier Excel work had missed: correct cells
+are not the same as a readable document. Most of the workbook's sheets were
+hidden archives, every sheet began with a title the converter took for the
+header, and dates carried a meaningless midnight. None of it was wrong data;
+all of it made the result harder for a model to use, which is the point of the
+tool.
+
 ## [1.2.0] - 2026-10-01 - Product hardening and UX improvement
 
 1.1.0 made doc2md a document converter again. This round asks a different

@@ -1,5 +1,34 @@
 # Changelog
 
+## [1.2.1] (2026-10-01) - SPREADSHEET OUTPUT FIXES
+
+Found by converting a real audit workbook (24 sheets, 21 of them hidden
+archives) and reading the result as an AI would.
+
+### Fixed
+
+- **Title rows no longer become the header.** A sheet opening with a report
+  name (one value, usually a merged cell) had that name used as the table
+  header, with the real header pushed into the data and columns named
+  `col2..colN`. Leading single-value rows (up to 5) are now text above the
+  table when a header row of 3 or more values follows.
+- **Hidden worksheets are skipped by default**, with a note naming them, so an
+  old archive no longer buries the current data (that workbook went from
+  148,000 to 34,000 characters). `--include-hidden` on the CLI and the
+  "Hidden sheets" checkbox in the GUI convert them.
+- **Cell values read as they do in Excel:** midnight datetimes are plain
+  dates (`2026-08-17`, not `2026-08-17 00:00:00`), percentage cells keep their
+  percent (`-17%`, not `-0.1724137931034483`), floats lose binary noise, and
+  padded text is trimmed.
+- Sheet names with stray spaces are trimmed; sheets declared out to column
+  XFC are read at most 1,024 columns wide.
+
+### Known limits
+
+- Merged header cells and multi-row headers are not unfolded (openpyxl's
+  read-only mode does not expose merges); calendar-style sheets still convert
+  to a wide grid.
+
 ## [1.2.0] (2026-10-01) - PRODUCT HARDENING & UX IMPROVEMENT
 
 Trust and transparency pass on top of 1.1.0: every conversion now reports

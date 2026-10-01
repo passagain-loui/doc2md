@@ -515,6 +515,10 @@ class MainWindow(QMainWindow):
         self.tables_check = QCheckBox("Extract tables")
         self.tables_check.setChecked(True)
         self.tables_check.toggled.connect(self._on_ocr_setting_changed)
+        self.hidden_sheets_check = QCheckBox("Hidden sheets")
+        self.hidden_sheets_check.setToolTip(
+            "Also convert worksheets that are hidden in the Excel file"
+        )
         self.clipboard_check = QCheckBox("Copy result to clipboard")
         for widget in (
             self.beside_source_check,
@@ -546,6 +550,7 @@ class MainWindow(QMainWindow):
         )
         self.preset_combo.currentIndexChanged.connect(self._on_preset_selected)
         grid.addWidget(self.preset_combo, 4, 0, 1, 2)
+        grid.addWidget(self.hidden_sheets_check, 4, 2, 1, 2)
 
         self.ocr_diagnostics_button = QPushButton("OCR Diagnostics…")
         self.ocr_diagnostics_button.setIcon(theme.make_icon("document"))
@@ -997,6 +1002,7 @@ class MainWindow(QMainWindow):
         return {
             **self._current_preset_options(),
             "inline_styles": True,
+            "include_hidden_sheets": self.hidden_sheets_check.isChecked(),
         }
 
     def output_suffix(self) -> str:
