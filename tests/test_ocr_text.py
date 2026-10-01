@@ -192,3 +192,27 @@ def test_other_data_errors_keep_the_unfiltered_text(tmp_path, monkeypatch):
     monkeypatch.setitem(sys.modules, "pytesseract", Fake("kept text", _data([])))
 
     assert ocr_text.recognize(image_path, "eng") == "kept text"
+
+
+# ---------------------------------------------------------------- pale fills
+
+
+def test_pale_fills_on_a_light_page_become_white_and_text_is_untouched():
+    image = Image.new("RGB", (400, 200), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((0, 0, 400, 40), fill=(158, 200, 220))  # pastel header bar
+    draw.rectangle((20, 10, 120, 30), fill=(20, 20, 20))  # text on it
+    draw.rectangle((20, 100, 120, 120), fill=(120, 120, 120))  # mid-grey text
+
+    prepared = ocr_text.prepare_for_ocr(image)
+
+    assert prepared.mode == "L"
+    assert prepared.getpixel((300, 20)) == 255
+    assert prepared.getpixel((60, 20)) < 40
+    assert prepared.getpixel((60, 110)) < 150
+
+
+def test_dark_pages_are_returned_unchanged():
+    image = Image.new("RGB", (400, 200), (10, 10, 20))
+
+    assert ocr_text.prepare_for_ocr(image) is image

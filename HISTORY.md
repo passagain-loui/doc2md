@@ -1,5 +1,13 @@
 # History
 
+## [1.3.2] - 2026-10-02 - The missing header row
+
+Reading the brochure's table output a second time turned up what the first fix
+did not: every row was now on its own line, but the row that says which column is
+which model was gone. The values were right and unattributable, the worst kind of
+correct. Tesseract had classed the pastel header bar as a picture. Making the
+fill white was enough; the text was never the problem.
+
 ## [1.3.1] - 2026-10-02 - Reading a brochure
 
 The first real scan through the new OCR install was a car brochure, and it

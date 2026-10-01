@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.3.2] (2026-10-02) - TABLE HEADER ROWS ON SCANNED PAGES
+
+### Fixed
+
+- **The row that names the columns is no longer lost.** On the same brochure,
+  the specification table's header row ("Model | 2.8 Legender 4WD | 2.8
+  Legender | 2.4 Legender 4WD | 2.4 Legender") was missing from the OCR, so no
+  value could be attributed to a model. Tesseract's layout analysis treats a
+  pastel header bar as a picture. Pale fills on light pages are now whitened
+  before recognition (pixels at or above 175/255 become white; text is darker
+  and untouched; dark pages are left alone). All four panels now start with
+  their header row.
+
+### Known limits
+
+- Stylised display text is still missed: the large "150 PS / 400 NM / 204 PS /
+  500 NM" figures on the engine page were not recognised (the same numbers are
+  in the specification table, which is read correctly). White wide-spaced
+  headings on photographs come out garbled.
+- Check marks in feature matrices are read as dots, so which model has which
+  feature cannot be recovered from the text.
+
 ## [1.3.1] (2026-10-02) - OCR ON BROCHURES AND TABLES
 
 Found by converting a real 8-page Thai car brochure, scanned, with the OCR

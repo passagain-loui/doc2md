@@ -105,6 +105,25 @@ def split_into_bands(image) -> list:
     return [image.crop((left, 0, right, height)) for left, right in merged]
 
 
+LIGHT_PAGE_BRIGHTNESS = 200
+FILL_LEVEL = 175
+
+
+def prepare_for_ocr(image):
+    """Whiten pale fills on light pages so Tesseract does not treat them as pictures.
+
+    A spec table's pastel header bar ("Model | 2.8 4WD | 2.8 | ...") is read as an
+    image by Tesseract's layout analysis, so the very row that names the columns
+    disappears. Pixels at or above ``FILL_LEVEL`` become white; anything darker -
+    all text - is untouched. Dark pages are returned unchanged.
+    """
+    gray = image.convert("L")
+    sample = list(gray.resize((64, 64)).getdata())
+    if sum(sample) / len(sample) < LIGHT_PAGE_BRIGHTNESS:
+        return image
+    return gray.point(lambda value: 255 if value >= FILL_LEVEL else value)
+
+
 def _normalized(text: str) -> str:
     return "".join(text.split())
 
@@ -172,6 +191,7 @@ def recognize(image_path: str | Path, language: str) -> str:
 
     pieces: list[str] = []
     for band in bands:
+        band = prepare_for_ocr(band)
         text = plain(band)
         try:
             data = pytesseract.image_to_data(
