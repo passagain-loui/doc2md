@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.3.1] (2026-10-02) - OCR ON BROCHURES AND TABLES
+
+Found by converting a real 8-page Thai car brochure, scanned, with the OCR
+installed by 1.3.0 and reading the result against the pages.
+
+### Fixed
+
+- **Side-by-side panels are read one at a time.** A specification table laid
+  out in four panels came out with each line mixing fragments of four
+  different rows. Pages are now cut at blank vertical gutters (found from edge
+  density, so dark pages work too) and each panel is read on its own, left to
+  right: on that brochure every spec row (`ความจุกระบอกสูบ ซีซี 2,755 2,393`) is
+  one clean line.
+- **Noise from pictures is dropped.** Photographs and logos produced lines of
+  stray symbols. Lines Tesseract itself is unsure of (mean confidence under 40,
+  60 for lines of 3 characters or fewer) are removed. Tesseract's own spacing is
+  kept; the word data is used only to decide which lines to drop.
+- **Tests no longer depend on, or change, an OCR install on the dev machine**,
+  including inside the worker processes.
+
+### Known limits
+
+- Thai OCR is not perfect: on that brochure, caption text matched a hand-read
+  transcription about 92-94% (typical slips: ข/ห and tone marks). Table cell
+  borders are not recovered on scanned pages - rows come out as lines of text.
+  Bullet dots in tables are read as stray characters.
+- Reading the panels separately makes a scanned page take about 70% longer.
+
 ## [1.3.0] (2026-10-02) - LEGACY OFFICE FILES, OCR INSTALL, CANCEL, TOKEN COUNTS
 
 ### Added

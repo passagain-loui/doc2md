@@ -18,6 +18,12 @@ from doc2md.core.ocr_setup import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _search_known_locations(monkeypatch):
+    """conftest turns the search off; these tests are about the search itself."""
+    monkeypatch.delenv("DOC2MD_NO_TESSERACT_SEARCH", raising=False)
+
+
 def _fake_binary(tmp_path) -> Path:
     binary = tmp_path / "Tesseract-OCR" / "tesseract.exe"
     binary.parent.mkdir()

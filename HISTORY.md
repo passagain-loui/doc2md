@@ -1,5 +1,18 @@
 # History
 
+## [1.3.1] - 2026-10-02 - Reading a brochure
+
+The first real scan through the new OCR install was a car brochure, and it
+showed what plain OCR does to a catalogue: it reads four side-by-side tables as
+one wide table, and turns photographs into lines of symbols. The fix was
+measured on the same pages, but the transcription used as ground truth was read
+by hand, so the 92-94% accuracy figure is an estimate, not a benchmark.
+
+One attempt was dropped after measuring it: building the text from Tesseract's
+word data gave better row structure but put spaces inside Thai words, which
+Tesseract's own text output does not. The final version keeps its spacing and
+uses the word data only to find noise.
+
 ## [1.3.0] - 2026-10-02 - Old files, OCR setup, cancel, counting
 
 A candid assessment of 1.2.2 found four things a user would trip over, and each

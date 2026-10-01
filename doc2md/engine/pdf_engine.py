@@ -23,6 +23,7 @@ from pathlib import Path
 from doc2md.core.errors import ConversionError, EngineUnavailableError, wrap_warning
 from doc2md.core.quality import EngineOutput, QualityMetrics
 from doc2md.core.ocr_setup import find_tesseract, prepare_tesseract
+from doc2md.core.ocr_text import recognize
 from doc2md.core.router import FileKind
 from doc2md.core.tables import render_table
 from doc2md.engine.base import BaseEngine
@@ -353,9 +354,7 @@ class PdfEngine(BaseEngine):
                     pix = page.get_pixmap(dpi=dpi)
                     pix.save(str(png_path))
                     del pix
-                    text = pytesseract.image_to_string(
-                        str(png_path), lang=language
-                    ).strip()
+                    text = recognize(png_path, language).strip()
                 except Exception as exc:
                     # A page-level OCR exception must not be masked by other
                     # pages succeeding: a batch where 1 of 2 pages raised

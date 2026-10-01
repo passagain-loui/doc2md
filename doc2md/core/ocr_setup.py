@@ -53,6 +53,8 @@ def find_tesseract() -> str | None:
     on_path = shutil.which("tesseract")
     if on_path:
         return on_path
+    if os.environ.get("DOC2MD_NO_TESSERACT_SEARCH"):
+        return None  # lets tests (and spawned workers) ignore a machine-wide install
     for candidate in KNOWN_LOCATIONS:
         try:
             if candidate.is_file():

@@ -227,3 +227,4 @@ def _isolated_tesseract_lookup(monkeypatch, tmp_path_factory):
     monkeypatch.setattr(ocr_setup, "KNOWN_LOCATIONS", [])
     monkeypatch.setattr(ocr_setup, "user_tessdata_dir", lambda: tmp_path_factory.mktemp("tessdata"))
     monkeypatch.delenv("TESSDATA_PREFIX", raising=False)
+    monkeypatch.setenv("DOC2MD_NO_TESSERACT_SEARCH", "1")
