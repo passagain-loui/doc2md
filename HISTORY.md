@@ -1,5 +1,12 @@
 # History
 
+## [1.2.2] - 2026-10-01 - Merged cells
+
+The follow-up the previous release named as its limit. Merges are the only way
+a spreadsheet says "this label covers those columns", so ignoring them left
+calendar-style sheets as grids of unnamed columns. They are read from the sheet
+XML rather than by loading the workbook, which keeps large files streaming.
+
 ## [1.2.1] - 2026-10-01 - Spreadsheet output
 
 A real workbook showed what the earlier Excel work had missed: correct cells

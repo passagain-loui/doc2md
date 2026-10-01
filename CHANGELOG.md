@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.2.2] (2026-10-01) - MERGED CELLS IN SPREADSHEETS
+
+### Fixed
+
+- **Merged header cells are unfolded.** A merged range taller than one row near
+  the top of a sheet marks a multi-row header. Rows above it become title
+  lines; the header rows fold into one row whose column names join the labels
+  top-down (`Period / Internal Audit 10-31 August 2026 / Mon / 10`), so a
+  calendar or comparison table no longer comes out as `col1..colN` with its
+  real headers left in the data. Vertical merges below the header repeat their
+  value on every row they cover.
+- Merges are read from the sheet XML directly, so large sheets still stream
+  and nothing is loaded whole into memory. If the merge data cannot be read the
+  sheet converts as in 1.2.1.
+
+### Known limits
+
+- A merge that is shorter than the columns it visibly labels (a source quirk)
+  leaves the extra column without that label; horizontal merges in data rows
+  are not repeated.
+
 ## [1.2.1] (2026-10-01) - SPREADSHEET OUTPUT FIXES
 
 Found by converting a real audit workbook (24 sheets, 21 of them hidden

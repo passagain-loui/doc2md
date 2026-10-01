@@ -77,6 +77,66 @@ def format_cell_value(value, number_format: str = "General"):
     return value
 
 
+_MAIN_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+_REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+_PKG_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
+# Sheet XML larger than this (uncompressed) is not scanned for merged cells.
+MAX_MERGE_SCAN_BYTES = 300 * 1024 * 1024
+# A header block is looked for among a sheet's first rows only.
+HEADER_SEARCH_ROWS = 15
+
+Merge = tuple  # (min_row, min_col, max_row, max_col), 1-based
+
+
+def sheet_xml_paths(source: Path) -> list[str]:
+    """Part names of the workbook's sheets, in workbook order."""
+    import xml.etree.ElementTree as ET
+    import zipfile
+
+    with zipfile.ZipFile(source) as archive:
+        book = ET.fromstring(archive.read("xl/workbook.xml"))
+        rels = ET.fromstring(archive.read("xl/_rels/workbook.xml.rels"))
+    targets = {rel.get("Id"): rel.get("Target") for rel in rels.iter(f"{{{_PKG_REL_NS}}}Relationship")}
+    paths = []
+    for sheet in book.iter(f"{{{_MAIN_NS}}}sheet"):
+        target = targets.get(sheet.get(f"{{{_REL_NS}}}id")) or ""
+        paths.append(target.lstrip("/") if target.startswith("/") else "xl/" + target)
+    return paths
+
+
+def read_merged_ranges(source: Path, part: str) -> list[Merge]:
+    """Merged cell ranges of one sheet, read straight from its XML.
+
+    openpyxl's read-only mode (used so big sheets stream) does not expose
+    merges, and loading the whole workbook would hold every cell in memory. The
+    ``<mergeCell>`` entries are a few bytes each, so they are read on their own.
+    Any failure returns no merges: the sheet then converts as before.
+    """
+    import xml.etree.ElementTree as ET
+    import zipfile
+
+    from openpyxl.utils.cell import range_boundaries
+
+    merges: list[Merge] = []
+    try:
+        with zipfile.ZipFile(source) as archive:
+            if archive.getinfo(part).file_size > MAX_MERGE_SCAN_BYTES:
+                return []
+            with archive.open(part) as handle:
+                for _event, element in ET.iterparse(handle, events=("end",)):
+                    tag = element.tag
+                    if tag == f"{{{_MAIN_NS}}}mergeCell":
+                        min_col, min_row, max_col, max_row = range_boundaries(element.get("ref"))
+                        merges.append((min_row, min_col, max_row, min(max_col, MAX_COLUMNS)))
+                    elif tag == f"{{{_MAIN_NS}}}mergeCells":
+                        break
+                    elif tag == f"{{{_MAIN_NS}}}row":
+                        element.clear()
+    except Exception:
+        return []
+    return merges
+
+
 class ExcelEngine(BaseEngine):
     name = "excel"
     supported_kinds = (FileKind.XLSX, FileKind.CSV)
@@ -181,8 +241,18 @@ class ExcelEngine(BaseEngine):
         any_truncated = False
         all_exact = True
         try:
+            try:
+                sheet_parts = sheet_xml_paths(source)
+            except Exception:
+                sheet_parts = []
             for sheet in selected:
                 sheets_detected += 1
+                position = all_sheets.index(sheet)
+                merges = (
+                    read_merged_ranges(source, sheet_parts[position])
+                    if len(sheet_parts) == len(all_sheets)
+                    else []
+                )
                 rows, total, sheet_exact = self._scan_rows(
                     self._formatted_rows(sheet), max_rows
                 )
@@ -195,7 +265,8 @@ class ExcelEngine(BaseEngine):
                 any_truncated = any_truncated or truncated
                 parts.append(
                     self._sheet_markdown(
-                        sheet.title.strip(), rows, total_rows=total, truncated=truncated
+                        sheet.title.strip(), rows, total_rows=total,
+                        truncated=truncated, merges=merges,
                     )
                 )
                 parts.append("")
@@ -280,6 +351,89 @@ class ExcelEngine(BaseEngine):
             return rows
         return [row[:last_used] for row in rows]
 
+    @staticmethod
+    def _unfold_merged(rows: list[list], merges) -> "tuple[list[str], list[list]] | None":
+        """Use merged cells to find the header block and label every column.
+
+        A merged range taller than one row that starts near the top marks a
+        multi-row header (``No.`` spanning four rows, ``Period`` spanning a month
+        of day columns). Rows above it are titles; the header rows are folded into
+        one row whose names join the labels top-down (``Period / Mon / 10``);
+        vertical merges below it repeat their value on every row they cover so each
+        row stands alone. Returns ``None`` when there is no such block, leaving the
+        plain title/header heuristic to decide.
+        """
+        tall = [m for m in merges if m[2] > m[0] and m[0] <= HEADER_SEARCH_ROWS]
+        if not tall or not rows:
+            return None
+        start = min(m[0] for m in tall) - 1
+        if start >= len(rows):
+            return None
+        if sum(1 for v in rows[start] if v is not None) < MIN_HEADER_VALUES:
+            return None
+
+        bottom = start
+        changed = True
+        while changed:
+            changed = False
+            for m in merges:
+                if start <= m[0] - 1 <= bottom and m[2] - 1 > bottom:
+                    bottom = m[2] - 1
+                    changed = True
+        bottom = min(bottom, len(rows) - 1)
+
+        def cell(r: int, c: int):
+            row = rows[r]
+            return row[c] if c < len(row) else None
+
+        width = max(len(row) for row in rows[start:bottom + 1])
+        for m in merges:
+            if m[0] - 1 <= bottom and m[2] - 1 >= start:
+                width = max(width, m[3])
+        width = min(width, MAX_COLUMNS)
+
+        block = [[cell(r, c) for c in range(width)] for r in range(start, bottom + 1)]
+        for m in merges:
+            if not (start <= m[0] - 1 <= bottom):
+                continue
+            value = cell(m[0] - 1, m[1] - 1)
+            for r in range(m[0] - 1, min(m[2] - 1, bottom) + 1):
+                for c in range(m[1] - 1, min(m[3], width)):
+                    block[r - start][c] = value
+
+        names: list[str] = []
+        for c in range(width):
+            parts: list[str] = []
+            for row in block:
+                text = "" if row[c] is None else " ".join(str(row[c]).split())
+                if text and (not parts or parts[-1] != text):
+                    parts.append(text)
+            names.append(" / ".join(parts))
+
+        titles = []
+        for r in range(start):
+            values = [" ".join(str(v).split()) for v in rows[r] if v is not None and str(v).strip()]
+            if values:
+                titles.append(" | ".join(values))
+
+        data = [list(row) for row in rows[bottom + 1:]]
+        offset = bottom + 1
+        for m in merges:
+            first = m[0] - 1
+            if m[2] <= m[0] or first < offset or first >= len(rows):
+                continue
+            value = cell(first, m[1] - 1)
+            if value is None:
+                continue
+            for r in range(first + 1, min(m[2], len(rows))):
+                row = data[r - offset]
+                if len(row) < m[3]:
+                    row.extend([None] * (m[3] - len(row)))
+                for c in range(m[1] - 1, m[3]):
+                    if row[c] is None:
+                        row[c] = value
+        return titles, [names] + data
+
     def _split_titles(self, rows: list[list]) -> tuple[list[str], list[list]]:
         """Separate leading title rows from the table that follows them.
 
@@ -301,7 +455,7 @@ class ExcelEngine(BaseEngine):
         return [], rows
 
     def _sheet_markdown(
-        self, title: str, rows, *, total_rows: int, truncated: bool
+        self, title: str, rows, *, total_rows: int, truncated: bool, merges=()
     ) -> str:
         lines = [f"## Sheet: {title}", ""]
         note_lines = []
@@ -312,7 +466,12 @@ class ExcelEngine(BaseEngine):
                 f"({total_rows:,} rows detected in total)."
             )
 
-        titles, rows = self._split_titles(list(rows))
+        rows = list(rows)
+        unfolded = self._unfold_merged(rows, merges)
+        if unfolded is not None:
+            titles, rows = unfolded
+        else:
+            titles, rows = self._split_titles(rows)
         table = render_table(
             self._trim_trailing_blanks(rows), name_empty_headers=True
         )

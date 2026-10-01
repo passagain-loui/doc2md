@@ -123,3 +123,69 @@ def test_cli_include_hidden_flag(tmp_path):
     assert "Old Archive" in plain.output  # named in the note only
     assert "| old | data | here |" not in plain.output
     assert "| old | data | here |" in full.output
+
+
+def _merged_header_workbook(path):
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.title = "Plan"
+    sheet["A1"] = "Quality plan"
+    sheet.merge_cells("A1:F1")
+    sheet["A2"], sheet["B2"], sheet["D2"], sheet["F2"] = "No.", "Plan", "Actual", "Group"
+    sheet.merge_cells("A2:A3")
+    sheet.merge_cells("B2:C2")
+    sheet.merge_cells("D2:E2")
+    sheet.merge_cells("F2:F3")
+    for column, label in zip("BCDE", ("Q1", "Q2", "Q1", "Q2")):
+        sheet[f"{column}3"] = label
+    sheet.append([1, 10, 11, 12, 13, "Group A"])
+    sheet.append([2, 20, 21, 22, 23, None])
+    sheet.append([3, 30, 31, 32, 33, None])
+    sheet.merge_cells("F4:F6")
+    workbook.save(path)
+
+
+def test_multi_row_merged_headers_become_one_labelled_header(tmp_path):
+    path = tmp_path / "t.xlsx"
+    _merged_header_workbook(path)
+
+    output = _convert(path)
+
+    assert "Quality plan\n" in output
+    assert "| No. | Plan / Q1 | Plan / Q2 | Actual / Q1 | Actual / Q2 | Group |" in output
+    assert "col2" not in output
+
+
+def test_a_vertical_merge_repeats_its_value_on_every_row_it_covers(tmp_path):
+    path = tmp_path / "t.xlsx"
+    _merged_header_workbook(path)
+
+    output = _convert(path)
+
+    assert "| 1 | 10 | 11 | 12 | 13 | Group A |" in output
+    assert "| 2 | 20 | 21 | 22 | 23 | Group A |" in output
+    assert "| 3 | 30 | 31 | 32 | 33 | Group A |" in output
+
+
+def test_a_sheet_without_merges_is_unchanged(tmp_path):
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.append(["a", "b", "c"])
+    sheet.append([1, 2, 3])
+    path = tmp_path / "t.xlsx"
+    workbook.save(path)
+
+    assert "| a | b | c |" in _convert(path)
+
+
+def test_unreadable_merge_data_falls_back_to_plain_conversion(tmp_path, monkeypatch):
+    path = tmp_path / "t.xlsx"
+    _merged_header_workbook(path)
+    monkeypatch.setattr(
+        "doc2md.engine.excel_engine.sheet_xml_paths",
+        lambda source: (_ for _ in ()).throw(KeyError("broken")),
+    )
+
+    output = _convert(path)
+
+    assert "Group A" in output
