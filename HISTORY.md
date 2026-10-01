@@ -1,5 +1,14 @@
 # History
 
+## [1.3.5] - 2026-10-02 - Measuring the fix
+
+The 1.3.2 fix for a missing table header worked on the brochure it was built
+from and quietly made a different kind of document worse, which only showed up
+when a certificate was run through it. Three numbers on one page set were enough
+to see it, and enough to fix it: the cure for a coloured bar was never to whiten
+light pixels, only coloured ones. The model upgrade everyone expects to help,
+`tessdata_best`, was tried the same way and did not, so it was not shipped.
+
 ## [1.3.4] - 2026-10-02 - A batch of real files
 
 Six more real documents, run through at once, did more than any single sample:

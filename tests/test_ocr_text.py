@@ -197,7 +197,7 @@ def test_other_data_errors_keep_the_unfiltered_text(tmp_path, monkeypatch):
 # ---------------------------------------------------------------- pale fills
 
 
-def test_pale_fills_on_a_light_page_become_white_and_text_is_untouched():
+def test_pale_coloured_fills_become_white_and_text_stays_dark():
     image = Image.new("RGB", (400, 200), "white")
     draw = ImageDraw.Draw(image)
     draw.rectangle((0, 0, 400, 40), fill=(158, 200, 220))  # pastel header bar
@@ -207,9 +207,30 @@ def test_pale_fills_on_a_light_page_become_white_and_text_is_untouched():
     prepared = ocr_text.prepare_for_ocr(image)
 
     assert prepared.mode == "L"
-    assert prepared.getpixel((300, 20)) == 255
+    assert prepared.getpixel((300, 20)) >= 250
     assert prepared.getpixel((60, 20)) < 40
     assert prepared.getpixel((60, 110)) < 150
+
+
+def test_light_grey_strokes_are_not_whitened_because_they_are_not_coloured():
+    """Whitening every light pixel thinned strokes and turned ข into ย."""
+    image = Image.new("RGB", (400, 200), "white")
+    ImageDraw.Draw(image).rectangle((20, 20, 120, 40), fill=(190, 190, 190))
+    ImageDraw.Draw(image).rectangle((20, 100, 120, 120), fill=(10, 10, 10))
+
+    prepared = ocr_text.prepare_for_ocr(image)
+
+    assert prepared.getpixel((60, 30)) < 235
+
+
+def test_small_pages_are_not_median_filtered():
+    """A median filter erases thin strokes of small text."""
+    image = Image.new("RGB", (800, 300), "white")
+    ImageDraw.Draw(image).line((10, 150, 790, 150), fill=(0, 0, 0), width=1)
+
+    prepared = ocr_text.prepare_for_ocr(image)
+
+    assert prepared.getpixel((400, 150)) < 100
 
 
 def test_dark_pages_are_returned_unchanged():

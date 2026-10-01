@@ -1,5 +1,30 @@
 # Changelog
 
+## [1.3.5] (2026-10-02) - ข/ย ON SCANS
+
+### Fixed
+
+- **A regression from 1.3.2 on grey scans.** The pastel-header fix whitened every
+  light pixel on a light page. On a grey scan that thins the strokes and makes
+  Tesseract read ข as ย: on three pages of a company certificate the wrong
+  readings ("ยอง", "ยาย", "ยนส่ง") went from 8 (unprocessed) to 11. The fix now
+  whitens only pixels that are both light *and coloured*, so a pastel bar is
+  still removed (the spec-table header rows are all still found) and grey scans
+  keep every stroke.
+- **Cleaner input for scans.** Light pages get a contrast stretch, and large pages
+  (2,500 px tall and up, i.e. a 300 DPI page) a 3x3 median filter against scanner
+  speckle. On the certificate the wrong readings fell from 11 to 4 and the right
+  ones rose from 14 to 20 (8/17 unprocessed). Small text is not median-filtered:
+  on a 200 DPI page it erased the table header row.
+
+### Tried and not adopted
+
+- **`tessdata_best`** (the higher-accuracy Thai and English models, 23 MB against
+  5 MB). Measured on the same three tests (certificate ข/ย, brochure captions,
+  poster phrases) it was identical or marginally lower (certificate 11 vs 11
+  wrong; captions 0.936 vs 0.941; poster 0.755 vs 0.765) and took about twice
+  as long. The installer keeps downloading the fast models.
+
 ## [1.3.4] (2026-10-02) - UNREADABLE TEXT LAYERS, SCAN RESOLUTION
 
 Found by running a batch of real documents: a price quote, a flood notice, a
