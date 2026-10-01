@@ -52,9 +52,9 @@ def test_selecting_a_preset_applies_its_options(window):
 
 
 def test_editing_ocr_language_by_hand_switches_to_custom(window):
-    # Balanced AI already selected by default; pick a different language.
-    other_index = (window.ocr_combo.currentIndex() + 1) % window.ocr_combo.count()
-    window.ocr_combo.setCurrentIndex(other_index)
+    # Balanced AI is selected by default; English-only at 300 DPI with tables
+    # matches no preset ("Thai only" now equals Thai Scanned Document).
+    window.ocr_combo.setCurrentIndex(2)
 
     assert window.preset_combo.currentText() == CUSTOM
 

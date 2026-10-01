@@ -1,5 +1,14 @@
 # History
 
+## [1.3.4] - 2026-10-02 - A batch of real files
+
+Six more real documents, run through at once, did more than any single sample:
+they showed that the earlier repair for one font was a special case of a more
+common problem. In this library about one Thai page in twenty has a text layer
+that is wrong in ways that look like text. The honest response was not another
+repair rule but a detector and a different route - read the page as an image -
+with a flag when that route is not available.
+
 ## [1.3.3] - 2026-10-02 - When the text layer lies
 
 A PDF with a real text layer is supposed to be the easy case. This one - a price

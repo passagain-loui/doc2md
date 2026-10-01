@@ -1,5 +1,39 @@
 # Changelog
 
+## [1.3.4] (2026-10-02) - UNREADABLE TEXT LAYERS, SCAN RESOLUTION
+
+Found by running a batch of real documents: a price quote, a flood notice, a
+company certificate and two posters.
+
+### Fixed
+
+- **A text layer that is mis-encoded Thai is detected and read by OCR instead.**
+  A flood notice (a Ghostscript rewrite) extracted as "น้ำท!วมป5 2569": tone
+  marks and vowels had become `!`, `?`, digits and control characters, which no
+  rule can repair. A page with Thai letters sandwiching symbols, or with stray
+  control characters, is now treated as unreadable text and recognised from an
+  image of the page; the result says so. If OCR is unavailable (or switched off)
+  the text is kept and the result is marked Warning rather than passed off as
+  clean. Across 345 Thai-heavy pages of real PDFs, 16 (4.6%) were of this kind;
+  the ones inspected were genuinely corrupt.
+- **The sara aa repair covers a font's bold face too.** `Angsana New,Bold` and
+  `Angsana New` share one bad character map, but the pattern had been found
+  only in the bold face, so regular text was left broken. Faces are now one
+  family.
+- **Scans are read at 300 DPI, not 200.** On three pages of a company
+  certificate, ข read as ย ("ของ" as "ยอง", "ขาย" as "ยาย") 60% of the time at
+  200 DPI, 44% at 300 and 40% at 400. 300 costs about 15% more time per page.
+- **White text on dark bars** (table headers, buttons on a poster) is read
+  through an extra inverted pass in the image reader; "Leader G Plus" in a
+  banner on a car-price poster is now read.
+
+### Known limits
+
+- ข/ย confusion on scans is reduced, not gone; the higher-accuracy Thai model
+  (`tessdata_best`) is the next lever and is not downloaded by the app.
+- Headers on dark gradient buttons ("ดาวน์", "จำนวนงวดผ่อน") are still missed.
+- Chinese text is not read (no Chinese language data is installed).
+
 ## [1.3.3] (2026-10-02) - BROKEN THAI IN EXCEL PDFS, POSTERS
 
 ### Fixed

@@ -372,6 +372,8 @@ def recognize_image(image_path: str | Path, language: str) -> str:
         (base, "--psm 3", 1.0),
         (base, "--psm 11", 1.0),
         (flattened, "--psm 11", scale),
+        # White text on dark bars (table headers, buttons) reads better inverted.
+        (ImageOps.invert(flattened), "--psm 11", scale),
     ]
     readings: list[_Reading] = []
     failures = 0

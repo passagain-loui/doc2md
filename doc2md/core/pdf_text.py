@@ -21,6 +21,7 @@ Thai words and inside numbers ("1 0,400.00").
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 SARA_AM = "ำ"
@@ -54,6 +55,14 @@ class Line:
         return "".join(char.text for char in self.chars)
 
 
+_STYLE_RE = re.compile(r"[,\-\s]*(bold|italic|oblique|regular|black|light|medium|semibold)+", re.IGNORECASE)
+
+
+def font_family(name: str) -> str:
+    """``Angsana New,Bold`` and ``Angsana New`` are one typeface with one bad map."""
+    return _STYLE_RE.sub("", name.split("+")[-1]).strip().lower()
+
+
 def _is_zero_width_space(char: Char) -> bool:
     return char.text == " " and char.x1 - char.x0 < _ZERO_WIDTH
 
@@ -85,7 +94,7 @@ def find_sara_bug_fonts(doc) -> frozenset[str]:
             for chars in _raw_lines(page):
                 for position, char in enumerate(chars):
                     if char.text == SARA_AM and _nikhahit_before(chars, position):
-                        fonts.add(char.font)
+                        fonts.add(font_family(char.font))
         except Exception:
             continue
     return frozenset(fonts)
@@ -105,7 +114,7 @@ def _repair(chars: list[Char], buggy: frozenset[str]) -> list[Char]:
     for position, char in enumerate(chars):
         if _is_zero_width_space(char):
             continue  # an unmapped nikhahit or similar: never real text
-        if char.text == SARA_AM and char.font in buggy:
+        if char.text == SARA_AM and font_family(char.font) in buggy:
             if not _nikhahit_before(chars, position):
                 char = Char(SARA_AA, char.x0, char.y0, char.x1, char.y1, char.font)
         out.append(char)
@@ -157,3 +166,25 @@ def text_in(lines: list[Line], include=None, exclude=(), merge_lines: bool = Fal
     return "\n".join(
         " ".join(item[3] for item in sorted(row, key=lambda item: item[2])) for row in rows
     )
+
+
+_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+_THAI_SYMBOL_THAI = re.compile(r"[\u0e01-\u0e4e][!?\"#$%&()*+<=>@\[\]^_`{|}~0-9][\u0e01-\u0e4e]")
+_THAI_LETTER = re.compile(r"[\u0e01-\u0e3a\u0e40-\u0e4e]")
+
+
+def thai_text_is_corrupt(text: str) -> bool:
+    """Whether a page's text layer is mis-encoded Thai that no rule can repair.
+
+    Some producers (a Ghostscript rewrite was seen) lose the character map: tone
+    marks and vowels come out as ``!``, ``?``, digits or control characters, as in
+    "น้ำท!วมป5". Real Thai text has almost no control characters, and a symbol or
+    digit sandwiched between two Thai letters is rare, so either, in quantity, is
+    a reliable sign.
+    """
+    thai = len(_THAI_LETTER.findall(text))
+    if thai < 50:
+        return False
+    if len(_CONTROL.findall(text)) >= 3:
+        return True
+    return len(_THAI_SYMBOL_THAI.findall(text)) >= max(6, thai // 300)

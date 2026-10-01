@@ -24,7 +24,12 @@ from doc2md.core.errors import ConversionError, EngineUnavailableError, wrap_war
 from doc2md.core.quality import EngineOutput, QualityMetrics
 from doc2md.core.ocr_setup import find_tesseract, prepare_tesseract
 from doc2md.core.ocr_text import recognize
-from doc2md.core.pdf_text import find_sara_bug_fonts, page_lines, text_in
+from doc2md.core.pdf_text import (
+    find_sara_bug_fonts,
+    page_lines,
+    text_in,
+    thai_text_is_corrupt,
+)
 from doc2md.core.router import FileKind
 from doc2md.core.tables import render_table
 from doc2md.engine.base import BaseEngine
@@ -37,7 +42,7 @@ from doc2md.engine.ocr_engine import DEFAULT_OCR_LANG
 # handful of characters a stray page-number layer contributes.
 SCANNED_TEXT_THRESHOLD = 16
 
-DEFAULT_OCR_DPI = 200
+DEFAULT_OCR_DPI = 300
 
 
 def _pdfplumber_available() -> bool:
@@ -138,9 +143,16 @@ class PdfEngine(BaseEngine):
             if has_text:
                 if metrics is not None:
                     metrics.pages_with_content = sum(1 for text in pages if text.strip())
+                corrupt = [i for i, text in enumerate(pages) if thai_text_is_corrupt(text)]
+                reread: set[int] = set()
+                if corrupt:
+                    warning, reread = self._reread_corrupt_pages(doc, pages, corrupt, options, metrics)
                 tables_by_page, outside_text_by_page = self._extract_tables(
                     source, options, doc, buggy
                 )
+                for index in reread:
+                    tables_by_page.pop(index + 1, None)
+                    outside_text_by_page.pop(index + 1, None)
                 if metrics is not None and options.get("pdf_tables", True) and _pdfplumber_available():
                     # Only a genuine "we looked and found N" is 0/N - when
                     # table extraction itself was switched off, the dicts
@@ -170,6 +182,63 @@ class PdfEngine(BaseEngine):
                 doc.close()
             except Exception:
                 pass
+
+    def _reread_corrupt_pages(self, doc, pages, corrupt, options, metrics):
+        """Replace pages whose text layer is mis-encoded Thai with OCR of the page.
+
+        Returns ``(warning_or_none, set_of_zero_based_pages_replaced)``. When OCR
+        cannot run, the text is kept (it is all there is) and the result carries a
+        warning, so it is never presented as a clean read.
+        """
+        numbers = ", ".join(str(i + 1) for i in corrupt[:10]) + ("..." if len(corrupt) > 10 else "")
+        if not options.get("pdf_ocr_fallback", True):
+            reason = "OCR is switched off"
+        else:
+            reason = self._ocr_unavailable_reason()
+        if reason:
+            return (
+                f"The text layer of page(s) {numbers} is mis-encoded Thai (symbols in place of "
+                f"tone marks and vowels) and OCR is unavailable to read it instead: {reason}",
+                set(),
+            )
+
+        import pytesseract  # noqa: F401  (availability was checked above)
+
+        language = self._ocr_language(options)
+        prepare_tesseract(language)
+        dpi = self._ocr_dpi(options)
+        replaced: set[int] = set()
+        failed = 0
+        with tempfile.TemporaryDirectory(prefix="doc2md_pdfocr_") as tmpdir:
+            for index in corrupt:
+                png_path = Path(tmpdir) / f"page_{index + 1}.png"
+                try:
+                    pix = doc[index].get_pixmap(dpi=dpi)
+                    pix.save(str(png_path))
+                    del pix
+                    text = recognize(png_path, language).strip()
+                except Exception:
+                    failed += 1
+                    continue
+                if text:
+                    pages[index] = (
+                        "> The text layer of this page is mis-encoded Thai; it was read by OCR "
+                        f"instead.\n\n{text}"
+                    )
+                    replaced.add(index)
+                else:
+                    failed += 1
+        if metrics is not None and replaced:
+            metrics.ocr_backend = "tesseract"
+            metrics.ocr_language = language
+            metrics.ocr_pages_success = len(replaced)
+        if failed:
+            return (
+                f"The text layer of {failed} page(s) is mis-encoded Thai and OCR could not "
+                "replace it; those pages may contain wrong characters.",
+                replaced,
+            )
+        return None, replaced
 
     # ------------------------------------------------------------------ setup
 

@@ -405,7 +405,7 @@ class MainWindow(QMainWindow):
         self._scan_queue: list[list[Path]] = []
         self._worker: ConversionWorker | None = None
         self._close_after_cancel = False
-        self._ocr_dpi = 200
+        self._ocr_dpi = 300
         self._syncing_preset = False
         self._current_index: int | None = None
 

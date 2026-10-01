@@ -5,9 +5,17 @@ from __future__ import annotations
 import types
 
 from doc2md.core import pdf_text
-from doc2md.core.pdf_text import SARA_AA, SARA_AM, find_sara_bug_fonts, page_lines, text_in
+from doc2md.core.pdf_text import (
+    SARA_AA,
+    SARA_AM,
+    find_sara_bug_fonts,
+    font_family,
+    page_lines,
+    text_in,
+)
 
 FONT = "AngsanaUPC"
+BUGGY = frozenset({font_family(FONT)})
 
 
 def _char(text, x0, width=4.0, font=FONT, y0=0.0, y1=10.0):
@@ -46,28 +54,28 @@ NAM = [("น", 0, 4), (" ", 4, 0), ("้", 4, 0), (SARA_AM, 4, 3)]
 
 
 def test_a_font_is_flagged_only_when_a_true_sara_am_pattern_is_seen():
-    assert find_sara_bug_fonts(_doc(_page(TAMBON))) == {FONT}
+    assert find_sara_bug_fonts(_doc(_page(TAMBON))) == BUGGY
     assert find_sara_bug_fonts(_doc(_page(BANG))) == frozenset()
 
 
 def test_the_pattern_is_found_through_a_tone_mark():
-    assert find_sara_bug_fonts(_doc(_page(NAM))) == {FONT}
+    assert find_sara_bug_fonts(_doc(_page(NAM))) == BUGGY
 
 
 def test_detection_looks_across_pages():
-    assert find_sara_bug_fonts(_doc(_page(BANG), _page(TAMBON))) == {FONT}
+    assert find_sara_bug_fonts(_doc(_page(BANG), _page(TAMBON))) == BUGGY
 
 
 def test_bare_sara_am_becomes_sara_aa_and_the_real_one_is_kept():
     page = _page(TAMBON + [(" ", 15, 2)] + [("บ", 17, 4), (SARA_AM, 21, 3), ("ง", 24, 4)])
 
-    text = text_in(page_lines(page, frozenset({FONT})))
+    text = text_in(page_lines(page, BUGGY))
 
     assert text == "ตำบล บาง"
 
 
 def test_sara_am_after_a_tone_mark_is_kept():
-    text = text_in(page_lines(_page(NAM), frozenset({FONT})))
+    text = text_in(page_lines(_page(NAM), BUGGY))
 
     assert text == "น้" + SARA_AM
 
@@ -88,7 +96,7 @@ def test_zero_width_spaces_are_never_text():
 def test_other_fonts_are_not_touched_by_a_flagged_font():
     page = _page(BANG, font="Other")
 
-    assert SARA_AM in text_in(page_lines(page, frozenset({FONT})))
+    assert SARA_AM in text_in(page_lines(page, BUGGY))
 
 
 def test_text_in_a_box_and_outside_a_box():
@@ -122,7 +130,7 @@ def test_fragments_on_one_visual_row_are_merged_for_table_cells():
 def test_a_page_that_cannot_be_read_does_not_break_detection():
     broken = types.SimpleNamespace(get_text=lambda kind="text": 1 / 0)
 
-    assert find_sara_bug_fonts(_doc(broken, _page(TAMBON))) == {FONT}
+    assert find_sara_bug_fonts(_doc(broken, _page(TAMBON))) == BUGGY
 
 
 def test_detection_is_cheap_for_pages_without_sara_am(monkeypatch):
@@ -144,3 +152,46 @@ def test_scan_is_limited_to_the_first_pages():
     pages = [_page([("ก", 0, 4)]) for _ in range(pdf_text._SCAN_PAGES)] + [_page(TAMBON)]
 
     assert find_sara_bug_fonts(_doc(*pages)) == frozenset()
+
+
+def test_bold_and_regular_variants_are_one_family():
+    assert font_family("Angsana New,Bold") == font_family("Angsana New")
+    assert font_family("ABCDEE+AngsanaUPC-Bold") == font_family("AngsanaUPC")
+    assert font_family("THSarabunNew-BoldItalic") == font_family("THSarabunNew")
+    assert font_family("AngsanaUPC") != font_family("THSarabunNew")
+
+
+def test_a_pattern_seen_in_the_bold_face_repairs_the_regular_face():
+    bold = _page(TAMBON, font="Angsana New,Bold")
+    regular = _page(BANG, font="Angsana New")
+    flagged = find_sara_bug_fonts(_doc(bold))
+
+    assert SARA_AA in text_in(page_lines(regular, flagged))
+
+
+# --- text layers no rule can repair
+
+
+def test_symbols_in_place_of_tone_marks_are_detected():
+    garbled = "น้ำท!วมในเขตพื้นที่กรุงเทพฯและสมุทรปราการ ผ!านมา ต!อไป ท!วม " * 6
+
+    assert pdf_text.thai_text_is_corrupt(garbled)
+
+
+def test_control_characters_in_thai_text_are_detected():
+    garbled = ("กรมพัฒนาธุรกิจการค้า\x1a กระทรวงพาณิชย์\x1e " * 5) + "บริษัทจำกัด" * 10
+
+    assert pdf_text.thai_text_is_corrupt(garbled)
+
+
+def test_clean_thai_text_and_short_text_are_not_flagged():
+    clean = "ขอรับรองว่าบริษัทนี้ได้จดทะเบียนเป็นนิติบุคคลตามประมวลกฎหมายแพ่งและพาณิชย์ " * 8
+
+    assert not pdf_text.thai_text_is_corrupt(clean)
+    assert not pdf_text.thai_text_is_corrupt("ท!วม")
+
+
+def test_a_year_after_a_thai_word_is_not_corruption():
+    text = "บริษัทฯได้มีการติดตามสถานการณ์น้ำท่วมปี 2569 ตั้งแต่วันที่ 25 – 28 กันยายน พ.ศ.2569 " * 8
+
+    assert not pdf_text.thai_text_is_corrupt(text)

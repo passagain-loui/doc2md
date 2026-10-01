@@ -14,7 +14,7 @@ CUSTOM = "Custom"
 PRESETS: dict[str, dict] = {
     "Balanced AI": {
         "ocr_lang": "tha+eng",
-        "ocr_dpi": 200,
+        "ocr_dpi": 300,
         "pdf_tables": True,
         "pdf_ocr_fallback": True,
     },
