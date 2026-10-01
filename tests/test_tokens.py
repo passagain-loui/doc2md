@@ -13,17 +13,38 @@ def test_estimate_empty_string():
     assert tokens.estimate_tokens("") == 0
 
 
-def test_fallback_estimate_is_chars_div_four(heuristic_only):
-    assert tokens.estimate_tokens("abcd") == 1
-    assert tokens.estimate_tokens("abc") == 1
-    assert tokens.estimate_tokens("x" * 400) == 100
+def test_english_prose_is_about_four_characters_per_token(heuristic_only):
+    sentence = "The quick brown fox jumps over the lazy dog and keeps running. " * 20
+
+    ratio = len(sentence) / tokens.estimate_tokens(sentence)
+
+    assert 3.0 <= ratio <= 5.5
+
+
+def test_thai_text_is_about_one_token_per_character_not_four(heuristic_only):
+    thai = "รายงานสรุปผลการตรวจประเมินระบบคุณภาพภายในประจำปี " * 20
+
+    ratio = len(thai) / tokens.estimate_tokens(thai)
+
+    assert 0.8 <= ratio <= 1.5, "chars/4 would give about 4"
+
+
+def test_thai_is_estimated_far_above_the_old_chars_over_four(heuristic_only):
+    thai = "การตรวจสอบเอกสารและบันทึกคุณภาพ" * 30
+
+    assert tokens.estimate_tokens(thai) > 2.5 * (len(thai) / 4)
+
+
+def test_estimate_is_never_zero_for_text_and_is_monotonic(heuristic_only):
+    assert tokens.estimate_tokens("a") >= 1
+    assert tokens.estimate_tokens("ab cd") <= tokens.estimate_tokens("ab cd ef gh")
 
 
 def test_backend_name_reflects_availability(monkeypatch):
     monkeypatch.setattr(tokens, "_get_encoder", lambda: object())
     assert tokens.encoder_backend() == "tiktoken/cl100k_base"
     monkeypatch.setattr(tokens, "_get_encoder", lambda: None)
-    assert tokens.encoder_backend() == "heuristic/chars4"
+    assert tokens.encoder_backend() == tokens.HEURISTIC_BACKEND
 
 
 def test_real_tiktoken_if_available():
@@ -48,4 +69,4 @@ def test_encoder_exception_falls_back_gracefully(monkeypatch):
             raise RuntimeError("tokenizer exploded")
 
     monkeypatch.setattr(tokens, "_get_encoder", lambda: Boom())
-    assert tokens.estimate_tokens("fallback please") == (len("fallback please") + 3) // 4
+    assert tokens.estimate_tokens("fallback please") == tokens._heuristic_tokens("fallback please")

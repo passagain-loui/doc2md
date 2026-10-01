@@ -44,7 +44,8 @@ class WebEngine(BaseEngine):
         for tag in soup(_DROP_TAGS):
             tag.decompose()
         title_tag = soup.find("title")
-        parts = [f"# {(title_tag.get_text(strip=True) or Path(source).stem)}", ""]
+        title = title_tag.get_text(strip=True) if title_tag is not None else ""
+        parts = [f"# {title or Path(source).stem}", ""]
         body = soup.body or soup
         rendered = self._render_children(body).strip()
         parts.append(rendered)

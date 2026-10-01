@@ -1,5 +1,58 @@
 # Changelog
 
+## [1.3.0] (2026-10-02) - LEGACY OFFICE FILES, OCR INSTALL, CANCEL, TOKEN COUNTS
+
+### Added
+
+- **Legacy `.xls`, `.doc` and `.ppt`.** Thai offices still hold thousands of
+  them, and they were rejected outright.
+  - `.xls` is read with xlrd and goes through the same pipeline as `.xlsx`:
+    dates, percentages, merged headers, hidden-sheet handling.
+  - `.doc` (Word 97-2003) is read straight from the file's piece table and
+    paragraph records, so tables keep their cells (empty ones included),
+    headings and list items come through, and field codes are dropped. Not
+    recovered: bold/italic, headers/footers, footnotes, text boxes. A `.doc`
+    that is really RTF (or a `.docx`/HTML renamed) is detected and converted as
+    what it is. A `.doc` holding only a scanned picture says so instead of
+    returning nothing.
+  - `.ppt` follows PowerPoint's own edit chain, so an incrementally saved deck
+    shows the current slides, not stale copies. Titles and text come through;
+    notes, table layout, bullet levels and pictures do not.
+  Every `.doc`/`.ppt` result carries a one-line note saying what was not
+  recovered. Tried against 220 real files (90 `.doc`, 90 `.xls`, 40 `.ppt`):
+  all `.xls` and `.ppt` converted; 79 of 90 `.doc` converted, the 11 others were
+  Word files that contain only a scanned picture (reported as such).
+- **Install OCR from the app.** The OCR Diagnostics dialog has an "Install OCR
+  (Thai + English)" button: it installs Tesseract with winget (the manifest
+  pins the installer's hash) and downloads the Thai and English language data
+  into a per-user folder, then asks Tesseract itself which languages it can
+  load. Tesseract is also found in its default install folder when it is not on
+  PATH. Windows asks for administrator approval for the installer.
+- **Cancel stops a conversion in flight.** A large scanned PDF no longer has to
+  finish before Cancel takes effect: the worker process is terminated, and
+  spreadsheet scans check for cancellation as they read.
+
+### Changed
+
+- **Token counts are measured, not `chars / 4`.** On 2,501 segments (1.34M
+  tokens) of real converted documents, `chars / 4` was off by 43% on average
+  and undercounted Thai-heavy text about threefold (Thai runs near one token
+  per character). The built-in estimate now weights characters by class; on
+  documents held out from the fitting it is off by 5.7% on average. It is
+  calibrated to OpenAI's `cl100k_base`; Claude's tokenizer is not public, so the
+  figure is an estimate of the same order, not a count. tiktoken is still used
+  when installed. Chunk sizes follow the new estimate, so Thai documents split
+  into more, smaller chunks than before.
+
+### Fixed
+
+- HTML without a `<title>` (including Excel's HTML exports saved as `.xls`)
+  crashed the HTML engine.
+
+### Dependencies
+
+- Added `xlrd` and `olefile`.
+
 ## [1.2.2] (2026-10-01) - MERGED CELLS IN SPREADSHEETS
 
 ### Fixed

@@ -71,7 +71,7 @@ def test_saved_ratio_bounds_and_backend_string():
     assert saved_ratio(0, 10) == 0.0
     assert saved_ratio(100, 25) == 75.0
     assert saved_ratio(100, 250) == 0.0
-    assert encoder_backend() in ("tiktoken/cl100k_base", "heuristic/chars4")
+    assert encoder_backend() in ("tiktoken/cl100k_base", "heuristic/script-weights")
 
 
 def test_tiktoken_module_injection(monkeypatch):

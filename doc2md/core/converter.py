@@ -13,14 +13,15 @@ Resilience model
 from __future__ import annotations
 
 import time
+from concurrent.futures import wait as futures_wait
 from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass, field
 from multiprocessing import get_context
 from pathlib import Path
 
 from doc2md.core import cleaner
 from doc2md.core.errors import (
+    ConversionCancelledError,
     ConversionError,
     ConversionTimeoutError,
     EngineUnavailableError,
@@ -101,15 +102,23 @@ def _isolated_convert_entry(payload: dict, sender) -> None:
             pass
 
 
-def _wait_for_worker(receiver, proc, source: str, timeout: float) -> str:
+_CANCEL_POLL_S = 0.1
+
+
+def _wait_for_worker(receiver, proc, source: str, timeout: float, cancel=None) -> str:
     deadline = time.monotonic() + max(0.05, timeout)
     try:
-        remaining = deadline - time.monotonic()
-        if not receiver.poll(max(remaining, 0.05)):
-            raise ConversionTimeoutError(
-                f"{source}: conversion exceeded hard timeout "
-                f"of {timeout:.0f}s and the worker was terminated"
-            )
+        while True:
+            if cancel is not None and cancel.is_set():
+                raise ConversionCancelledError(f"{source}: cancelled")
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise ConversionTimeoutError(
+                    f"{source}: conversion exceeded hard timeout "
+                    f"of {timeout:.0f}s and the worker was terminated"
+                )
+            if receiver.poll(min(remaining, _CANCEL_POLL_S)):
+                break
         try:
             status, value = receiver.recv()
         except (EOFError, OSError) as exc:
@@ -129,7 +138,7 @@ def _wait_for_worker(receiver, proc, source: str, timeout: float) -> str:
         receiver.close()
 
 
-def _run_in_process(payload: dict, timeout: float) -> str:
+def _run_in_process(payload: dict, timeout: float, cancel=None) -> str:
     ctx = get_context("spawn")
     receiver, sender = ctx.Pipe(False)
     proc = ctx.Process(
@@ -140,20 +149,26 @@ def _run_in_process(payload: dict, timeout: float) -> str:
     )
     proc.start()
     sender.close()
-    return _wait_for_worker(receiver, proc, payload["source"], timeout)
+    return _wait_for_worker(receiver, proc, payload["source"], timeout, cancel)
 
 
-def _run_in_thread(payload: dict, timeout: float) -> str:
+def _run_in_thread(payload: dict, timeout: float, cancel=None) -> str:
     pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="doc2md-worker")
     try:
         future = pool.submit(_execute_payload, payload)
-        try:
-            return future.result(timeout=max(0.05, timeout))
-        except FuturesTimeoutError as exc:
-            raise ConversionTimeoutError(
-                f"{payload['source']}: conversion exceeded hard timeout "
-                f"of {timeout:.0f}s (worker thread abandoned)"
-            ) from exc
+        deadline = time.monotonic() + max(0.05, timeout)
+        while True:
+            if cancel is not None and cancel.is_set():
+                raise ConversionCancelledError(f"{payload['source']}: cancelled")
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise ConversionTimeoutError(
+                    f"{payload['source']}: conversion exceeded hard timeout "
+                    f"of {timeout:.0f}s (worker thread abandoned)"
+                )
+            done, _pending = futures_wait([future], timeout=min(remaining, _CANCEL_POLL_S))
+            if done:
+                return future.result()
     finally:
         pool.shutdown(wait=False, cancel_futures=True)
 
@@ -185,13 +200,26 @@ class Converter:
         *,
         timeout: float = DEFAULT_TIMEOUT_S,
         options: dict | None = None,
+        cancel_event=None,
     ) -> None:
         self.timeout = float(timeout)
         self.options: dict = dict(options or {})
+        # A ``threading.Event``: set it from another thread to stop a conversion
+        # in flight. Process-isolated engines are terminated; in-thread engines
+        # stop at their next check.
+        self.cancel_event = cancel_event
 
     def convert_file(self, path: Path | str, *, strict: bool = False) -> ConversionResult:
         started = time.perf_counter()
         source = Path(path)
+        if self.cancel_event is not None and self.cancel_event.is_set():
+            result = ConversionResult(
+                source=source, success=False, error=f"{source}: cancelled",
+                duration_s=time.perf_counter() - started,
+            )
+            if strict:
+                raise ConversionCancelledError(result.error)
+            return result
         detection: Detection = detect(source)
 
         if not source.is_file():
@@ -256,6 +284,8 @@ class Converter:
         options = dict(self.options)
         if engine.requires_process_isolation:
             options = _picklable_options(options)
+        elif self.cancel_event is not None:
+            options["_cancel_event"] = self.cancel_event
 
         payload = {
             "engine": engine.name,
@@ -271,9 +301,9 @@ class Converter:
                 effective_timeout = max(self.timeout, OCR_TIMEOUT_S)
 
             if engine.requires_process_isolation:
-                raw_result = _run_in_process(payload, effective_timeout)
+                raw_result = _run_in_process(payload, effective_timeout, self.cancel_event)
             else:
-                raw_result = _run_in_thread(payload, effective_timeout)
+                raw_result = _run_in_thread(payload, effective_timeout, self.cancel_event)
             if isinstance(raw_result, EngineOutput):
                 raw_markdown = raw_result.markdown
                 quality = raw_result.metrics

@@ -93,10 +93,6 @@ def strip_zero_width(text: str) -> str:
     return text
 
 
-def token_estimate(text: str) -> int:
-    return max(0, len(text) // 4)
-
-
 def split_blocks(markup: str) -> list[tuple[str, str]]:
     """Split *markup* into ``(kind, chunk)`` pairs of code / table / prose."""
     parts: list[tuple[str, str]] = []

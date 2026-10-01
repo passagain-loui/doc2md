@@ -1,5 +1,23 @@
 # History
 
+## [1.3.0] - 2026-10-02 - Old files, OCR setup, cancel, counting
+
+A candid assessment of 1.2.2 found four things a user would trip over, and each
+one was something the tool had been silent about. It refused `.xls`/`.doc`/`.ppt`
+though most Thai offices still have them; it told the user to install a 300 MB
+OCR program by hand; Cancel did nothing until the current file finished; and it
+reported token counts that were only ever right for English.
+
+The token counts were the one claim nobody had checked, so they were measured:
+the old estimate was wrong by 43% on average and by a factor of three on Thai.
+The replacement was fitted on real documents and judged only on documents it had
+not seen.
+
+The legacy formats were written against real files rather than only synthetic
+ones. That mattered: real `.doc` files turned up Word documents that hold nothing
+but a scanned picture, HTML pages saved as `.xls`, and a crash in the HTML engine
+on pages without a title - none of which a hand-built fixture would have found.
+
 ## [1.2.2] - 2026-10-01 - Merged cells
 
 The follow-up the previous release named as its limit. Merges are the only way

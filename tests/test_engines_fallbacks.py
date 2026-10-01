@@ -38,7 +38,7 @@ def test_docx_engine_unavailable_and_corrupted(monkeypatch, tmp_path):
 def test_xlsx_engine_unavailable_legacy_and_corrupted(monkeypatch, tmp_path):
     legacy = tmp_path / "old.xls"
     legacy.write_bytes(b"\xd0\xcf\x11\xe0legacy binary")
-    with pytest.raises(ConversionError, match="Legacy"):
+    with pytest.raises(ConversionError, match="unreadable XLS"):
         get_engine(FileKind.XLSX).convert(legacy, {})
 
     x = tmp_path / "book.xlsx"

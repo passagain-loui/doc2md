@@ -22,6 +22,7 @@ from pathlib import Path
 
 from doc2md.core.errors import ConversionError, EngineUnavailableError, wrap_warning
 from doc2md.core.quality import EngineOutput, QualityMetrics
+from doc2md.core.ocr_setup import find_tesseract, prepare_tesseract
 from doc2md.core.router import FileKind
 from doc2md.core.tables import render_table
 from doc2md.engine.base import BaseEngine
@@ -338,6 +339,7 @@ class PdfEngine(BaseEngine):
         import pytesseract
 
         language = self._ocr_language(options)
+        prepare_tesseract(language)
         dpi = self._ocr_dpi(options)
         out: list[str] = []
         pages_total = 0
@@ -395,10 +397,10 @@ class PdfEngine(BaseEngine):
 
     @staticmethod
     def _ocr_unavailable_reason() -> str | None:
-        if shutil.which("tesseract") is None:
+        if find_tesseract() is None:
             return (
-                "the Tesseract binary is not on PATH "
-                "(install Tesseract OCR with the Thai language data)"
+                "Tesseract is not installed "
+                "(the OCR Diagnostics button in the app can install it with the Thai language data)"
             )
         try:
             import pytesseract  # noqa: F401

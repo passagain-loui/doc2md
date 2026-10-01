@@ -19,6 +19,7 @@ Design notes that matter for correctness rather than looks:
 from __future__ import annotations
 
 import logging
+import threading
 from pathlib import Path
 
 from PyQt6.QtCore import QObject, QSettings, Qt, QThread, QUrl, pyqtSignal
@@ -255,12 +256,16 @@ class ConversionWorker(QObject):
         self._options = dict(options)
         self._timeout = float(timeout)
         self._cancelled = False
+        self._cancel_event = threading.Event()
 
     def cancel(self) -> None:
         self._cancelled = True
+        self._cancel_event.set()
 
     def run(self) -> None:
-        converter = Converter(timeout=self._timeout, options=self._options)
+        converter = Converter(
+            timeout=self._timeout, options=self._options, cancel_event=self._cancel_event
+        )
         total = len(self._files)
         succeeded = 0
         failed = 0
@@ -284,9 +289,8 @@ class ConversionWorker(QObject):
                     )
                 else:
                     failed += 1
-                    self.file_finished.emit(
-                        index, False, "", result.error or "conversion failed", "", result
-                    )
+                    error = "Cancelled" if self._cancelled else (result.error or "conversion failed")
+                    self.file_finished.emit(index, False, "", error, "", result)
             self.progress.emit(position + 1, total)
         self.finished.emit(succeeded, failed, self._cancelled)
 
@@ -906,7 +910,7 @@ class MainWindow(QMainWindow):
             self,
             "Select documents",
             str(Path.home()),
-            "Documents (*.pdf *.docx *.xlsx *.xlsm *.csv *.pptx *.html *.htm *.eml *.json *.txt *.md);;"
+            "Documents (*.pdf *.docx *.doc *.xlsx *.xlsm *.xls *.csv *.pptx *.ppt *.html *.htm *.eml *.json *.txt *.md);;"
             "Images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff *.webp *.gif);;"
             "All files (*)",
         )
@@ -977,16 +981,16 @@ class MainWindow(QMainWindow):
         present it. Checked before any conversion runs, not discovered only
         after a scanned document comes back as metadata-only.
         """
-        import shutil
+        from doc2md.core.ocr_setup import find_tesseract
 
-        if shutil.which("tesseract") is not None:
+        if find_tesseract() is not None:
             return True, "Tesseract ready"
         try:
             import rapidocr_onnxruntime  # noqa: F401
 
             return True, "RapidOCR ready"
         except ImportError:
-            return False, "OCR unavailable (no Tesseract, no RapidOCR)"
+            return False, "OCR unavailable - click OCR Diagnostics to install it"
 
     def _refresh_ocr_backend_status(self) -> None:
         available, message = self._ocr_backend_status()
@@ -995,7 +999,8 @@ class MainWindow(QMainWindow):
         self.ocr_backend_label.setToolTip(
             message if available else
             "Scanned PDFs and images will convert to metadata only, marked "
-            "Warning, until Tesseract OCR or rapidocr-onnxruntime is installed."
+            "Warning, until OCR is installed. OCR Diagnostics can install "
+            "Tesseract with Thai language data for you."
         )
 
     def conversion_options(self) -> dict:
@@ -1060,6 +1065,7 @@ class MainWindow(QMainWindow):
     def show_ocr_diagnostics(self) -> None:
         dialog = OcrDiagnosticsDialog(self)
         dialog.exec()
+        self._refresh_ocr_backend_status()
 
     @staticmethod
     def _policy_index(value: str) -> int:
@@ -1145,7 +1151,7 @@ class MainWindow(QMainWindow):
     def cancel_conversion(self) -> None:
         if self._worker is not None:
             self._worker.cancel()
-            self.statusBar().showMessage("Cancelling after the current file…")
+            self.statusBar().showMessage("Cancelling…")
 
     def _on_file_started(self, index: int, name: str) -> None:
         if 0 <= index < len(self._items):

@@ -17,6 +17,10 @@ python-docx>=1.1
 openpyxl>=3.1
 python-pptx>=1.0
 
+# --- legacy Office formats (.xls / .doc / .ppt) ---
+xlrd>=2.0.1            # binary .xls
+olefile>=0.47          # OLE container for .doc and .ppt
+
 # --- HTML / e-mail ---
 beautifulsoup4>=4.12
 lxml>=5.2

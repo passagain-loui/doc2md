@@ -346,3 +346,107 @@ def test_copy_diagnostics_puts_the_report_on_the_clipboard(qapp):
         dialog.close()
         dialog.deleteLater()
         qapp.processEvents()
+
+
+# --- one-click OCR install --------------------------------------------------
+
+
+def _wait(qapp, predicate, timeout_ms=10_000):
+    from PyQt6.QtCore import QDeadlineTimer, QEventLoop
+
+    deadline = QDeadlineTimer(timeout_ms)
+    while not predicate() and not deadline.hasExpired():
+        qapp.processEvents(QEventLoop.ProcessEventsFlag.AllEvents, 50)
+    assert predicate()
+
+
+def test_install_button_runs_the_installer_then_rechecks_readiness(qapp, monkeypatch):
+    from doc2md.core.ocr_diagnostics import OcrDiagnostics
+    from doc2md.core.ocr_setup import SetupResult
+    from doc2md.gui import ocr_dialog
+
+    progress_seen = []
+    diagnoses = []
+
+    def fake_install(progress):
+        progress("Installing Tesseract...")
+        progress_seen.append(1)
+        return SetupResult(ok=True, steps=["Installing Tesseract...", "Verified: ok"])
+
+    def fake_diagnose(**_kwargs):
+        diagnoses.append(1)
+        return OcrDiagnostics(readiness_message="ready after install")
+
+    monkeypatch.setattr(ocr_dialog, "install_ocr", fake_install)
+    monkeypatch.setattr(ocr_dialog, "diagnose", fake_diagnose)
+    dialog = OcrDiagnosticsDialog()
+    _wait(qapp, lambda: dialog._thread is None)
+    monkeypatch.setattr(dialog, "_confirm_install", lambda: True)
+    before = len(diagnoses)
+
+    assert dialog.install() is True
+    assert not dialog.install_button.isEnabled()
+    _wait(qapp, lambda: not dialog._installing and dialog._thread is None and len(diagnoses) > before)
+
+    assert progress_seen
+    assert dialog.message_label.text() == "ready after install"
+    assert dialog.install_button.isEnabled()
+    dialog.done(0)
+
+
+def test_install_is_not_started_when_the_user_declines(qapp, monkeypatch):
+    from doc2md.gui import ocr_dialog
+
+    calls = []
+    monkeypatch.setattr(ocr_dialog, "install_ocr", lambda progress: calls.append(1))
+    dialog = OcrDiagnosticsDialog()
+    _wait(qapp, lambda: dialog._thread is None)
+    monkeypatch.setattr(dialog, "_confirm_install", lambda: False)
+
+    assert dialog.install() is False
+    assert calls == []
+    dialog.done(0)
+
+
+def test_a_failed_install_shows_the_reason(qapp, monkeypatch):
+    from doc2md.core.ocr_setup import SetupResult
+    from doc2md.gui import ocr_dialog
+
+    monkeypatch.setattr(
+        ocr_dialog, "install_ocr",
+        lambda progress: SetupResult(ok=False, steps=["step one"], error="winget is not available"),
+    )
+    dialog = OcrDiagnosticsDialog()
+    _wait(qapp, lambda: dialog._thread is None)
+    monkeypatch.setattr(dialog, "_confirm_install", lambda: True)
+
+    dialog.install()
+    _wait(qapp, lambda: not dialog._installing)
+
+    assert "did not complete" in dialog.message_label.text()
+    assert "winget is not available" in dialog.detail_view.toPlainText()
+    dialog.done(0)
+
+
+def test_the_dialog_cannot_be_closed_while_installing(qapp, monkeypatch):
+    import threading
+
+    from doc2md.core.ocr_setup import SetupResult
+    from doc2md.gui import ocr_dialog
+
+    release = threading.Event()
+    monkeypatch.setattr(
+        ocr_dialog, "install_ocr", lambda progress: (release.wait(10), SetupResult(ok=True))[1]
+    )
+    dialog = OcrDiagnosticsDialog()
+    _wait(qapp, lambda: dialog._thread is None)
+    monkeypatch.setattr(dialog, "_confirm_install", lambda: True)
+    dialog.install()
+
+    dialog.done(0)
+    assert not dialog._closed
+
+    release.set()
+    _wait(qapp, lambda: not dialog._installing)
+    dialog.done(0)
+    assert dialog._closed

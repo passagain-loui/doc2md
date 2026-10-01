@@ -217,3 +217,13 @@ def thai_image(tmp_path, thai_font):
     draw.text((20, 50), "ใบเสร็จรับเงิน เลขที่ 12345", fill="black", font=font)
     image.save(str(path))
     return path
+
+
+@pytest.fixture(autouse=True)
+def _isolated_tesseract_lookup(monkeypatch, tmp_path_factory):
+    """Tests must not depend on, or change, a Tesseract installed on the dev machine."""
+    from doc2md.core import ocr_setup
+
+    monkeypatch.setattr(ocr_setup, "KNOWN_LOCATIONS", [])
+    monkeypatch.setattr(ocr_setup, "user_tessdata_dir", lambda: tmp_path_factory.mktemp("tessdata"))
+    monkeypatch.delenv("TESSDATA_PREFIX", raising=False)

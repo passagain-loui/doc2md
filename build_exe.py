@@ -38,6 +38,8 @@ HIDDEN_IMPORTS = [
     "docx",
     "openpyxl",
     "pptx",
+    "xlrd",
+    "olefile",
     "bs4",
     "lxml.etree",
     "lxml._elementpath",

@@ -6,17 +6,21 @@ from doc2md.core.errors import ConversionError
 from doc2md.core.router import FileKind
 from doc2md.engine.base import BaseEngine
 from doc2md.engine.code_engine import CodeEngine
+from doc2md.engine.doc_engine import DocEngine
 from doc2md.engine.docx_engine import DocxEngine
 from doc2md.engine.excel_engine import ExcelEngine
 from doc2md.engine.ocr_engine import OcrEngine
 from doc2md.engine.pdf_engine import PdfEngine
+from doc2md.engine.ppt_engine import PptEngine
 from doc2md.engine.pptx_engine import PptxEngine
 from doc2md.engine.web_engine import WebEngine
 
 _ENGINES: list[BaseEngine] = [
     PdfEngine(),
+    DocEngine(),
     DocxEngine(),
     ExcelEngine(),
+    PptEngine(),
     PptxEngine(),
     WebEngine(),
     OcrEngine(),

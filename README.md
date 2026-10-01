@@ -13,8 +13,11 @@ correctly throughout.
 | --- | --- | --- |
 | `.pdf` | PyMuPDF + pdfplumber | text layer on the fast path, OCR when scanned, tables extracted |
 | `.docx` | python-docx | headings, nested lists, bold/italic, tables |
+| `.doc` | built in (olefile) | legacy Word: text, headings, lists, tables; not bold/italic, headers, footnotes |
 | `.xlsx` `.xlsm` `.csv` | openpyxl | one table per sheet, truncated summary past the row limit |
+| `.xls` | xlrd | legacy Excel: same output as `.xlsx` (dates, percentages, merged headers, hidden sheets) |
 | `.pptx` | python-pptx | slide titles, bullet nesting, tables, speaker notes |
+| `.ppt` | built in (olefile) | legacy PowerPoint: slide titles and text; not notes, table layout, pictures |
 | `.html` `.htm` `.eml` | BeautifulSoup | article text, links, tables |
 | `.png` `.jpg` `.jpeg` `.bmp` `.tif` `.webp` | Tesseract | Thai + English OCR |
 | source files, `.json`, `.txt` | built in | fenced with the right language |
@@ -44,8 +47,12 @@ instead if that's genuinely what you want.
 pip install -r requirements.txt
 ```
 
-OCR needs [Tesseract](https://github.com/UB-Mannheim/tesseract/wiki) on PATH.
-Install the Thai language data (`tha`) as well - without it, scanned Thai
+OCR needs [Tesseract](https://github.com/UB-Mannheim/tesseract/wiki). The GUI's
+**OCR Diagnostics…** dialog has an **Install OCR (Thai + English)…** button that
+installs it with `winget` and downloads the Thai and English language data into
+`%LOCALAPPDATA%\doc2md\tessdata` (Windows asks for administrator approval for
+the Tesseract installer itself). Installing by hand also works. Without the Thai
+language data (`tha`), scanned Thai
 documents fall back to English and say so in the output. Tesseract is
 deliberately **not** bundled: the Thai model alone is larger than the rest of
 the application. The GUI's **OCR Diagnostics…** dialog (see below) tells you

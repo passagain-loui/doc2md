@@ -9,13 +9,16 @@ from enum import Enum
 from pathlib import Path
 
 MAGIC_LIMIT = 8192
+OLE_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 
 
 class FileKind(str, Enum):
     PDF = "pdf"
+    DOC = "doc"
     DOCX = "docx"
     XLSX = "xlsx"
     CSV = "csv"
+    PPT = "ppt"
     PPTX = "pptx"
     HTML = "html"
     EML = "eml"
@@ -40,11 +43,15 @@ class Detection:
 
 EXTENSION_KINDS: dict[str, FileKind] = {
     ".pdf": FileKind.PDF,
+    ".doc": FileKind.DOC,
+    ".dot": FileKind.DOC,
     ".docx": FileKind.DOCX,
     ".xlsx": FileKind.XLSX,
     ".xlsm": FileKind.XLSX,
     ".xls": FileKind.XLSX,
     ".csv": FileKind.CSV,
+    ".ppt": FileKind.PPT,
+    ".pps": FileKind.PPT,
     ".pptx": FileKind.PPTX,
     ".html": FileKind.HTML,
     ".htm": FileKind.HTML,
@@ -124,9 +131,11 @@ CODE_EXTENSIONS: dict[str, str] = {
 
 MIME_BY_KIND: dict[FileKind, str] = {
     FileKind.PDF: "application/pdf",
+    FileKind.DOC: "application/msword",
     FileKind.DOCX: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     FileKind.XLSX: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     FileKind.CSV: "text/csv",
+    FileKind.PPT: "application/vnd.ms-powerpoint",
     FileKind.PPTX: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     FileKind.HTML: "text/html",
     FileKind.EML: "message/rfc822",
@@ -139,6 +148,15 @@ MIME_BY_KIND: dict[FileKind, str] = {
 }
 
 _RFC822_HEADERS = ("from:", "to:", "subject:", "date:", "message-id:", "mime-version:")
+
+
+_OLE_KINDS: dict[str, FileKind] = {
+    ".doc": FileKind.DOC,
+    ".dot": FileKind.DOC,
+    ".xls": FileKind.XLSX,
+    ".ppt": FileKind.PPT,
+    ".pps": FileKind.PPT,
+}
 
 
 def detect(path: Path | str) -> Detection:
@@ -172,6 +190,12 @@ def _detect_magic(p: Path, head: bytes) -> Detection | None:
         kind = _sniff_ooxml_zip(p)
         if kind is not None:
             return Detection(kind, MIME_BY_KIND[kind], "magic-zip")
+        return None
+    if head.startswith(OLE_MAGIC):
+        # .doc, .xls and .ppt share one container; only the extension tells them apart.
+        kind = _OLE_KINDS.get(p.suffix.lower())
+        if kind is not None:
+            return Detection(kind, MIME_BY_KIND[kind], "magic-ole")
         return None
     if head.startswith(b"\x89PNG\r\n\x1a\n"):
         return Detection(FileKind.IMAGE, "image/png", "magic")

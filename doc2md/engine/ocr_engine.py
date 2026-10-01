@@ -25,6 +25,7 @@ from pathlib import Path
 
 from doc2md.core.errors import ConversionError, EngineUnavailableError, wrap_warning
 from doc2md.core.quality import EngineOutput, QualityMetrics
+from doc2md.core.ocr_setup import find_tesseract, prepare_tesseract
 from doc2md.core.router import FileKind
 from doc2md.engine.base import BaseEngine
 
@@ -103,7 +104,7 @@ class OcrEngine(BaseEngine):
     def _tesseract_usable() -> bool:
         """Binary on PATH *and* pytesseract importable - the same test the setup
         assistant uses, so a half-installed Tesseract falls through to RapidOCR."""
-        if shutil.which("tesseract") is None:
+        if find_tesseract() is None:
             return False
         try:
             import pytesseract  # noqa: F401
@@ -173,6 +174,7 @@ class OcrEngine(BaseEngine):
                 f"Tesseract binary detected but the pytesseract package is missing "
                 f"({exc}); run pip install pytesseract"
             ) from exc
+        prepare_tesseract(self.language(options))
 
         language = self.language(options)
         try:

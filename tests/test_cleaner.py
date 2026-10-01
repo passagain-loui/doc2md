@@ -1,4 +1,4 @@
-from doc2md.core.cleaner import optimize, token_estimate
+from doc2md.core.cleaner import optimize
 
 
 def test_compresses_spaces_but_not_in_code_fence():
@@ -40,8 +40,3 @@ def test_unterminated_fence_is_preserved_verbatim():
     out = optimize(md)
     assert "a   b" in out
     assert "intro a" not in out.replace("\n", " ").replace("intro ", "intro")
-
-
-def test_token_estimate():
-    assert token_estimate("") == 0
-    assert token_estimate("x" * 401) == 100

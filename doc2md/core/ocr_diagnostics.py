@@ -11,8 +11,9 @@ an import alone.
 
 from __future__ import annotations
 
-import shutil
 from dataclasses import dataclass, field
+
+from doc2md.core.ocr_setup import find_tesseract, prepare_tesseract
 
 REQUIRED_LANGUAGES = ("tha", "eng")
 
@@ -74,7 +75,7 @@ class OcrDiagnostics:
 
 
 def _check_tesseract_binary() -> tuple[bool, str | None]:
-    path = shutil.which("tesseract")
+    path = find_tesseract()
     return path is not None, path
 
 
@@ -93,6 +94,7 @@ def _query_tesseract_languages() -> list[str] | None:
         import pytesseract
     except ImportError:
         return None
+    prepare_tesseract("+".join(REQUIRED_LANGUAGES))
     try:
         languages = pytesseract.get_languages(config="")
     except Exception:

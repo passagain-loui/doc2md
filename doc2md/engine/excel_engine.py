@@ -22,9 +22,11 @@ from __future__ import annotations
 import csv
 import datetime as _dt
 import re
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from pathlib import Path
 
-from doc2md.core.errors import ConversionError, EngineUnavailableError
+from doc2md.core.errors import ConversionCancelledError, ConversionError, EngineUnavailableError
 from doc2md.core.quality import EngineOutput, QualityMetrics
 from doc2md.core.router import FileKind
 from doc2md.core.tables import render_table
@@ -86,6 +88,16 @@ MAX_MERGE_SCAN_BYTES = 300 * 1024 * 1024
 HEADER_SEARCH_ROWS = 15
 
 Merge = tuple  # (min_row, min_col, max_row, max_col), 1-based
+
+
+@dataclass
+class _SheetSource:
+    """One worksheet, however it was read: a name, visibility and two lazy readers."""
+
+    title: str
+    visible: bool
+    rows: Callable[[], Iterable[list]]
+    merges: Callable[[], list]
 
 
 def sheet_xml_paths(source: Path) -> list[str]:
@@ -157,9 +169,9 @@ class ExcelEngine(BaseEngine):
             return self._convert_csv(source, options)
         if suffix in (".xlsx", ".xlsm"):
             return self._convert_xlsx(source, options)
-        raise ConversionError(
-            f"Legacy .xls format is not supported; re-save as .xlsx: {source}"
-        )
+        if suffix == ".xls":
+            return self._convert_xls(source, options)
+        raise ConversionError(f"Unsupported spreadsheet format {suffix!r}: {source}")
 
     @staticmethod
     def _limits(options: dict) -> tuple[int, int]:
@@ -211,7 +223,6 @@ class ExcelEngine(BaseEngine):
                 "XLSX backend missing: pip install -r requirements.txt (openpyxl)"
             ) from exc
 
-        max_rows, sample_rows = self._limits(options)
         try:
             workbook = openpyxl.load_workbook(
                 str(source), read_only=True, data_only=True
@@ -221,13 +232,101 @@ class ExcelEngine(BaseEngine):
                 f"Corrupted or unreadable XLSX: {source} ({exc})"
             ) from exc
 
+        try:
+            sheet_parts = sheet_xml_paths(source)
+        except Exception:
+            sheet_parts = []
+        worksheets = list(workbook.worksheets)
+        sheets = [
+            _SheetSource(
+                title=sheet.title,
+                visible=sheet.sheet_state == "visible",
+                rows=lambda sheet=sheet: self._formatted_rows(sheet),
+                merges=lambda index=index: (
+                    read_merged_ranges(source, sheet_parts[index])
+                    if len(sheet_parts) == len(worksheets)
+                    else []
+                ),
+            )
+            for index, sheet in enumerate(worksheets)
+        ]
+        return self._render_sheets(source, sheets, options, close=workbook.close)
+
+    def _convert_xls(self, source: Path, options: dict) -> tuple[str, QualityMetrics]:
+        """Legacy binary .xls, read with xlrd (cell values, formats and merges)."""
+        try:
+            import xlrd
+        except ImportError as exc:
+            raise EngineUnavailableError(
+                "XLS backend missing: pip install -r requirements.txt (xlrd)"
+            ) from exc
+
+        try:
+            book = xlrd.open_workbook(str(source), formatting_info=True, on_demand=True)
+        except Exception as exc:
+            raise ConversionError(f"Corrupted, protected or unreadable XLS: {source} ({exc})") from exc
+
+        sheets = []
+        for index in range(book.nsheets):
+            sheet = book.sheet_by_index(index)
+            sheets.append(
+                _SheetSource(
+                    title=sheet.name,
+                    visible=sheet.visibility == 0,
+                    rows=lambda sheet=sheet: self._xls_rows(book, sheet),
+                    merges=lambda sheet=sheet: [
+                        (rlo + 1, clo + 1, rhi, min(chi, MAX_COLUMNS))
+                        for rlo, rhi, clo, chi in sheet.merged_cells
+                    ],
+                )
+            )
+        return self._render_sheets(source, sheets, options, close=book.release_resources)
+
+    @staticmethod
+    def _xls_cell(book, sheet, row: int, column: int):
+        import xlrd
+
+        cell = sheet.cell(row, column)
+        kind = cell.ctype
+        if kind in (xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK):
+            return None
+        if kind == xlrd.XL_CELL_ERROR:
+            return xlrd.error_text_from_code.get(cell.value, "#ERR")
+        if kind == xlrd.XL_CELL_BOOLEAN:
+            return bool(cell.value)
+        if kind == xlrd.XL_CELL_DATE:
+            try:
+                moment = xlrd.xldate.xldate_as_datetime(cell.value, book.datemode)
+            except Exception:
+                return format_cell_value(cell.value)
+            if cell.value < 1:
+                return moment.time()
+            return moment
+        number_format = "General"
+        try:
+            xf = book.xf_list[cell.xf_index]
+            number_format = book.format_map[xf.format_key].format_str
+        except Exception:
+            pass
+        return format_cell_value(cell.value, number_format)
+
+    def _xls_rows(self, book, sheet):
+        width = min(sheet.ncols, MAX_COLUMNS)
+        for row in range(sheet.nrows):
+            values = [self._xls_cell(book, sheet, row, column) for column in range(width)]
+            values = [format_cell_value(v) if v is not None else None for v in values]
+            while values and values[-1] is None:
+                values.pop()
+            yield values
+
+    def _render_sheets(self, source: Path, sheets, options: dict, *, close) -> tuple[str, QualityMetrics]:
+        max_rows, sample_rows = self._limits(options)
         parts: list[str] = [f"# {source.name}", ""]
         include_hidden = bool(options.get("include_hidden_sheets", False))
-        all_sheets = list(workbook.worksheets)
-        visible = [sheet for sheet in all_sheets if sheet.sheet_state == "visible"]
+        visible = [sheet for sheet in sheets if sheet.visible]
         # A workbook whose every sheet is hidden still has to produce output.
-        selected = all_sheets if include_hidden or not visible else visible
-        skipped = [sheet.title.strip() for sheet in all_sheets if sheet not in selected]
+        selected = sheets if include_hidden or not visible else visible
+        skipped = [sheet.title.strip() for sheet in sheets if sheet not in selected]
         if skipped:
             parts.extend([
                 f"> {len(skipped)} hidden sheet(s) were not converted: "
@@ -235,26 +334,14 @@ class ExcelEngine(BaseEngine):
                 + ". Enable hidden sheets to include them.",
                 "",
             ])
-        sheets_detected = 0
         rows_detected_total = 0
         rows_exported_total = 0
         any_truncated = False
         all_exact = True
         try:
-            try:
-                sheet_parts = sheet_xml_paths(source)
-            except Exception:
-                sheet_parts = []
             for sheet in selected:
-                sheets_detected += 1
-                position = all_sheets.index(sheet)
-                merges = (
-                    read_merged_ranges(source, sheet_parts[position])
-                    if len(sheet_parts) == len(all_sheets)
-                    else []
-                )
                 rows, total, sheet_exact = self._scan_rows(
-                    self._formatted_rows(sheet), max_rows
+                    sheet.rows(), max_rows, options.get("_cancel_event")
                 )
                 all_exact = all_exact and sheet_exact
                 truncated = total > max_rows
@@ -266,18 +353,18 @@ class ExcelEngine(BaseEngine):
                 parts.append(
                     self._sheet_markdown(
                         sheet.title.strip(), rows, total_rows=total,
-                        truncated=truncated, merges=merges,
+                        truncated=truncated, merges=sheet.merges(),
                     )
                 )
                 parts.append("")
         finally:
             try:
-                workbook.close()
+                close()
             except Exception:
                 pass
         markdown = "\n".join(parts).rstrip() + "\n"
         metrics = QualityMetrics(
-            sheets_detected=sheets_detected,
+            sheets_detected=len(sheets),
             rows_detected=rows_detected_total,
             rows_detected_is_exact=all_exact,
             rows_exported=rows_exported_total,
@@ -299,7 +386,7 @@ class ExcelEngine(BaseEngine):
     def _row_is_blank(row) -> bool:
         return all(value is None or not str(value).strip() for value in row)
 
-    def _scan_rows(self, iterator, max_rows: int) -> tuple[list[list], int, bool]:
+    def _scan_rows(self, iterator, max_rows: int, cancel=None) -> tuple[list[list], int, bool]:
         """Walk *iterator* keeping at most ``max_rows`` rows.
 
         Returns ``(rows, total, exact)`` where *total* is the position of the
@@ -315,6 +402,8 @@ class ExcelEngine(BaseEngine):
         exact = True
         for row in iterator:
             seen += 1
+            if cancel is not None and seen % 500 == 0 and cancel.is_set():
+                raise ConversionCancelledError("cancelled")
             if self._row_is_blank(row):
                 blank_run += 1
                 if blank_run >= BLANK_RUN_LIMIT:

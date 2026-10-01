@@ -9,6 +9,10 @@ class ConversionTimeoutError(ConversionError):
     """Raised when conversion exceeds the configured hard timeout."""
 
 
+class ConversionCancelledError(ConversionError):
+    """Raised when the caller cancelled the conversion while it was running."""
+
+
 class EngineUnavailableError(ConversionError):
     """Raised when the optional backend library for an engine is missing."""
 
