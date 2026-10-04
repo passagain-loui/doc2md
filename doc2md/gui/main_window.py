@@ -594,12 +594,6 @@ class MainWindow(QMainWindow):
             toolbar.addWidget(button)
         layout.addLayout(toolbar)
 
-        # Compact metadata line — source/output size, pages, warning status
-        self.compare_metadata = QLabel("")
-        self.compare_metadata.setObjectName("MetaFooter")
-        self.compare_metadata.setWordWrap(False)
-        layout.addWidget(self.compare_metadata)
-
         self.warning_banner = QLabel("")
         self.warning_banner.setObjectName("WarningBanner")
         self.warning_banner.setWordWrap(True)
@@ -1287,7 +1281,6 @@ class MainWindow(QMainWindow):
         self._update_warning_banner(index)
         self._update_row_actions(index)
         self._update_thumbnail(index)
-        self._update_compare_metadata(index)
 
     def _reset_preview_panel(self) -> None:
         self._current_index = None
@@ -1296,7 +1289,6 @@ class MainWindow(QMainWindow):
         self._update_warning_banner(None)
         self._update_row_actions(None)
         self._update_thumbnail(None)
-        self._update_compare_metadata(None)
 
     # ------------------------------------------------------- review extras
 
@@ -1397,49 +1389,6 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
 
-    def _update_compare_metadata(self, index: int | None) -> None:
-        if index is None or not (0 <= index < len(self._files)):
-            self.compare_metadata.setText("")
-            return
-
-        source = self._files[index]
-        try:
-            source_size = source.stat().st_size
-        except OSError:
-            source_size = None
-
-        destination = self._output_paths.get(index)
-        output_size = None
-        if destination is not None:
-            try:
-                output_size = destination.stat().st_size
-            except OSError:
-                output_size = None
-
-        lines = [
-            f"Source: {_human_size(source_size)}",
-            f"Output: {_human_size(output_size)}",
-        ]
-
-        result = self._results.get(index)
-        quality = getattr(result, "quality", None) if result is not None else None
-        if quality is not None:
-            if quality.pages_total is not None:
-                lines.append(f"Pages: {quality.pages_total}")
-            if quality.sheets_detected is not None:
-                lines.append(f"Sheets: {quality.sheets_detected}")
-            if quality.tables_detected is not None:
-                lines.append(f"Tables extracted: {quality.tables_detected}")
-            rows_detected_text = _format_rows_detected(quality)
-            if rows_detected_text is not None:
-                exported = quality.rows_exported if quality.rows_exported is not None else "?"
-                lines.append(f"Rows: {exported}/{rows_detected_text}")
-
-        warning = getattr(result, "warning", None) if result is not None else None
-        lines.append(f"Warning: {warning}" if warning else "Warning: none")
-
-        self.compare_metadata.setText(" · ".join(lines))
-
     def _show_quality_summary(self, index: int | None) -> None:
         """Refresh the quality badge/detail row for the selected file.
 
@@ -1463,8 +1412,14 @@ class MainWindow(QMainWindow):
         self.quality_badge.style().polish(self.quality_badge)
         self.quality_badge.show()
 
-        quality = getattr(result, "quality", None)
         facts: list[str] = []
+        try:
+            source_size = self._files[index].stat().st_size
+        except (OSError, IndexError):
+            source_size = None
+        facts.append(f"source {_human_size(source_size)}")
+
+        quality = getattr(result, "quality", None)
         if quality is not None:
             if quality.pages_total is not None:
                 # Prefer "pages with content" - it is the only field that
@@ -1497,10 +1452,7 @@ class MainWindow(QMainWindow):
             elif quality.ocr_pages_success is not None or quality.ocr_pages_empty is not None:
                 facts.append("OCR: no backend available")
 
-        if facts:
-            self.quality_detail.setText(" · ".join(facts))
-        else:
-            self.quality_detail.setText("No structured metrics available for this file type.")
+        self.quality_detail.setText(" · ".join(facts))
 
     def _update_actions(self) -> None:
         running = self._is_running()

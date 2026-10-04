@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.4.3] (2026-10-04) - ONE-LINE QUALITY SUMMARY
+
+### Changed
+
+- **Merged the quality detail line and the compare-metadata line into one.**
+  "Source: ... · Output: ... · Sheets: 1 · Rows: 141/141 · Warning: none"
+  sat on its own row directly below "1 sheet(s) · rows 141/141", repeating
+  the sheet/row counts that were already shown next to the Success badge.
+  "Output: unknown" was dead text besides — nothing has populated an output
+  path since 1.4.0 removed auto-save. Now there is one line next to the
+  badge: `source 6.2 KB · 1 sheet(s) · rows 141/141`. Dropping the row
+  moves the preview box's top edge up to sit right under the badge row
+  instead of two rows down.
+
 ## [1.4.2] (2026-10-04) - STALE PREVIEW, FLUSH PANEL EDGES
 
 ### Fixed

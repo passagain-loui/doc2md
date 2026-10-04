@@ -1,5 +1,22 @@
 # History
 
+## [1.4.3] - 2026-10-04 - One line instead of two
+
+Another screenshot, this time of the toolbar row right under "MARKDOWN
+PREVIEW": the Success badge and "1 sheet(s) · rows 141/141" on one line,
+then "Source: 19.5 KB · Output: unknown · Sheets: 1 · Rows: 141/141 ·
+Warning: none" repeating most of the same facts on the row right below it.
+The user wanted the Source fact folded up into the badge's row and the
+leftover row gone, so the preview box's top edge could move up to meet it.
+
+"Output: unknown" turned out to be permanently dead text - no code path
+has written an output path since 1.4.0 removed auto-save, so it could
+never read anything else. Merged what was left (source size) into the
+quality-detail label itself, deleted the second line and the method that
+built it (`_update_compare_metadata`), and dropped the now-unused
+`MetaFooter` stylesheet rule. One line now: `source 6.2 KB · 1 sheet(s) ·
+rows 141/141`.
+
 ## [1.4.2] - 2026-10-04 - Stale preview, flush panel edges
 
 Two reports against the 1.4.1 layout, both from a screenshot of the real

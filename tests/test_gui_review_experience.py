@@ -1,7 +1,7 @@
 """Milestone 5 - Review Experience.
 
-Warning banner, Open Original/Output, per-row Copy Markdown, Compare
-Metadata, and first-page-only thumbnails for PDF/image - all built from
+Warning banner, Open Original, per-row Copy Markdown, the quality detail
+line, and first-page-only thumbnails for PDF/image - all built from
 libraries already required (pymupdf, Qt's own image loader), never a fake
 stand-in for the real document.
 """
@@ -174,10 +174,10 @@ def test_copy_selected_markdown_copies_only_the_selected_row(window, qapp, tmp_p
     assert "BBBB marker" not in clipboard.text()
 
 
-# --- compare metadata ---------------------------------------------------------------
+# --- quality detail (source size + metrics, one line) -------------------------------
 
 
-def test_compare_metadata_shows_source_and_output_size(window, qapp, tmp_path):
+def test_quality_detail_shows_source_size(window, qapp, tmp_path):
     source = make_txt(tmp_path, "good.txt", "hello world")
     window.add_paths([source])
     run_batch(window, qapp)
@@ -185,13 +185,10 @@ def test_compare_metadata_shows_source_and_output_size(window, qapp, tmp_path):
     window.file_tree.setCurrentItem(window.file_tree.topLevelItem(0))
     qapp.processEvents()
 
-    text = window.compare_metadata.text()
-    assert "Source" in text
-    assert "Output" in text
-    assert "Warning: none" in text
+    assert "source" in window.quality_detail.text()
 
 
-def test_compare_metadata_shows_pdf_page_count(window, qapp, tmp_path):
+def test_quality_detail_shows_pdf_page_count(window, qapp, tmp_path):
     pdf = _make_text_pdf(tmp_path / "doc.pdf")
     window.add_paths([pdf])
     run_batch(window, qapp)
@@ -199,11 +196,11 @@ def test_compare_metadata_shows_pdf_page_count(window, qapp, tmp_path):
     window.file_tree.setCurrentItem(window.file_tree.topLevelItem(0))
     qapp.processEvents()
 
-    assert "Pages: 1" in window.compare_metadata.text()
+    assert "pages with content 1/1" in window.quality_detail.text()
 
 
-def test_compare_metadata_placeholder_when_nothing_selected(window):
-    assert window.compare_metadata.text() == ""
+def test_quality_detail_placeholder_when_nothing_selected(window):
+    assert window.quality_detail.text() == "Select a converted file to see its quality summary."
 
 
 # --- thumbnails ----------------------------------------------------------------------
