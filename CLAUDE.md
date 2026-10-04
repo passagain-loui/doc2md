@@ -1,4 +1,6 @@
-# doc2md v1.0.21
+# doc2md
+
+> Current version and project state: see HANDOFF.md.
 
 ## 1. Role & Execution Guidelines
 - **Role:** คุณคือ Execution Engine ทำหน้าที่คิดวิเคราะห์จุดแก้ไขและจุดเชื่อมโยงทั้งหมดอย่างรอบด้าน เพื่อแก้ไขโค้ดให้สมบูรณ์ครบจบในรอบเดียวและประหยัด Token

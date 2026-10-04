@@ -1,11 +1,13 @@
-# doc2md v1.1.0
+# doc2md v1.3.5
 
 Drag a document in, get clean Markdown out. PDF, Word, Excel, PowerPoint, HTML,
 e-mail, images and source files, with Thai text and Thai filenames handled
 correctly throughout.
 
-> **1.1.0 is a breaking release.** Audio and video transcription has been removed
-> in full. If you need it, stay on 1.0.27. See CHANGELOG.md for the reasoning.
+> Audio and video transcription was removed in 1.1.0. If you need it, stay on
+> 1.0.27. See CHANGELOG.md for the reasoning.
+>
+> Moving to a new machine or picking the project up cold? Read **HANDOFF.md**.
 
 ## What it converts
 
@@ -47,6 +49,8 @@ instead if that's genuinely what you want.
 pip install -r requirements.txt
 ```
 
+Or use the installer built by `python build.py` (`dist/doc2md_Setup_v<version>.exe`).
+
 OCR needs [Tesseract](https://github.com/UB-Mannheim/tesseract/wiki). The GUI's
 **OCR Diagnostics…** dialog has an **Install OCR (Thai + English)…** button that
 installs it with `winget` and downloads the Thai and English language data into
@@ -66,10 +70,19 @@ a scan silently produce metadata-only output.
  without table formatting; `--no-tables` requests the same degraded-but-fast
  behaviour deliberately.
 - **OCR requires an external backend that is not bundled**: either the
- Tesseract binary on PATH (with the `tha` language pack for Thai) or
- `rapidocr-onnxruntime` installed separately. Neither is installed
- automatically by this project or its GUI; a scanned document converts to
- metadata plus an explanatory Warning until one is available.
+ Tesseract binary (with the `tha` language pack for Thai) or
+ `rapidocr-onnxruntime` installed separately. The GUI's **Install OCR**
+ button sets up Tesseract on request; nothing is installed on its own. Until
+ a backend is available, a scanned document converts to metadata plus an
+ explanatory Warning.
+- **Scanned and image-based Thai is good, not perfect.** Letters that differ by
+ a small stroke (ข/ย) are still occasionally confused on poor scans, stylised
+ display text and text on dark gradients is often missed, Chinese is not
+ installed, and tick/cross matrices come out as noise. Check important
+ numbers against the original.
+- **Legacy `.doc` and `.ppt` are read without formatting** that the modern
+ formats keep: no bold/italic, headers or footnotes in `.doc`; no speaker
+ notes, table layout or pictures in `.ppt`.
 - **RapidOCR does not have verified Thai support** in this project; its
  readiness is reported as "has a backend" rather than folded into the
  Thai/English readiness message, which is specific to Tesseract's installed
@@ -83,7 +96,8 @@ Desktop interface:
 python -m doc2md gui
 ```
 
-Drag in any number of files or whole folders. Each row shows its own status,
+Drag in any number of files or whole folders (anywhere on the window). A
+running batch can be cancelled, including in the middle of a large file. Each row shows its own status,
 with the reason when something goes wrong, so nothing fails quietly:
 
 | Status | Meaning |
@@ -149,14 +163,15 @@ the CLI, the GUI, and chunked output:
 
 | Policy | Behaviour |
 | --- | --- |
-| `unique` | **Default. Unchanged from before this existed.** Never overwrites; `report.md` that already exists becomes `report-1.md`, `report-2.md`, ... |
+| `unique` | Never overwrites; `report.md` that already exists becomes `report-1.md`, `report-2.md`, ... |
 | `fail` | Refuses to write if the destination already exists - the file becomes an Error row/CLI failure instead. |
-| `overwrite` | Writes over an existing file. **Always** refuses to write over the *source* file itself, even when the destination path would coincide with it (for example converting a `.md` file to `.md` in the same folder) - this is not user-selectable away. |
+| `overwrite` | **CLI default.** Writes over an existing file (re-running refreshes the output). **Always** refuses to write over the *source* file itself, even when the destination path would coincide with it (for example converting a `.md` file to `.md` in the same folder) - this is not user-selectable away. |
 | `converted-folder` | Writes into a `Converted` subfolder of the output directory, numbered the same way `unique` is *within* that subfolder. Cannot collide with a document you did not just convert. **GUI default.** |
 
-`--output-policy unique|fail|overwrite|converted-folder` on the CLI (default
-`unique`, so a script written before this flag existed keeps behaving
-identically). The GUI has an Output Policy dropdown that remembers your last
+`--output-policy unique|fail|overwrite|converted-folder` on the CLI. Without it
+the CLI uses `overwrite`, except that a name already written earlier in the same
+run, and a `.md` source that would land on itself, are numbered instead so one
+document never destroys another. The GUI has an Output Policy dropdown that remembers your last
 choice between runs and previews each queued file's destination before you
 press Convert.
 
@@ -225,6 +240,21 @@ apply a fixed OCR language + resolution + table-extraction bundle to the
 existing controls; editing any of those controls by hand switches the
 selector to Custom.
 
+### Scanned pages and Thai text layers
+
+At 300 DPI by default, scanned pages are read by OCR with several safeguards:
+pale coloured table header bars are cleaned so the header row is read, pages
+with side-by-side panels are read one panel at a time, low-confidence lines are
+dropped, and posters/images are read in several passes and merged.
+
+Some PDFs carry a text layer that *looks* like Thai but is wrong (for example
+PDFs exported from Excel with certain fonts). Known font-map errors (sara aa /
+sara am) are repaired; a page whose text is garbled in other ways is detected
+and re-read by OCR, or marked with a Warning if OCR is unavailable.
+
+Token counts use `tiktoken` when it is installed and otherwise a heuristic
+fitted to it, so the figure is an estimate either way.
+
 ## Configuration
 
 An optional `doc2md.toml` in the working directory or your home directory:
@@ -242,9 +272,13 @@ stats = false
 ## Build
 
 ```
+python build.py # everything: folder build, single file, installer
 python build_exe.py # single-file dist/doc2md.exe
 python build_exe.py --onedir # folder build, starts without unpacking
+python build_installer.py # dist/doc2md_Setup_v<version>.exe (needs Inno Setup 6)
 ```
+
+`dist/` and `build/` are not committed; rebuild after cloning.
 
 The build refuses to run if a runtime dependency is missing, rather than
 producing an executable that fails on first use.
@@ -258,7 +292,8 @@ powershell -ExecutionPolicy Bypass -File ./tools/verify.ps1
 
 The verification gate checks version consistency, imports every module, requires
 release notes for the current version, smoke-tests the CLI, and runs the full
-test suite. It must exit 0 before a release is built.
+test suite. It must exit 0 before a release is built. The release pipeline and the rules
+around it are in CLAUDE.md; project state, setup and gotchas are in HANDOFF.md.
 
 ---
 

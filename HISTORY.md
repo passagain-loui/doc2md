@@ -1,5 +1,21 @@
 # History
 
+## Where the project stands (2026-10-03, at the move to a new machine)
+
+Since 1.1.0 turned an audio tool into a document converter, the work has run in
+three arcs. 1.2.x made the product safe and honest: atomic output sets, truthful
+quality reports, a GUI that accepts drops anywhere, and spreadsheets that keep
+their titles, merged headers and dates. 1.3.0 closed the gaps a user would hit
+first - old Office files, installing OCR from the app, cancelling mid-file, and
+a token count that is measured rather than guessed. 1.3.1-1.3.5 were driven by
+real documents, one batch at a time, and each taught something the test suite
+could not: brochures with panels, fonts whose Thai maps are wrong, text layers
+that lie, and a "fix" that made grey scans worse until it was measured.
+
+The pattern worth keeping: run a real file, compare with the original, fix the
+cause, then re-run the earlier files before shipping. Open items, setup steps and
+gotchas for the next machine are in HANDOFF.md.
+
 ## [1.3.5] - 2026-10-02 - Measuring the fix
 
 The 1.3.2 fix for a missing table header worked on the brochure it was built
