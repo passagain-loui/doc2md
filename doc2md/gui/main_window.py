@@ -41,6 +41,7 @@ from PyQt6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QSplitter,
+    QStackedWidget,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -410,11 +411,6 @@ class MainWindow(QMainWindow):
         root.addLayout(self._build_header())
         root.addWidget(self._build_settings_card())
 
-        self.drop_zone = DropZone()
-        self.drop_zone.files_dropped.connect(self.add_paths)
-        self.drop_zone.clicked.connect(self._browse_files)
-        root.addWidget(self.drop_zone)
-
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(self._build_file_list())
         splitter.addWidget(self._build_preview())
@@ -562,7 +558,19 @@ class MainWindow(QMainWindow):
         header.setSectionResizeMode(COLUMN_KIND, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(COLUMN_STATUS, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(COLUMN_DETAIL, QHeaderView.ResizeMode.Stretch)
-        layout.addWidget(self.file_tree)
+
+        # Same panel does double duty: the empty state IS the drop target
+        # (drag & drop or click to browse), and swaps for the tree the
+        # moment there is anything to show - no separate drop zone box
+        # above it competing for space.
+        self.drop_zone = DropZone()
+        self.drop_zone.files_dropped.connect(self.add_paths)
+        self.drop_zone.clicked.connect(self._browse_files)
+
+        self.file_list_stack = QStackedWidget()
+        self.file_list_stack.addWidget(self.drop_zone)
+        self.file_list_stack.addWidget(self.file_tree)
+        layout.addWidget(self.file_list_stack)
         return container
 
     def _build_preview(self) -> QWidget:
@@ -1471,6 +1479,12 @@ class MainWindow(QMainWindow):
         self.retry_warnings_button.setEnabled(has_warnings and not running)
         self.clear_completed_button.setEnabled(has_successes and not running)
         self.export_error_report_button.setEnabled(has_errors and not running)
+        # The FILES panel doubles as the drop target: show the drag & drop
+        # invitation only while there is truly nothing to show, including
+        # skipped-folder-content rows (which never touch self._files).
+        self.file_list_stack.setCurrentWidget(
+            self.file_tree if self.file_tree.topLevelItemCount() else self.drop_zone
+        )
 
     def _warn(self, title: str, message: str) -> None:
         QMessageBox.warning(self, title, message)

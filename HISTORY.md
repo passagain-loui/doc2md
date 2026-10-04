@@ -1,5 +1,19 @@
 # History
 
+## [1.4.4] - 2026-10-04 - The files panel is the drop target
+
+The user wanted the separate "Drag & drop documents here" box gone and the
+FILES panel to take over both of its jobs: accept the drop and show what
+landed. The window already accepted drops anywhere - that part needed no
+new code. What changed is the FILES column itself: it now holds a
+`QStackedWidget` with the drop-zone widget on one page and the file tree on
+the other, and `_update_actions()` (already called after every state change
+that could add or clear files) swaps to whichever one has something to
+show. The swap is keyed off the tree's actual row count, not
+`self._files`, so a folder drop that resolves to nothing but
+already-converted `.md` files still shows its skip-reason row instead of
+silently falling back to the empty-state invitation.
+
 ## [1.4.3] - 2026-10-04 - One line instead of two
 
 Another screenshot, this time of the toolbar row right under "MARKDOWN

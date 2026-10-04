@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.4.4] (2026-10-04) - FILES PANEL IS THE DROP TARGET
+
+### Changed
+
+- **Removed the standalone "Drag & drop documents here" box.** The FILES
+  panel now does both jobs: empty, it shows the drag-and-drop/click-to-browse
+  invitation; the moment there is a file (or even just a skipped-folder
+  explanation row), it swaps to the file list. One panel instead of two
+  stacked boxes competing for vertical space.
+
 ## [1.4.3] (2026-10-04) - ONE-LINE QUALITY SUMMARY
 
 ### Changed
