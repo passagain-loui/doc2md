@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.4.1] (2026-10-04) - LAYOUT CLEANUP
+
+### Changed
+
+- **Files and Preview sit side by side now**, not stacked. The Markdown
+  preview was cramped under the file list; a horizontal split gives both
+  the full window height, with extra width weighted toward the preview.
+- **Removed "Add files" button.** The drop zone has accepted a click to
+  browse for files since it was built; the separate button was a duplicate
+  entry point.
+- **Removed "Send to Sandbox" button** from the main window to cut toolbar
+  clutter. The underlying bridge feature (`send_to_bridge`) is unchanged and
+  still reachable from the CLI.
+- **Removed "Open Output" button.** It has had nothing to open since 1.4.0
+  stopped auto-saving to disk — it was dead ever since.
+
 ## [1.4.0] (2026-10-04) - EXPORT FORMATS, NO AUTO-SAVE
 
 ### Changed

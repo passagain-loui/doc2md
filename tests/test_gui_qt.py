@@ -89,7 +89,6 @@ def test_window_starts_with_actions_disabled(window):
     assert not window.convert_button.isEnabled()
     assert not window.cancel_button.isEnabled()
     assert not window.copy_button.isEnabled()
-    assert not window.bridge_button.isEnabled()
 
 
 def test_drop_zone_accepts_drops(window):
@@ -98,12 +97,10 @@ def test_drop_zone_accepts_drops(window):
 
 def test_every_button_carries_an_icon(window):
     for button in (
-        window.add_button,
         window.clear_button,
         window.convert_button,
         window.cancel_button,
         window.copy_button,
-        window.bridge_button,
     ):
         assert not button.icon().isNull(), button.text()
 

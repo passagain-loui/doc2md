@@ -118,12 +118,11 @@ def test_warning_banner_shown_for_a_warning_row(window, qapp, tmp_path):
     assert window.warning_banner.text() != ""
 
 
-# --- open original / open output --------------------------------------------------
+# --- open original -----------------------------------------------------------------
 
 
 def test_row_actions_disabled_before_any_selection(window):
     assert not window.open_original_button.isEnabled()
-    assert not window.open_output_button.isEnabled()
     assert not window.row_copy_button.isEnabled()
 
 
@@ -136,7 +135,6 @@ def test_open_original_enabled_after_selecting_a_converted_row(window, qapp, tmp
     qapp.processEvents()
 
     assert window.open_original_button.isEnabled()
-    assert not window.open_output_button.isEnabled()
     assert window.row_copy_button.isEnabled()
 
 

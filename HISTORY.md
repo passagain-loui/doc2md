@@ -1,5 +1,16 @@
 # History
 
+## [1.4.1] - 2026-10-04 - Side-by-side layout, fewer buttons
+
+The user looked at a screenshot of the running window and asked for a pass
+on button clutter and the cramped preview panel. Files and Preview went from
+a vertical stack to a horizontal split, which gives the preview the full
+window height instead of half of it. Three buttons came out: "Add files"
+(the drop zone already does this on click), "Send to Sandbox" (still works
+from the CLI, just not surfaced in the main window), and "Open Output" (it
+had been permanently disabled since 1.4.0 removed auto-save — nothing was
+ever going to populate a destination path for it to open again).
+
 ## [1.4.0] - 2026-10-04 - Export choices, no auto-save
 
 The user asked for two things: be able to choose the export format (md/txt/json),

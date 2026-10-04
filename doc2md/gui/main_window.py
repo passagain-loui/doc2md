@@ -415,11 +415,11 @@ class MainWindow(QMainWindow):
         self.drop_zone.clicked.connect(self._browse_files)
         root.addWidget(self.drop_zone)
 
-        splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(self._build_file_list())
         splitter.addWidget(self._build_preview())
-        splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 2)
+        splitter.setStretchFactor(0, 2)
+        splitter.setStretchFactor(1, 3)
         root.addWidget(splitter, 1)
 
         root.addWidget(self._build_progress())
@@ -586,12 +586,10 @@ class MainWindow(QMainWindow):
 
         self.open_original_button = QPushButton("Open Original")
         self.open_original_button.clicked.connect(self.open_original)
-        self.open_output_button = QPushButton("Open Output")
-        self.open_output_button.clicked.connect(self.open_output)
         self.row_copy_button = QPushButton("Copy Selected")
         self.row_copy_button.setToolTip("Copy this file's Markdown to clipboard.")
         self.row_copy_button.clicked.connect(self.copy_selected_markdown)
-        for button in (self.open_original_button, self.open_output_button, self.row_copy_button):
+        for button in (self.open_original_button, self.row_copy_button):
             button.setEnabled(False)
             toolbar.addWidget(button)
         layout.addLayout(toolbar)
@@ -674,10 +672,6 @@ class MainWindow(QMainWindow):
         row = QHBoxLayout()
         row.setSpacing(8)
 
-        self.add_button = QPushButton("Add files")
-        self.add_button.setIcon(theme.make_icon("add"))
-        self.add_button.clicked.connect(self._browse_files)
-
         self.clear_button = QPushButton("Clear")
         self.clear_button.setIcon(theme.make_icon("clear"))
         self.clear_button.clicked.connect(self.clear_files)
@@ -696,14 +690,6 @@ class MainWindow(QMainWindow):
         self.copy_button.setIcon(theme.make_icon("copy"))
         self.copy_button.clicked.connect(self.copy_markdown)
 
-        self.bridge_button = QPushButton("Send to Sandbox")
-        self.bridge_button.setIcon(theme.make_icon("bridge"))
-        self.bridge_button.setToolTip(
-            "Write the converted documents plus a manifest.json bundle into a "
-            "folder the Mediplex AI Sandbox can ingest."
-        )
-        self.bridge_button.clicked.connect(self.send_to_bridge)
-
         self.export_report_button = QPushButton("Export…")
         self.export_report_button.setIcon(theme.make_icon("document"))
         self.export_report_button.setToolTip(
@@ -712,12 +698,10 @@ class MainWindow(QMainWindow):
         )
         self.export_report_button.clicked.connect(self.export_content)
 
-        row.addWidget(self.add_button)
         row.addWidget(self.clear_button)
         row.addStretch(1)
         row.addWidget(self.copy_button)
         row.addWidget(self.export_report_button)
-        row.addWidget(self.bridge_button)
         row.addWidget(self.cancel_button)
         row.addWidget(self.convert_button)
         return row
@@ -1326,10 +1310,8 @@ class MainWindow(QMainWindow):
 
     def _update_row_actions(self, index: int | None) -> None:
         has_source = index is not None and 0 <= index < len(self._files)
-        has_output = has_source and index in self._output_paths
         has_markdown = has_source and bool(self._markdown.get(index))
         self.open_original_button.setEnabled(has_source)
-        self.open_output_button.setEnabled(has_output)
         self.row_copy_button.setEnabled(has_markdown)
 
     def open_original(self) -> None:
@@ -1337,15 +1319,6 @@ class MainWindow(QMainWindow):
         if index is None or not (0 <= index < len(self._files)):
             return
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(self._files[index])))
-
-    def open_output(self) -> None:
-        index = self._current_index
-        if index is None:
-            return
-        destination = self._output_paths.get(index)
-        if destination is None:
-            return
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(destination)))
 
     def copy_selected_markdown(self) -> bool:
         index = self._current_index
@@ -1532,10 +1505,8 @@ class MainWindow(QMainWindow):
         has_successes = STATUS_SUCCESS in statuses
         self.convert_button.setEnabled(has_files and not running)
         self.cancel_button.setEnabled(running)
-        self.add_button.setEnabled(not running)
         self.clear_button.setEnabled(has_files and not running)
         self.copy_button.setEnabled(has_output and not running)
-        self.bridge_button.setEnabled(has_output and not running)
         self.export_report_button.setEnabled(bool(self._markdown or self._results) and not running)
         self.retry_failed_button.setEnabled(has_errors and not running)
         self.retry_warnings_button.setEnabled(has_warnings and not running)
