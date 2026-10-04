@@ -131,6 +131,19 @@ def test_the_same_file_is_not_queued_twice(window, tmp_path):
     assert window.file_tree.topLevelItemCount() == 1
 
 
+def test_the_same_file_is_not_queued_twice_via_a_differently_spelled_path(window, tmp_path):
+    """The cross-drop dedup check must resolve paths, not compare raw
+    strings - otherwise the same physical file queued through two
+    differently-spelled (but equivalent) paths converts twice."""
+    source = make_txt(tmp_path, "dup.txt")
+    equivalent = tmp_path / "." / "dup.txt"
+
+    window.add_paths([source])
+    window.add_paths([equivalent])
+
+    assert window.file_tree.topLevelItemCount() == 1
+
+
 def test_unsupported_files_are_listed_as_skipped(window, tmp_path):
     media = tmp_path / "ประชุม.mp3"
     media.write_bytes(bytes([0x49, 0x44, 0x33, 3, 0, 0, 0]) + bytes(32))

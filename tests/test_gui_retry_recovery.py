@@ -261,6 +261,49 @@ def test_clear_completed_noop_when_nothing_succeeded(window, qapp, tmp_path):
     assert window.file_tree.topLevelItemCount() == 1
 
 
+def test_clear_completed_removes_the_right_rows_around_a_skipped_folder_row(
+    window, qapp, tmp_path
+):
+    """A skipped-folder explanation row is added straight to file_tree and
+    never tracked in window._items - if a Success row is added AFTER that
+    skip row lands, self._items and the tree's own top-level-item order
+    diverge. Clear Completed must still remove exactly the Success rows
+    (by identity), not whatever happens to sit at the same numeric position
+    in the tree."""
+    from PyQt6.QtCore import QDeadlineTimer, QEventLoop
+
+    a = make_txt(tmp_path, "a.txt", "A")
+    b = make_txt(tmp_path, "b.txt", "B")
+    window.add_paths([a, b])
+    run_batch(window, qapp)
+
+    already_converted = tmp_path / "already_converted"
+    already_converted.mkdir()
+    (already_converted / "old.md").write_text("# old", encoding="utf-8")
+    window.add_paths([already_converted])
+    deadline = QDeadlineTimer(10_000)
+    while window._scan_thread is not None and not deadline.hasExpired():
+        qapp.processEvents(QEventLoop.ProcessEventsFlag.AllEvents, 50)
+
+    broken = _write_broken_pdf(tmp_path / "bad.pdf")
+    window.add_paths([broken])
+    run_batch(window, qapp)
+
+    window.clear_completed()
+
+    remaining = [
+        window.file_tree.topLevelItem(i).text(0)
+        for i in range(window.file_tree.topLevelItemCount())
+    ]
+    assert "bad.pdf" in remaining, "the Error row must survive"
+    assert any("already_converted" in name for name in remaining), (
+        "the skip-row explanation must survive - it must never be deleted "
+        "in place of an actual Success row"
+    )
+    assert "a.txt" not in remaining
+    assert "b.txt" not in remaining
+
+
 # --- clipboard/bridge only reflect the latest valid round ------------------------
 
 

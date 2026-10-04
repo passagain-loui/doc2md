@@ -608,10 +608,17 @@ class MainWindow(QMainWindow):
         self.warning_banner.hide()
         layout.addWidget(self.warning_banner)
 
-        # Thumbnail widget kept for internal logic but never shown in layout
-        self.thumbnail_label = QLabel()
+        # Thumbnail widget kept for internal logic but never shown in layout.
+        # Must be parented (not QLabel() with no parent) - an unparented
+        # QWidget is a top-level window in Qt, so .show() in
+        # _update_thumbnail() would pop up a real floating OS window every
+        # time a PDF/image row is selected. Parenting makes it a normal
+        # child; moving it off-screen keeps it from being painted even
+        # though nothing lays it out.
+        self.thumbnail_label = QLabel(container)
         self.thumbnail_label.setObjectName("Thumbnail")
         self.thumbnail_label.setFixedSize(140, 140)
+        self.thumbnail_label.move(-1000, -1000)
         self.thumbnail_label.hide()
 
         # Last widget in the layout, same as file_tree is in its own column,
@@ -750,13 +757,21 @@ class MainWindow(QMainWindow):
         if self._scan_queue:
             self._start_next_scan()
 
+    @staticmethod
+    def _dedup_key(path: Path) -> str:
+        try:
+            return str(path.resolve()).casefold()
+        except OSError:
+            return str(path).casefold()
+
     def _apply_scan(self, accepted: list, rejected: list) -> None:
-        known = {str(p).casefold() for p in self._files}
+        known = {self._dedup_key(p) for p in self._files}
         added = 0
         for path in accepted:
-            if str(path).casefold() in known:
+            key = self._dedup_key(path)
+            if key in known:
                 continue
-            known.add(str(path).casefold())
+            known.add(key)
             self._files.append(path)
             self._items.append(self._make_row(path))
             added += 1
@@ -821,8 +836,15 @@ class MainWindow(QMainWindow):
             return
 
         keep_positions = [i for i in range(len(self._items)) if i not in set(remove_positions)]
-        for pos in sorted(remove_positions, reverse=True):
-            self.file_tree.takeTopLevelItem(pos)
+        # Remove by each item's actual tree position, not its self._items-
+        # relative index - those diverge whenever a skipped-folder row
+        # (added straight to file_tree, never tracked in self._items) sits
+        # between tracked rows, which would otherwise delete the wrong row.
+        for pos in remove_positions:
+            item = self._items[pos]
+            tree_index = self.file_tree.indexOfTopLevelItem(item)
+            if tree_index != -1:
+                self.file_tree.takeTopLevelItem(tree_index)
 
         self._files = [self._files[i] for i in keep_positions]
         self._items = [self._items[i] for i in keep_positions]

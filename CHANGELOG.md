@@ -1,5 +1,30 @@
 # Changelog
 
+## [1.4.5] (2026-10-04) - THREE BUGS FROM A DETAILED REVIEW
+
+### Fixed
+
+- **Clear Completed could delete the wrong row.** It removed rows by their
+  position within the internal tracking list, but a skipped-folder
+  explanation row (shown directly in the FILES list, never tracked
+  internally) can sit between tracked rows and throw that position out of
+  sync with the row's real position on screen. Confirmed with a repro: a
+  Success file would survive as an orphaned, unremovable row while the
+  skip-row explanation got deleted in its place. Now removes each row by
+  its own identity, never by a position that could point somewhere else.
+- **A real floating window could pop up when selecting a PDF or image.**
+  The hidden thumbnail widget (kept internally since the UI redesign that
+  removed it from view) had no parent widget, which in Qt means a real
+  top-level window - `.show()` on it would display a small floating window
+  next to the main one. The test suite never caught this because it always
+  runs headless, where a shown top-level widget has no visible effect.
+  Fixed by giving the widget a parent and moving it off-screen.
+- **The same file queued twice from two different-but-equivalent paths.**
+  Re-adding an already-queued file is supposed to be a no-op, but the check
+  compared raw path strings instead of resolved ones, so two paths
+  pointing at the same file (e.g. one with a redundant `.` segment) weren't
+  recognized as duplicates.
+
 ## [1.4.4] (2026-10-04) - FILES PANEL IS THE DROP TARGET
 
 ### Changed

@@ -1,5 +1,44 @@
 # History
 
+## [1.4.5] - 2026-10-04 - A detailed bug sweep
+
+The user asked for a thorough bug check rather than a specific feature or
+report. Read through the whole GUI module end to end and confirmed three
+issues before touching any code - each with a repro script, not just a
+hunch:
+
+1. `clear_completed()` removed tree rows using each item's position
+   *within `self._items`* as if that were also its position in the tree.
+   That holds as long as every row the tree shows is also tracked in
+   `self._items` - but a skipped-folder explanation row is added straight
+   to `file_tree` and deliberately never tracked there (it isn't a file,
+   there's nothing to convert or retry). Once one of those sits between
+   two tracked rows, the two indexings diverge and `takeTopLevelItem()`
+   removes whatever happens to be at that tree position, not the row
+   that was meant to go. Fixed by looking up each row's real tree index
+   (`indexOfTopLevelItem`) at removal time instead of assuming the two
+   orderings match.
+2. The thumbnail widget - alive internally since the original redesign
+   stopped showing it, kept only so `_update_thumbnail()`'s pixmap-building
+   logic stays exercised - was built with `QLabel()` and no parent. An
+   unparented `QWidget` is a top-level window to Qt; calling `.show()` on
+   it, which `_update_thumbnail()` does for every PDF/image selected, would
+   produce a real floating OS window. The test suite is blind to this
+   because it runs under `QT_QPA_PLATFORM=offscreen`, where showing a
+   top-level widget has no visible effect either way. Fixed by parenting
+   the widget to its container and moving it off-screen, so it stays an
+   ordinary, invisible child.
+3. The cross-drop duplicate check in `_apply_scan` compared `str(path)`
+   directly, while `collect_files()`'s own internal dedup resolves paths
+   first. Two spellings of the same file across two separate drops (e.g. a
+   path with a redundant `.` segment) weren't recognized as the same file
+   and would queue - and convert - twice.
+
+All three got a regression test alongside the fix, not just a manual
+repro: `test_clear_completed_removes_the_right_rows_around_a_skipped_folder_row`,
+`test_thumbnail_label_is_not_a_top_level_window`, and
+`test_the_same_file_is_not_queued_twice_via_a_differently_spelled_path`.
+
 ## [1.4.4] - 2026-10-04 - The files panel is the drop target
 
 The user wanted the separate "Drag & drop documents here" box gone and the

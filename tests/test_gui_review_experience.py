@@ -241,6 +241,15 @@ def test_thumbnail_cleared_when_selection_is_cleared(window, qapp, tmp_path):
     assert window.thumbnail_label.isHidden()
 
 
+def test_thumbnail_label_is_not_a_top_level_window(window):
+    """An unparented QWidget is a real top-level window in Qt - calling
+    .show() on one (as _update_thumbnail does whenever a PDF/image row is
+    selected) would pop up a genuine floating OS window. The widget must be
+    parented so it stays an ordinary, never-actually-visible child."""
+    assert window.thumbnail_label.parent() is not None
+    assert window.thumbnail_label.isWindow() is False
+
+
 # --- folder skip UX: collect_files reasons -------------------------------------------
 
 
