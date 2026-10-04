@@ -182,6 +182,12 @@ QLabel#Thumbnail {{
     border-radius: 8px;
 }}
 
+QLabel#MetaFooter {{
+    font-size: 11px;
+    color: {TEXT_MUTED};
+    padding: 2px 0px;
+}}
+
 QPushButton {{
     background-color: {SURFACE};
     border: 1px solid {BORDER};

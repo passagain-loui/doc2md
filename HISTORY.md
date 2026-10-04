@@ -1,5 +1,15 @@
 # History
 
+## [1.4.0] - 2026-10-04 - Export choices, no auto-save
+
+The user asked for two things: be able to choose the export format (md/txt/json),
+and stop writing files to disk automatically during conversion. Both are done.
+
+Conversion now keeps everything in memory. The "Export…" button opens a Save
+dialog where the user picks a format and location. The settings card is
+correspondingly leaner: the output policy dropdown, "save next to source"
+checkbox, and "copy to clipboard" checkbox are all gone.
+
 ## Where the project stands (2026-10-03, at the move to a new machine)
 
 Since 1.1.0 turned an audio tool into a document converter, the work has run in

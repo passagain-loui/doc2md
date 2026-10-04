@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.4.0] (2026-10-04) - EXPORT FORMATS, NO AUTO-SAVE
+
+### Changed
+
+- **Multi-format export.** The "Export…" button now opens a Save dialog with
+  format choice: Markdown (`.md`), Plain text (`.txt`), or JSON quality
+  report (`.json`). All converted results are combined into the chosen file.
+- **No auto-save to disk.** Converted documents are held in memory only;
+  nothing is written to disk until the user clicks "Export…". The output
+  folder setting now sets the default directory for the export dialog.
+- **Settings card simplified.** Removed: "Save next to source file" checkbox,
+  "Output Policy" dropdown, "Copy result to clipboard" checkbox. Destination
+  previews (the `→ path/to/output.md` text on queued rows) are also removed.
+
 ## [1.3.5] (2026-10-02) - ข/ย ON SCANS
 
 ### Fixed

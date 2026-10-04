@@ -69,8 +69,6 @@ def test_export_report_disabled_until_something_converts(window):
 
 def test_quality_panel_shows_pdf_metrics_after_conversion(window, qapp, simple_pdf, tmp_path):
     window.add_paths([simple_pdf])
-    window.output_edit.setText(str(tmp_path / "out"))
-    window.beside_source_check.setChecked(False)
 
     run_batch(window, qapp)
 
@@ -85,10 +83,7 @@ def test_quality_panel_shows_pdf_metrics_after_conversion(window, qapp, simple_p
 
 
 def test_export_report_writes_real_metrics(window, qapp, simple_pdf, tmp_path):
-    out_dir = tmp_path / "out"
     window.add_paths([simple_pdf])
-    window.output_edit.setText(str(out_dir))
-    window.beside_source_check.setChecked(False)
 
     run_batch(window, qapp)
     assert window.export_report_button.isEnabled()
@@ -97,37 +92,10 @@ def test_export_report_writes_real_metrics(window, qapp, simple_pdf, tmp_path):
     assert len(entries) == 1
     assert entries[0]["status"] == STATUS_SUCCESS
     assert entries[0]["pages_total"] == 1
-    assert entries[0]["output"] is not None
+    assert entries[0]["output"] is None
 
     report_path = tmp_path / "report.json"
     from doc2md.core.quality import write_report_atomic
 
     write_report_atomic(entries, report_path)
     assert json.loads(report_path.read_text(encoding="utf-8")) == entries
-
-
-def test_quality_badge_reflects_write_failure_not_engine_success(window, qapp, tmp_path):
-    """A conversion that succeeded at the engine level but failed to reach
-    disk must show as Error in the quality panel too - never as a stray
-    Success that contradicts the row's own status column."""
-    source = tmp_path / "note.txt"
-    source.write_text("hello", encoding="utf-8")
-    # A plain FILE where the output directory needs to be: `mkdir(parents=True)`
-    # for the destination's parent must fail, regardless of resolve_output_path's
-    # collision-numbering (which would otherwise sidestep a pre-created file).
-    blocker = tmp_path / "blocker"
-    blocker.write_text("not a directory", encoding="utf-8")
-    out_dir = blocker / "sub"
-
-    window.add_paths([source])
-    window.output_edit.setText(str(out_dir))
-    window.beside_source_check.setChecked(False)
-
-    run_batch(window, qapp)
-
-    item = window.file_tree.topLevelItem(0)
-    window.file_tree.setCurrentItem(item)
-    qapp.processEvents()
-
-    assert item.text(COLUMN_STATUS) == STATUS_ERROR
-    assert window.quality_badge.text() == STATUS_ERROR

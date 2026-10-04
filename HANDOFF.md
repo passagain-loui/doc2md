@@ -1,14 +1,14 @@
-# Handoff - doc2md v1.3.5
+# Handoff - doc2md v1.4.0
 
-Written 2026-10-03 for moving development to a new machine. Read this first,
-then README.md (what the tool does) and CLAUDE.md (the release pipeline rules).
+Written 2026-10-04. Read this first, then README.md (what the tool does) and
+CLAUDE.md (the release pipeline rules).
 
 ## 1. State right now
 
 | Item | Value |
 | --- | --- |
-| Version | 1.3.5 (`pyproject.toml` and `doc2md/__init__.py` agree) |
-| Last release commit | `5b53748` - "release: v1.3.5 fix a grey-scan regression..." |
+| Version | 1.4.0 (`pyproject.toml` and `doc2md/__init__.py` agree) |
+| Last release commit | see `git log` |
 | Branch | `main`, working tree clean at the time of writing |
 | Remote | `origin` = https://github.com/passagain-loui/doc2md.git |
 | Unpushed work | `main` was **19 commits ahead of `origin/main`**. Push before leaving the old machine, or copy the whole folder including `.git`. |

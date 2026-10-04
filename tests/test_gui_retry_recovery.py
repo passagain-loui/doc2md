@@ -123,8 +123,6 @@ def _run_mixed_batch(window, qapp, tmp_path):
     bad = _write_broken_pdf(tmp_path / "bad.pdf")
 
     window.add_paths([good, scanned, bad])
-    window.beside_source_check.setChecked(True)
-    window.policy_combo.setCurrentIndex(window._policy_index("unique"))
     run_batch(window, qapp)
     return good, scanned, bad
 

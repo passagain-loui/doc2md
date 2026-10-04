@@ -49,12 +49,6 @@ from PyQt6.QtWidgets import (
 
 from doc2md import __version__
 from doc2md.core.converter import ConversionResult, Converter
-from doc2md.core.exporter import (
-    OutputPolicy,
-    OutputPolicyError,
-    claim_and_publish_text,
-    resolve_destination,
-)
 from doc2md.core.presets import CUSTOM, PRESET_NAMES, matching_preset, options_for
 from doc2md.core.quality import build_report, write_report_atomic
 from doc2md.core.router import RECURSIVE_SCAN_EXCLUDED_SUFFIXES, FileKind, detect
@@ -76,13 +70,6 @@ OCR_LANGUAGES = [
     ("Thai only", "tha"),
     ("English only", "eng"),
 ]
-OUTPUT_POLICIES = [
-    ("Converted folder (recommended)", OutputPolicy.CONVERTED_FOLDER.value),
-    ("Unique (never overwrite)", OutputPolicy.UNIQUE.value),
-    ("Fail if it exists", OutputPolicy.FAIL.value),
-    ("Overwrite existing file", OutputPolicy.OVERWRITE.value),
-]
-
 STATUS_QUEUED = "Queued"
 STATUS_CONVERTING = "Converting"
 STATUS_SUCCESS = "Success"
@@ -397,7 +384,6 @@ class MainWindow(QMainWindow):
         self._markdown: dict[int, str] = {}
         self._results: dict[int, object] = {}
         self._output_paths: dict[int, Path] = {}
-        self._write_failures = 0
         self._warnings = 0
         self._thread: QThread | None = None
         self._scan_thread: QThread | None = None
@@ -466,8 +452,7 @@ class MainWindow(QMainWindow):
         grid.addWidget(self._section_label("OUTPUT FOLDER"), 0, 0)
         self.output_edit = QLineEdit(str(Path.home() / "Documents"))
         self.output_edit.setToolTip(
-            "Where the .md files are written. Leave the 'next to source' box "
-            "ticked to save each result beside its original file instead."
+            "Default folder for exporting converted results."
         )
         self.output_edit.textChanged.connect(self._on_output_edit_changed)
         grid.addWidget(self.output_edit, 1, 0, 1, 2)
@@ -495,24 +480,7 @@ class MainWindow(QMainWindow):
         self.ocr_combo.currentIndexChanged.connect(self._on_ocr_setting_changed)
         grid.addWidget(self.ocr_combo, 1, 4)
 
-        grid.addWidget(self._section_label("OUTPUT POLICY"), 0, 5)
-        self.policy_combo = QComboBox()
-        for label, _value in OUTPUT_POLICIES:
-            self.policy_combo.addItem(label)
-        self.policy_combo.setToolTip(
-            "What to do when a destination file might already exist. "
-            "'Converted folder' (default) can never collide with an "
-            "existing document since it always writes into its own subfolder."
-        )
-        saved_policy = self._settings.value("output/policy", OutputPolicy.CONVERTED_FOLDER.value)
-        self.policy_combo.setCurrentIndex(self._policy_index(str(saved_policy)))
-        self.policy_combo.currentIndexChanged.connect(self._on_policy_changed)
-        grid.addWidget(self.policy_combo, 1, 5)
-
         options = QHBoxLayout()
-        self.beside_source_check = QCheckBox("Save next to source file")
-        self.beside_source_check.setChecked(True)
-        self.beside_source_check.toggled.connect(self._on_beside_source_toggled)
         self.ocr_check = QCheckBox("OCR scanned pages")
         self.ocr_check.setChecked(True)
         self.ocr_check.toggled.connect(self._on_ocr_setting_changed)
@@ -523,12 +491,9 @@ class MainWindow(QMainWindow):
         self.hidden_sheets_check.setToolTip(
             "Also convert worksheets that are hidden in the Excel file"
         )
-        self.clipboard_check = QCheckBox("Copy result to clipboard")
         for widget in (
-            self.beside_source_check,
             self.ocr_check,
             self.tables_check,
-            self.clipboard_check,
         ):
             options.addWidget(widget)
         options.addStretch(1)
@@ -567,7 +532,6 @@ class MainWindow(QMainWindow):
 
         grid.setColumnStretch(0, 3)
         grid.setColumnStretch(1, 1)
-        self._on_beside_source_toggled(True)
         self._sync_preset_combo()
         return card
 
@@ -605,20 +569,32 @@ class MainWindow(QMainWindow):
         container = QWidget()
         layout = QVBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
+        layout.setSpacing(4)
         layout.addWidget(self._section_label("MARKDOWN PREVIEW"))
 
-        quality_row = QHBoxLayout()
-        quality_row.setSpacing(8)
+        # Single toolbar row: badge + quality metrics + action buttons
+        toolbar = QHBoxLayout()
+        toolbar.setSpacing(6)
         self.quality_badge = QLabel("")
         self.quality_badge.setObjectName("QualityBadge")
         self.quality_badge.hide()
         self.quality_detail = QLabel("Select a converted file to see its quality summary.")
         self.quality_detail.setObjectName("Muted")
-        self.quality_detail.setWordWrap(True)
-        quality_row.addWidget(self.quality_badge)
-        quality_row.addWidget(self.quality_detail, 1)
-        layout.addLayout(quality_row)
+        self.quality_detail.setWordWrap(False)
+        toolbar.addWidget(self.quality_badge)
+        toolbar.addWidget(self.quality_detail, 1)
+
+        self.open_original_button = QPushButton("Open Original")
+        self.open_original_button.clicked.connect(self.open_original)
+        self.open_output_button = QPushButton("Open Output")
+        self.open_output_button.clicked.connect(self.open_output)
+        self.row_copy_button = QPushButton("Copy Selected")
+        self.row_copy_button.setToolTip("Copy this file's Markdown to clipboard.")
+        self.row_copy_button.clicked.connect(self.copy_selected_markdown)
+        for button in (self.open_original_button, self.open_output_button, self.row_copy_button):
+            button.setEnabled(False)
+            toolbar.addWidget(button)
+        layout.addLayout(toolbar)
 
         self.warning_banner = QLabel("")
         self.warning_banner.setObjectName("WarningBanner")
@@ -626,31 +602,11 @@ class MainWindow(QMainWindow):
         self.warning_banner.hide()
         layout.addWidget(self.warning_banner)
 
-        row_actions = QHBoxLayout()
-        row_actions.setSpacing(8)
-        self.open_original_button = QPushButton("Open Original")
-        self.open_original_button.clicked.connect(self.open_original)
-        self.open_output_button = QPushButton("Open Output")
-        self.open_output_button.clicked.connect(self.open_output)
-        self.row_copy_button = QPushButton("Copy Markdown")
-        self.row_copy_button.setToolTip("Copy just the selected file's Markdown.")
-        self.row_copy_button.clicked.connect(self.copy_selected_markdown)
-        for button in (self.open_original_button, self.open_output_button, self.row_copy_button):
-            button.setEnabled(False)
-            row_actions.addWidget(button)
-        row_actions.addStretch(1)
-        layout.addLayout(row_actions)
-
-        content_row = QHBoxLayout()
-        content_row.setSpacing(8)
-
+        # Thumbnail widget kept for internal logic but never shown in layout
         self.thumbnail_label = QLabel()
         self.thumbnail_label.setObjectName("Thumbnail")
         self.thumbnail_label.setFixedSize(140, 140)
-        self.thumbnail_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.thumbnail_label.setScaledContents(False)
         self.thumbnail_label.hide()
-        content_row.addWidget(self.thumbnail_label, 0, Qt.AlignmentFlag.AlignTop)
 
         self.preview = QPlainTextEdit()
         self.preview.setReadOnly(True)
@@ -662,13 +618,12 @@ class MainWindow(QMainWindow):
         # without letting the window see the drag; opt out so it bubbles up.
         self.preview.setAcceptDrops(False)
         self.preview.viewport().setAcceptDrops(False)
-        content_row.addWidget(self.preview, 1)
-        layout.addLayout(content_row, 1)
+        layout.addWidget(self.preview, 1)
 
-        layout.addWidget(self._section_label("COMPARE METADATA"))
-        self.compare_metadata = QLabel("Select a converted file to compare source vs. output.")
-        self.compare_metadata.setObjectName("Muted")
-        self.compare_metadata.setWordWrap(True)
+        # Compact metadata footer — no section header, just one quiet line
+        self.compare_metadata = QLabel("")
+        self.compare_metadata.setObjectName("MetaFooter")
+        self.compare_metadata.setWordWrap(False)
         layout.addWidget(self.compare_metadata)
 
         return container
@@ -749,13 +704,13 @@ class MainWindow(QMainWindow):
         )
         self.bridge_button.clicked.connect(self.send_to_bridge)
 
-        self.export_report_button = QPushButton("Export Report")
+        self.export_report_button = QPushButton("Export…")
         self.export_report_button.setIcon(theme.make_icon("document"))
         self.export_report_button.setToolTip(
-            "Write a structured JSON quality report for every converted file "
-            "in this batch (pages read, tables found, OCR outcome, etc.)."
+            "Save converted results as Markdown (.md), plain text (.txt), "
+            "or a JSON quality report."
         )
-        self.export_report_button.clicked.connect(self.export_quality_report)
+        self.export_report_button.clicked.connect(self.export_content)
 
         row.addWidget(self.add_button)
         row.addWidget(self.clear_button)
@@ -829,8 +784,6 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"Nothing added — {len(rejected)} file(s) skipped")
         else:
             self.statusBar().showMessage("Nothing added — those files are already queued")
-        self._refresh_destination_previews()
-        self._warn_if_output_inside_input_tree()
         self._update_actions()
 
     def _make_row(self, path: Path) -> QTreeWidgetItem:
@@ -854,7 +807,6 @@ class MainWindow(QMainWindow):
         self._markdown.clear()
         self._results.clear()
         self._output_paths.clear()
-        self._write_failures = 0
         self._warnings = 0
         self.file_tree.clear()
         self._reset_preview_panel()
@@ -922,54 +874,12 @@ class MainWindow(QMainWindow):
         chosen = QFileDialog.getExistingDirectory(self, "Select output folder", current)
         if chosen:
             self.output_edit.setText(chosen)
-            self.beside_source_check.setChecked(False)
-
-    def _on_beside_source_toggled(self, checked: bool) -> None:
-        self.output_edit.setEnabled(not checked)
-        self._refresh_destination_previews()
-        self._warn_if_output_inside_input_tree()
 
     def _on_output_edit_changed(self, _text: str) -> None:
-        self._refresh_destination_previews()
-        self._warn_if_output_inside_input_tree()
+        pass
 
     def _refresh_destination_previews(self) -> None:
-        """Show each queued row's would-be destination before Convert is
-        pressed, so the output path is visible up front rather than only
-        discovered after the batch runs."""
-        for index, source in enumerate(self._files):
-            if index >= len(self._items):
-                continue
-            item = self._items[index]
-            if item.text(COLUMN_STATUS) != STATUS_QUEUED:
-                continue
-            try:
-                preview = self.output_path_for(source)
-            except (OSError, OutputPolicyError, ValueError):
-                item.setText(COLUMN_DETAIL, "")
-                continue
-            item.setText(COLUMN_DETAIL, f"→ {preview}")
-            item.setToolTip(COLUMN_DETAIL, str(preview))
-
-    def _warn_if_output_inside_input_tree(self) -> None:
-        if self.beside_source_check.isChecked():
-            return
-        text = self.output_edit.text().strip()
-        if not text:
-            return
-        try:
-            output_root = Path(text).resolve()
-        except OSError:
-            return
-        for source in self._files:
-            try:
-                source.resolve().relative_to(output_root)
-            except ValueError:
-                continue
-            self.statusBar().showMessage(
-                f"Note: output folder {output_root} contains one or more source files."
-            )
-            return
+        pass
 
     # ------------------------------------------------------------ conversion
 
@@ -1067,20 +977,6 @@ class MainWindow(QMainWindow):
         dialog.exec()
         self._refresh_ocr_backend_status()
 
-    @staticmethod
-    def _policy_index(value: str) -> int:
-        for i, (_label, policy_value) in enumerate(OUTPUT_POLICIES):
-            if policy_value == value:
-                return i
-        return 0  # unrecognized saved value -> fall back to the safe default
-
-    def selected_output_policy(self) -> str:
-        return OUTPUT_POLICIES[max(self.policy_combo.currentIndex(), 0)][1]
-
-    def _on_policy_changed(self, _index: int) -> None:
-        self._settings.setValue("output/policy", self.selected_output_policy())
-        self._refresh_destination_previews()
-
     def start_conversion(self) -> None:
         if self._is_running() or not self._files:
             return
@@ -1130,7 +1026,6 @@ class MainWindow(QMainWindow):
         always updates the same row a file already occupies - a retry never
         creates a new row, whether it ends in Success or Error again.
         """
-        self._write_failures = 0
         self._warnings = 0
         self.progress_bar.setValue(0)
         self.progress_label.setText(f"0 / {len(files_by_index)}")
@@ -1167,36 +1062,17 @@ class MainWindow(QMainWindow):
         if result is not None:
             self._results[index] = result
         if ok:
-            # Conversion succeeding is not the same as the row succeeding: a
-            # write failure here (full disk, permission denied, locked file)
-            # must surface as Error, not Success, and must never let this
-            # document into the clipboard or a Sandbox bundle silently.
-            write_ok, detail, destination = self._write_output(self._files[index], markdown)
-            if write_ok:
-                self._markdown[index] = markdown
-                if destination is not None:
-                    self._output_paths[index] = destination
-                if warning:
-                    # OCR unavailable/disabled/no-text: real output was
-                    # written, but it is not a real read of the document -
-                    # must not look identical to a genuine Success.
-                    self._warnings += 1
-                    self._paint_status(item, STATUS_WARNING)
-                    item.setText(COLUMN_DETAIL, warning)
-                    item.setToolTip(COLUMN_DETAIL, warning)
-                else:
-                    self._paint_status(item, STATUS_SUCCESS)
-                    item.setText(COLUMN_DETAIL, detail)
-                if self.file_tree.currentItem() is None:
-                    self.file_tree.setCurrentItem(item)
+            self._markdown[index] = markdown
+            if warning:
+                self._warnings += 1
+                self._paint_status(item, STATUS_WARNING)
+                item.setText(COLUMN_DETAIL, warning)
+                item.setToolTip(COLUMN_DETAIL, warning)
             else:
-                self._write_failures += 1
-                if result is not None:
-                    result.success = False
-                    result.error = detail
-                self._paint_status(item, STATUS_ERROR)
-                item.setText(COLUMN_DETAIL, detail)
-                item.setToolTip(COLUMN_DETAIL, detail)
+                self._paint_status(item, STATUS_SUCCESS)
+                item.setText(COLUMN_DETAIL, "")
+            if self.file_tree.currentItem() is None:
+                self.file_tree.setCurrentItem(item)
         else:
             self._paint_status(item, STATUS_ERROR)
             item.setText(COLUMN_DETAIL, error)
@@ -1211,18 +1087,10 @@ class MainWindow(QMainWindow):
 
     def _on_batch_finished(self, succeeded: int, failed: int, cancelled: bool) -> None:
         self._teardown_thread()
-        # `succeeded`/`failed` come from the converter only; a document whose
-        # markdown was produced but never made it to disk must not be counted
-        # as a success in the batch summary.
-        succeeded -= self._write_failures
-        failed += self._write_failures
         warn_note = f", {self._warnings} with warnings" if self._warnings else ""
         verb = "Cancelled" if cancelled else "Done"
         message = f"{verb} — {succeeded} converted{warn_note}, {failed} failed"
         self.statusBar().showMessage(message)
-
-        if self.clipboard_check.isChecked() and self._markdown:
-            self.copy_markdown(quiet=True)
         self._update_actions()
 
         if self._close_after_cancel:
@@ -1256,29 +1124,7 @@ class MainWindow(QMainWindow):
     # ---------------------------------------------------------------- output
 
     def output_directory_for(self, source: Path) -> Path:
-        if self.beside_source_check.isChecked():
-            return source.parent
         return Path(self.output_edit.text().strip() or source.parent)
-
-    def output_path_for(self, source: Path) -> Path:
-        """**Preview only** - see resolve_destination()'s docstring. Never
-        call this to decide where to actually write; use `_write_output`,
-        which claims the destination itself rather than trusting a path
-        computed here."""
-        return resolve_destination(
-            source, self.output_directory_for(source), self.output_suffix(),
-            self.selected_output_policy(),
-        )
-
-    def _write_output(self, source: Path, markdown: str) -> tuple[bool, str, Path | None]:
-        try:
-            destination = claim_and_publish_text(
-                source, self.output_directory_for(source), self.output_suffix(),
-                markdown, self.selected_output_policy(),
-            )
-        except (OSError, OutputPolicyError) as exc:
-            return False, f"saved nothing — {exc}", None
-        return True, f"saved to {destination}", destination
 
     def collected_markdown(self) -> str:
         """Concatenate every successful result in queue order."""
@@ -1352,26 +1198,44 @@ class MainWindow(QMainWindow):
             )
         return entries
 
-    def export_quality_report(self) -> bool:
-        entries = self.build_quality_report()
-        if not entries:
+    def export_content(self) -> bool:
+        if not self._markdown and not self._results:
             self._warn("Nothing to export", "Convert at least one document first.")
             return False
 
-        default_name = str(
-            Path(self.output_edit.text().strip() or str(Path.home())) / "quality-report.json"
-        )
+        default_dir = self.output_edit.text().strip() or str(Path.home())
         path_str, _filter = QFileDialog.getSaveFileName(
-            self, "Export quality report", default_name, "JSON (*.json)"
+            self,
+            "Export",
+            str(Path(default_dir) / "output.md"),
+            "Markdown (*.md);;Plain text (*.txt);;JSON quality report (*.json)",
         )
         if not path_str:
             return False
-        try:
-            write_report_atomic(entries, Path(path_str))
-        except OSError as exc:
-            self._warn("Export failed", f"Could not write the report: {exc}")
-            return False
-        self.statusBar().showMessage(f"Quality report written to {path_str}")
+
+        chosen = Path(path_str)
+        suffix = chosen.suffix.lower()
+
+        if suffix == ".json":
+            entries = self.build_quality_report()
+            if not entries:
+                self._warn("Nothing to export", "Convert at least one document first.")
+                return False
+            try:
+                write_report_atomic(entries, chosen)
+            except OSError as exc:
+                self._warn("Export failed", f"Could not write the report: {exc}")
+                return False
+        else:
+            if not self._markdown:
+                self._warn("Nothing to export", "Convert at least one document first.")
+                return False
+            try:
+                chosen.write_text(self.collected_markdown(), encoding="utf-8")
+            except OSError as exc:
+                self._warn("Export failed", f"Could not write the file: {exc}")
+                return False
+        self.statusBar().showMessage(f"Exported to {path_str}")
         return True
 
     def build_error_report(self) -> list[dict]:
@@ -1555,7 +1419,7 @@ class MainWindow(QMainWindow):
 
     def _update_compare_metadata(self, index: int | None) -> None:
         if index is None or not (0 <= index < len(self._files)):
-            self.compare_metadata.setText("Select a converted file to compare source vs. output.")
+            self.compare_metadata.setText("")
             return
 
         source = self._files[index]
@@ -1653,12 +1517,10 @@ class MainWindow(QMainWindow):
             elif quality.ocr_pages_success is not None or quality.ocr_pages_empty is not None:
                 facts.append("OCR: no backend available")
 
-        detail_text = item.text(COLUMN_DETAIL) or ""
         if facts:
-            self.quality_detail.setText(" · ".join(facts) + (f" — {detail_text}" if detail_text else ""))
+            self.quality_detail.setText(" · ".join(facts))
         else:
-            base = "No structured metrics available for this file type."
-            self.quality_detail.setText(f"{base} — {detail_text}" if detail_text else base)
+            self.quality_detail.setText("No structured metrics available for this file type.")
 
     def _update_actions(self) -> None:
         running = self._is_running()
@@ -1674,7 +1536,7 @@ class MainWindow(QMainWindow):
         self.clear_button.setEnabled(has_files and not running)
         self.copy_button.setEnabled(has_output and not running)
         self.bridge_button.setEnabled(has_output and not running)
-        self.export_report_button.setEnabled(bool(self._results) and not running)
+        self.export_report_button.setEnabled(bool(self._markdown or self._results) and not running)
         self.retry_failed_button.setEnabled(has_errors and not running)
         self.retry_warnings_button.setEnabled(has_warnings and not running)
         self.clear_completed_button.setEnabled(has_successes and not running)

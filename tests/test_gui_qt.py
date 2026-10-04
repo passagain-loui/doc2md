@@ -82,12 +82,6 @@ def run_batch(window: MainWindow, qapp, timeout_ms: int = 30_000) -> None:
     assert finished, "conversion did not finish within the timeout"
 
 
-def select_policy(window: MainWindow, value: str) -> None:
-    """Pin the output policy so a test unrelated to Milestone 2's policy
-    feature is not affected by the GUI's Converted-folder default."""
-    window.policy_combo.setCurrentIndex(window._policy_index(value))
-
-
 # --- construction ------------------------------------------------------------
 
 
@@ -164,17 +158,13 @@ def test_clear_empties_the_queue(window, tmp_path):
 # --- batch conversion --------------------------------------------------------
 
 
-def test_batch_conversion_marks_every_row_and_writes_output(window, qapp, tmp_path):
-    out_dir = tmp_path / "ผลลัพธ์"
+def test_batch_conversion_marks_every_row_success(window, qapp, tmp_path):
     sources = [
         make_txt(tmp_path, "รายงาน หนึ่ง.txt", "บรรทัดแรก"),
         make_txt(tmp_path, "report two.txt", "second line"),
         make_txt(tmp_path, "สาม.txt", "บรรทัดที่สาม"),
     ]
     window.add_paths(sources)
-    window.beside_source_check.setChecked(False)
-    window.output_edit.setText(str(out_dir))
-    select_policy(window, "unique")
 
     run_batch(window, qapp)
 
@@ -184,23 +174,7 @@ def test_batch_conversion_marks_every_row_and_writes_output(window, qapp, tmp_pa
     assert statuses == [STATUS_SUCCESS] * 3
     assert window.progress_bar.value() == 100
     assert window.progress_label.text() == "3 / 3"
-
-    written = sorted(p.name for p in out_dir.glob("*.md"))
-    assert written == ["report two.md", "รายงาน หนึ่ง.md", "สาม.md"]
-    assert "บรรทัดแรก" in (out_dir / "รายงาน หนึ่ง.md").read_text(encoding="utf-8")
-
-
-def test_output_is_written_next_to_the_source_when_requested(window, qapp, tmp_path):
-    folder = tmp_path / "เอกสาร ไทย"
-    folder.mkdir()
-    source = make_txt(folder, "บันทึก.txt")
-    window.add_paths([source])
-    window.beside_source_check.setChecked(True)
-    select_policy(window, "unique")
-
-    run_batch(window, qapp)
-
-    assert (folder / "บันทึก.md").is_file()
+    assert "บรรทัดแรก" in window._markdown[0]
 
 
 def test_a_failing_file_does_not_stop_the_batch(window, qapp, tmp_path):
@@ -221,64 +195,6 @@ def test_a_failing_file_does_not_stop_the_batch(window, qapp, tmp_path):
         if window.file_tree.topLevelItem(i).text(COLUMN_STATUS) == STATUS_ERROR
     )
     assert error_row.text(COLUMN_DETAIL).strip(), "an error row must say why"
-
-
-def test_colliding_output_names_do_not_overwrite_each_other(window, qapp, tmp_path):
-    out_dir = tmp_path / "out"
-    first = tmp_path / "a"
-    second = tmp_path / "b"
-    first.mkdir()
-    second.mkdir()
-    make_txt(first, "report.txt", "first body")
-    make_txt(second, "report.txt", "second body")
-
-    window.add_paths([first / "report.txt", second / "report.txt"])
-    window.beside_source_check.setChecked(False)
-    window.output_edit.setText(str(out_dir))
-    select_policy(window, "unique")
-
-    run_batch(window, qapp)
-
-    assert sorted(p.name for p in out_dir.glob("*.md")) == ["report-1.md", "report.md"]
-
-
-def test_write_failure_shows_error_not_success_and_is_excluded_from_summary(
-    window, qapp, tmp_path, monkeypatch
-):
-    """A document that converts cleanly but can't be written to disk must be
-    an Error row, must not count toward the succeeded total, and must not be
-    silently offered up for clipboard/bridge (Bug A3)."""
-    good = make_txt(tmp_path, "good.txt", "fine content")
-    unwritable = make_txt(tmp_path, "unwritable.txt", "will not save")
-    window.add_paths([good, unwritable])
-
-    import doc2md.gui.main_window as gui_main_window
-
-    original_claim_and_publish_text = gui_main_window.claim_and_publish_text
-
-    def flaky_claim_and_publish_text(source, *args, **kwargs):
-        if source.stem == "unwritable":
-            raise OSError("simulated permission denied")
-        return original_claim_and_publish_text(source, *args, **kwargs)
-
-    monkeypatch.setattr(gui_main_window, "claim_and_publish_text", flaky_claim_and_publish_text)
-
-    run_batch(window, qapp)
-
-    rows = {
-        window.file_tree.topLevelItem(i).text(0): window.file_tree.topLevelItem(i)
-        for i in range(2)
-    }
-    assert rows["good.txt"].text(COLUMN_STATUS) == STATUS_SUCCESS
-    assert rows["unwritable.txt"].text(COLUMN_STATUS) == STATUS_ERROR
-    assert "saved nothing" in rows["unwritable.txt"].text(COLUMN_DETAIL)
-
-    # The write failure must not be reported as a converted success anywhere,
-    # and the document must not have entered the clipboard/bridge payload.
-    unwritable_index = window._files.index(unwritable)
-    assert unwritable_index not in window._markdown
-    good_index = window._files.index(good)
-    assert good_index in window._markdown
 
 
 def test_ocr_backend_status_reflects_real_environment():
@@ -409,18 +325,16 @@ def test_closing_window_during_conversion_does_not_force_delete_thread(
 
 
 def test_txt_output_format_is_honoured(window, qapp, tmp_path):
-    """Writing .txt beside a .txt source must not overwrite the source."""
+    """Selecting .txt format should affect output_suffix and conversion still succeeds."""
     source = make_txt(tmp_path, "plain.txt", "original body")
     window.add_paths([source])
     window.format_combo.setCurrentIndex(1)
-    window.beside_source_check.setChecked(True)
-    select_policy(window, "unique")
 
     assert window.output_suffix() == ".txt"
     run_batch(window, qapp)
 
+    assert window.file_tree.topLevelItem(0).text(COLUMN_STATUS) == STATUS_SUCCESS
     assert source.read_text(encoding="utf-8") == "original body"
-    assert (tmp_path / "plain-1.txt").is_file()
 
 
 # --- options -----------------------------------------------------------------
@@ -442,14 +356,6 @@ def test_default_ocr_language_is_thai_plus_english(window):
     assert window.conversion_options()["ocr_lang"] == "tha+eng"
 
 
-def test_output_folder_field_follows_the_beside_source_checkbox(window):
-    window.beside_source_check.setChecked(True)
-    assert not window.output_edit.isEnabled()
-
-    window.beside_source_check.setChecked(False)
-    assert window.output_edit.isEnabled()
-
-
 # --- clipboard and bridge ----------------------------------------------------
 
 
@@ -457,7 +363,6 @@ def test_copy_markdown_puts_every_result_on_the_clipboard(window, qapp, tmp_path
     window.add_paths(
         [make_txt(tmp_path, "หนึ่ง.txt", "อัลฟา"), make_txt(tmp_path, "song.txt", "beta")]
     )
-    window.beside_source_check.setChecked(True)
     run_batch(window, qapp)
 
     assert window.copy_button.isEnabled()
@@ -476,7 +381,6 @@ def test_copy_markdown_refuses_when_there_is_nothing_to_copy(window):
 
 def test_bridge_payload_carries_the_converted_documents(window, qapp, tmp_path):
     window.add_paths([make_txt(tmp_path, "รายงาน.txt", "เนื้อหา")])
-    window.beside_source_check.setChecked(True)
     run_batch(window, qapp)
 
     payload = window.build_bridge_payload()
@@ -489,7 +393,6 @@ def test_bridge_payload_carries_the_converted_documents(window, qapp, tmp_path):
 def test_bridge_writes_a_bundle_the_sandbox_can_read(window, qapp, tmp_path, monkeypatch):
     inbox = tmp_path / "sandbox-inbox"
     window.add_paths([make_txt(tmp_path, "ใบเสร็จ.txt", "ยอดรวม 100")])
-    window.beside_source_check.setChecked(True)
     run_batch(window, qapp)
 
     monkeypatch.setattr(
@@ -508,7 +411,6 @@ def test_bridge_writes_a_bundle_the_sandbox_can_read(window, qapp, tmp_path, mon
 
 def test_bridge_is_a_no_op_when_the_folder_dialog_is_cancelled(window, qapp, tmp_path, monkeypatch):
     window.add_paths([make_txt(tmp_path, "x.txt")])
-    window.beside_source_check.setChecked(True)
     run_batch(window, qapp)
 
     monkeypatch.setattr(
@@ -634,25 +536,6 @@ def test_files_dropped_anywhere_on_the_window_are_queued(window, qapp, tmp_path,
     qapp.sendEvent(receiver, drop)
 
     assert window.file_tree.topLevelItemCount() == 1
-
-
-# --- write failures must not look like successes in the reports --------------
-
-
-def test_write_failure_is_an_error_in_every_report(window, qapp, tmp_path):
-    blocker = tmp_path / "blocker"
-    blocker.write_text("not a directory", encoding="utf-8")
-    window.add_paths([make_txt(tmp_path, "a.txt")])
-    window.beside_source_check.setChecked(False)
-    window.output_edit.setText(str(blocker / "sub"))
-
-    run_batch(window, qapp)
-
-    assert window.file_tree.topLevelItem(0).text(COLUMN_STATUS) == STATUS_ERROR
-    quality = window.build_quality_report()
-    assert [entry["status"] for entry in quality] == ["Error"]
-    assert quality[0]["error"]
-    assert [entry["status"] for entry in window.build_error_report()] == ["Error"]
 
 
 # --- folders are scanned off the GUI thread ------------------------------------

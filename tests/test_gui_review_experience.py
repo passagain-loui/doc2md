@@ -136,7 +136,7 @@ def test_open_original_enabled_after_selecting_a_converted_row(window, qapp, tmp
     qapp.processEvents()
 
     assert window.open_original_button.isEnabled()
-    assert window.open_output_button.isEnabled()
+    assert not window.open_output_button.isEnabled()
     assert window.row_copy_button.isEnabled()
 
 
@@ -156,26 +156,6 @@ def test_open_original_calls_desktop_services_with_the_source_path(window, qapp,
 
     window.open_original()
     assert [Path(p) for p in opened] == [source]
-
-
-def test_open_output_calls_desktop_services_with_the_destination_path(window, qapp, tmp_path, monkeypatch):
-    source = make_txt(tmp_path, "good.txt")
-    window.add_paths([source])
-    window.beside_source_check.setChecked(True)
-    window.policy_combo.setCurrentIndex(window._policy_index("unique"))
-    run_batch(window, qapp)
-    window.file_tree.setCurrentItem(window.file_tree.topLevelItem(0))
-    qapp.processEvents()
-
-    opened = []
-    from doc2md.gui import main_window as gui_main_window
-
-    monkeypatch.setattr(
-        gui_main_window.QDesktopServices, "openUrl", lambda url: opened.append(url.toLocalFile())
-    )
-
-    window.open_output()
-    assert [Path(p) for p in opened] == [tmp_path / "good.md"]
 
 
 # --- per-row copy markdown ---------------------------------------------------------
@@ -225,7 +205,7 @@ def test_compare_metadata_shows_pdf_page_count(window, qapp, tmp_path):
 
 
 def test_compare_metadata_placeholder_when_nothing_selected(window):
-    assert "Select a converted file" in window.compare_metadata.text()
+    assert window.compare_metadata.text() == ""
 
 
 # --- thumbnails ----------------------------------------------------------------------
