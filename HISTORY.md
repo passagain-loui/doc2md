@@ -1,5 +1,28 @@
 # History
 
+## [1.4.2] - 2026-10-04 - Stale preview, flush panel edges
+
+Two reports against the 1.4.1 layout, both from a screenshot of the real
+app: the preview stayed on its placeholder text after a real conversion
+succeeded, and the preview box stopped noticeably short of the file list's
+bottom edge, leaving a visible strip of dead space under it.
+
+The blank preview turned out to be a genuine bug, not a rendering hiccup -
+confirmed with a repro script before touching anything. Selecting a row
+*before* its conversion finishes (easy to do with a single file: it auto-
+selects into "Converting" almost immediately) means that row is already
+`currentItem()` when `_on_file_finished` runs. The code only refreshed the
+quality badge for that case, not the preview text - so the badge caught up
+but the markdown pane never did, even though `self._markdown[index]` had
+the real content the whole time. Fixed by routing that path through the
+same full refresh a fresh click gets.
+
+The dead space was a layout ordering issue: the compare-metadata line was
+the last widget in the preview column, after the actual text box, so the
+box itself stopped short to leave room for it. Moved the metadata line
+above the box instead - now the preview box is the last widget, exactly
+like the file tree is in its own column, so both bottoms land flush.
+
 ## [1.4.1] - 2026-10-04 - Side-by-side layout, fewer buttons
 
 The user looked at a screenshot of the running window and asked for a pass

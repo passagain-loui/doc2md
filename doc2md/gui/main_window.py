@@ -594,6 +594,12 @@ class MainWindow(QMainWindow):
             toolbar.addWidget(button)
         layout.addLayout(toolbar)
 
+        # Compact metadata line — source/output size, pages, warning status
+        self.compare_metadata = QLabel("")
+        self.compare_metadata.setObjectName("MetaFooter")
+        self.compare_metadata.setWordWrap(False)
+        layout.addWidget(self.compare_metadata)
+
         self.warning_banner = QLabel("")
         self.warning_banner.setObjectName("WarningBanner")
         self.warning_banner.setWordWrap(True)
@@ -606,6 +612,9 @@ class MainWindow(QMainWindow):
         self.thumbnail_label.setFixedSize(140, 140)
         self.thumbnail_label.hide()
 
+        # Last widget in the layout, same as file_tree is in its own column,
+        # so both boxes' bottom edges land flush with each other - no dead
+        # space left over below either one.
         self.preview = QPlainTextEdit()
         self.preview.setReadOnly(True)
         self.preview.setPlaceholderText(
@@ -617,12 +626,6 @@ class MainWindow(QMainWindow):
         self.preview.setAcceptDrops(False)
         self.preview.viewport().setAcceptDrops(False)
         layout.addWidget(self.preview, 1)
-
-        # Compact metadata footer — no section header, just one quiet line
-        self.compare_metadata = QLabel("")
-        self.compare_metadata.setObjectName("MetaFooter")
-        self.compare_metadata.setWordWrap(False)
-        layout.addWidget(self.compare_metadata)
 
         return container
 
@@ -1063,7 +1066,11 @@ class MainWindow(QMainWindow):
             item.setToolTip(COLUMN_DETAIL, error)
 
         if self._items[index] is self.file_tree.currentItem():
-            self._show_quality_summary(index)
+            # Full refresh, not just the quality badge: a row selected while
+            # still Queued/Converting shows an empty preview (no markdown
+            # exists yet) - once it finishes, the preview must catch up too,
+            # not just the quality summary.
+            self._on_row_selected(self._items[index], None)
 
     def _on_progress(self, done: int, total: int) -> None:
         self.progress_bar.setValue(int(done * 100 / total) if total else 0)

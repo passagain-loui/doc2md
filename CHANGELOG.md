@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.4.2] (2026-10-04) - STALE PREVIEW, FLUSH PANEL EDGES
+
+### Fixed
+
+- **Preview stayed blank after conversion finished, if the row was already
+  selected.** Selecting a file while it was still Queued/Converting (or it
+  being the already-current row) meant `_on_file_finished` only refreshed
+  the quality badge, not the preview text, once conversion completed -
+  leaving a real result sitting in memory with nothing shown for it. Fixed
+  by running the full row-selected refresh (preview included) whenever the
+  just-finished row is the one on screen.
+- **Markdown Preview's bottom edge didn't line up with the file list's.**
+  The compare-metadata line sat *below* the preview box, so the box itself
+  stopped short of the panel's bottom with dead space underneath. Moved
+  that line above the preview box instead, so the preview - like the file
+  list - is the last (and therefore full-height) widget in its column.
+
 ## [1.4.1] (2026-10-04) - LAYOUT CLEANUP
 
 ### Changed
