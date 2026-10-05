@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.4.6] (2026-10-05) - BUSY PROGRESS BAR FOR SLOW FILES
+
+### Changed
+
+- **Progress bar no longer sits frozen at a stale percentage while a single
+  slow file (a long OCR scan) converts.** It switches to an indeterminate
+  "busy" animation the moment a file starts, and back to the real,
+  file-level percentage the moment it finishes. True per-page progress
+  inside one file isn't available yet - OCR runs in an isolated worker
+  process that only reports back once, when the whole file is done; getting
+  true page-level numbers would need a new progress channel across that
+  process boundary.
+
 ## [1.4.5] (2026-10-04) - THREE BUGS FROM A DETAILED REVIEW
 
 ### Fixed

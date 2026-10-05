@@ -1038,6 +1038,7 @@ class MainWindow(QMainWindow):
         creates a new row, whether it ends in Success or Error again.
         """
         self._warnings = 0
+        self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
         self.progress_label.setText(f"0 / {len(files_by_index)}")
 
@@ -1063,6 +1064,12 @@ class MainWindow(QMainWindow):
         if 0 <= index < len(self._items):
             self._paint_status(self._items[index], STATUS_CONVERTING)
         self.statusBar().showMessage(f"Converting {name}…")
+        # No per-page progress exists for the file that's actively
+        # converting (OCR runs in an isolated process that only reports
+        # back once, at the end) - an indeterminate/busy bar says "still
+        # working" honestly, rather than sitting frozen at a stale percent
+        # for however long that one file takes.
+        self.progress_bar.setRange(0, 0)
 
     def _on_file_finished(
         self, index: int, ok: bool, markdown: str, error: str, warning: str, result
@@ -1097,6 +1104,9 @@ class MainWindow(QMainWindow):
             self._on_row_selected(self._items[index], None)
 
     def _on_progress(self, done: int, total: int) -> None:
+        # Back to determinate now that this file's outcome is known - shows
+        # real, file-level progress between files in the batch.
+        self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(int(done * 100 / total) if total else 0)
         self.progress_label.setText(f"{done} / {total}")
 

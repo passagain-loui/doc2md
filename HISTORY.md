@@ -1,5 +1,35 @@
 # History
 
+## [1.4.6] - 2026-10-05 - A progress bar that doesn't look stuck
+
+The user tested the app on a real 24-page bilingual lease agreement and
+sent a screenshot of the progress bar sitting at "0%" / "0 / 1" during a
+long OCR run, asking whether it could show real percentage.
+
+Checked the architecture before promising anything: PDF/OCR conversion
+runs in a spawned, isolated worker process (`_run_in_process` in
+`converter.py`) that communicates back over a single pipe, read once when
+the whole file is done - there is no channel today for that process to
+report "page 7 of 24" partway through. Building one would mean touching
+the process-isolation plumbing, the PDF/OCR engine's page loop, and the
+GUI's signal wiring - a real feature, not a quick fix, and higher-risk
+because it touches the well-tested OCR pipeline.
+
+Shipped the honest, low-risk version instead: the bar goes indeterminate
+("busy") the moment a file starts converting and back to a real file-level
+percentage the moment it finishes, so a long single-file OCR run no longer
+looks frozen. Real per-page progress is still open if the user wants it as
+its own piece of work.
+
+Separately, caught and corrected a mistake from the previous turn: the
+earlier reply told the user to try "Thai Scanned Document (High Fidelity,
+400 DPI)" as if that were one preset - it is two different ones.
+"Thai Scanned Document" forces `ocr_lang: tha` (Thai-only), which on this
+bilingual Thai/English contract made the English text drop out, garbled to
+Thai-shaped letters it was never written in. "High Fidelity" is the one
+that actually keeps `tha+eng` and raises DPI to 400 - that's the one worth
+trying on this document, not the other.
+
 ## [1.4.5] - 2026-10-04 - A detailed bug sweep
 
 The user asked for a thorough bug check rather than a specific feature or
