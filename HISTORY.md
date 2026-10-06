@@ -1,5 +1,36 @@
 # History
 
+## [1.4.7] - 2026-10-06 - Corruption worse than the detector expected
+
+The user converted a real Toyota Camry 2019 brochure PDF and pasted back a
+page that was pure noise - no Thai, no English, just symbol soup like
+"N6B)4<br>A);I115C%584Aē611". Read the page directly with pymupdf instead
+of guessing: 4,882 characters of extracted text, 1,368 of them control
+characters, and exactly 0 real Thai letters. The page's font
+(`HLYROE+DBHeavent`, a Type0/Identity-H embedded font) has no usable
+character map at all - not the narrower sara-am/sara-aa swap `pdf_text.py`
+already handled, but total loss.
+
+`thai_text_is_corrupt()` existed to catch exactly this family of bug, but
+its first line was `thai = len(_THAI_LETTER.findall(text)); if thai < 50:
+return False` - a page with no surviving Thai letters never even reached
+the control-character check that would have caught it. Reordered so the
+control-character check runs unconditionally; the Thai-letter count now
+only gates the narrower symbol-sandwiched-in-Thai heuristic, which does
+need a real baseline to mean anything. Verified against all 9 pages of the
+actual PDF before and after: page 9 (the only one with a text layer at
+all) now correctly flags as corrupt and falls back to OCR instead of
+emitting the control-character garbage. Added a regression test matching
+the real page's shape - heavy control-character noise, zero Thai letters -
+since the existing corruption tests all had substantial Thai content and
+wouldn't have caught this ordering bug.
+
+Also corrected the previous turn's bad advice: told the user to try "Thai
+Scanned Document (High Fidelity, 400 DPI)" as if that were one preset -
+it's two. "Thai Scanned Document" forces Thai-only OCR (`tha`), which on
+a bilingual document garbles every English word into Thai-shaped noise.
+"High Fidelity" is the one that keeps `tha+eng` and raises DPI to 400.
+
 ## [1.4.6] - 2026-10-05 - A progress bar that doesn't look stuck
 
 The user tested the app on a real 24-page bilingual lease agreement and

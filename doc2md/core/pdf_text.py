@@ -181,10 +181,18 @@ def thai_text_is_corrupt(text: str) -> bool:
     "น้ำท!วมป5". Real Thai text has almost no control characters, and a symbol or
     digit sandwiched between two Thai letters is rare, so either, in quantity, is
     a reliable sign.
+
+    The control-character check runs regardless of how much Thai survived in
+    the text - a font whose character map is broken badly enough can lose
+    every single Thai codepoint (an Identity-H/Type0 font with no usable
+    ToUnicode map extracts as near-total control-character noise), and that
+    is the more severe corruption, not a reason to skip the check. Only the
+    symbol-sandwiched-in-Thai heuristic needs a real Thai-letter baseline to
+    be statistically meaningful.
     """
+    if len(_CONTROL.findall(text)) >= 3:
+        return True
     thai = len(_THAI_LETTER.findall(text))
     if thai < 50:
         return False
-    if len(_CONTROL.findall(text)) >= 3:
-        return True
     return len(_THAI_SYMBOL_THAI.findall(text)) >= max(6, thai // 300)

@@ -184,6 +184,19 @@ def test_control_characters_in_thai_text_are_detected():
     assert pdf_text.thai_text_is_corrupt(garbled)
 
 
+def test_control_character_soup_with_zero_thai_letters_is_still_detected():
+    """A font whose character map is broken badly enough loses every Thai
+    codepoint, not just the sara am/aa pair - the page extracts as near-total
+    control-character noise with no Thai letters left to count at all. The
+    control-character check must fire regardless, not bail out early because
+    there happens to be no Thai left to measure against (seen on a real PDF:
+    an Identity-H/Type0 embedded font, 1368 control chars, 0 Thai letters,
+    in under 5000 characters of extracted text)."""
+    garbled = "\x1d\x07\x1a\x0c\x19\x1e\x06\x0f\x18\x03\x81\x03" * 10
+
+    assert pdf_text.thai_text_is_corrupt(garbled)
+
+
 def test_clean_thai_text_and_short_text_are_not_flagged():
     clean = "ขอรับรองว่าบริษัทนี้ได้จดทะเบียนเป็นนิติบุคคลตามประมวลกฎหมายแพ่งและพาณิชย์ " * 8
 

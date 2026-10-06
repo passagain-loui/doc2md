@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.4.7] (2026-10-06) - WORST-CASE TEXT-LAYER CORRUPTION NOW CAUGHT
+
+### Fixed
+
+- **A PDF text layer broken badly enough to lose every Thai character went
+  undetected and was used as-is instead of falling back to OCR.** The
+  corruption check required at least 50 real Thai letters to still be
+  present before it would even look at the control-character count - on a
+  real document (an Identity-H/Type0 embedded font with no usable ToUnicode
+  map) one page extracted as 1,368 control characters and exactly 0 Thai
+  letters, so the check bailed out early and that garbage went straight
+  into the Markdown output. The control-character check now runs
+  regardless of how much Thai survived - that's the more severe corruption
+  case, not a reason to skip the check.
+
 ## [1.4.6] (2026-10-05) - BUSY PROGRESS BAR FOR SLOW FILES
 
 ### Changed
