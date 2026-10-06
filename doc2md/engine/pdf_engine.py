@@ -23,7 +23,7 @@ from pathlib import Path
 from doc2md.core.errors import ConversionError, EngineUnavailableError, wrap_warning
 from doc2md.core.quality import EngineOutput, QualityMetrics
 from doc2md.core.ocr_setup import find_tesseract, prepare_tesseract
-from doc2md.core.ocr_text import recognize
+from doc2md.core.ocr_text import recognize, recognize_region
 from doc2md.core.pdf_text import (
     find_sara_bug_fonts,
     page_lines,
@@ -99,6 +99,64 @@ def _grid_from_page_text(table, lines) -> list[list[str]] | None:
     return grid if any(any(cell for cell in row) for row in grid) else None
 
 
+def _scaled_box(bbox, scale: float, width: int, height: int) -> tuple[int, int, int, int] | None:
+    """A PDF-point ``(x0, top, x1, bottom)`` box to pixel space at *scale*
+    (pixels per point), clamped to the rendered image's own bounds."""
+    x0, top, x1, bottom = bbox
+    box = (
+        max(0, int(x0 * scale)), max(0, int(top * scale)),
+        min(width, int(x1 * scale)), min(height, int(bottom * scale)),
+    )
+    return box if box[2] > box[0] and box[3] > box[1] else None
+
+
+def _grid_from_cell_ocr(table, page_image, scale: float, language: str) -> list[list[str]] | None:
+    """Table cells filled by OCR-cropping *page_image* to each cell's own box.
+
+    Used in place of :func:`_grid_from_page_text` when the page's text layer
+    is corrupt: pdfplumber's cell geometry comes from the PDF's vector ruling
+    lines, which a broken font's character map never touches, so the grid
+    shape is still trustworthy - only the font's own (garbage) text is
+    replaced, with an OCR read of that exact cell instead.
+    """
+    try:
+        width, height = page_image.size
+        grid = []
+        for row in table.rows:
+            cells_text = []
+            for cell in row.cells:
+                if not cell:
+                    cells_text.append("")
+                    continue
+                box = _scaled_box(cell, scale, width, height)
+                cells_text.append(recognize_region(page_image.crop(box), language) if box else "")
+            grid.append(cells_text)
+    except Exception:
+        return None
+    return grid if any(any(cell for cell in row) for row in grid) else None
+
+
+def _mask_table_regions(page_image, tables, scale: float):
+    """A copy of *page_image* with every table's bounding box painted white.
+
+    Keeps the full-page prose OCR (:func:`recognize`) from also trying to
+    read the table content, which is OCR'd separately and more reliably one
+    cell at a time via :func:`_grid_from_cell_ocr` - without this, the table
+    would be read twice, once well (cell by cell) and once as a jumble of
+    rows flattened into running text.
+    """
+    from PIL import ImageDraw
+
+    masked = page_image.copy()
+    draw = ImageDraw.Draw(masked)
+    width, height = masked.size
+    for t in tables:
+        box = _scaled_box(t.bbox, scale, width, height)
+        if box:
+            draw.rectangle(box, fill="white")
+    return masked
+
+
 class PdfEngine(BaseEngine):
     name = "pdf"
     supported_kinds = (FileKind.PDF,)
@@ -146,7 +204,9 @@ class PdfEngine(BaseEngine):
                 corrupt = [i for i, text in enumerate(pages) if thai_text_is_corrupt(text)]
                 reread: set[int] = set()
                 if corrupt:
-                    warning, reread = self._reread_corrupt_pages(doc, pages, corrupt, options, metrics)
+                    warning, reread = self._reread_corrupt_pages(
+                        source, doc, pages, corrupt, options, metrics
+                    )
                 tables_by_page, outside_text_by_page = self._extract_tables(
                     source, options, doc, buggy
                 )
@@ -183,12 +243,24 @@ class PdfEngine(BaseEngine):
             except Exception:
                 pass
 
-    def _reread_corrupt_pages(self, doc, pages, corrupt, options, metrics):
+    def _reread_corrupt_pages(self, source, doc, pages, corrupt, options, metrics):
         """Replace pages whose text layer is mis-encoded Thai with OCR of the page.
 
         Returns ``(warning_or_none, set_of_zero_based_pages_replaced)``. When OCR
         cannot run, the text is kept (it is all there is) and the result carries a
         warning, so it is never presented as a clean read.
+
+        A page that also has a table loses that structure to plain OCR text
+        otherwise - a comparison table flattens into running text with no way
+        to tell which value belongs to which column. When pdfplumber can
+        still find the table's geometry (it comes from the PDF's own vector
+        ruling lines, not the broken font), the table region is masked out of
+        the page before the prose is OCR'd, and each cell is OCR'd on its own
+        from its own crop instead - the same geometry a correctly-encoded
+        page gets, just with OCR'd cell text instead of the font's garbage.
+        Any failure in that path (pdfplumber unavailable, no tables found,
+        cropping or masking raising) falls back to the plain whole-page OCR
+        this always did.
         """
         numbers = ", ".join(str(i + 1) for i in corrupt[:10]) + ("..." if len(corrupt) > 10 else "")
         if not options.get("pdf_ocr_fallback", True):
@@ -207,27 +279,47 @@ class PdfEngine(BaseEngine):
         language = self._ocr_language(options)
         prepare_tesseract(language)
         dpi = self._ocr_dpi(options)
+        scale = dpi / 72.0
         replaced: set[int] = set()
         failed = 0
-        with tempfile.TemporaryDirectory(prefix="doc2md_pdfocr_") as tmpdir:
-            for index in corrupt:
-                png_path = Path(tmpdir) / f"page_{index + 1}.png"
-                try:
-                    pix = doc[index].get_pixmap(dpi=dpi)
-                    pix.save(str(png_path))
-                    del pix
-                    text = recognize(png_path, language).strip()
-                except Exception:
-                    failed += 1
-                    continue
-                if text:
-                    pages[index] = (
-                        "> The text layer of this page is mis-encoded Thai; it was read by OCR "
-                        f"instead.\n\n{text}"
-                    )
-                    replaced.add(index)
-                else:
-                    failed += 1
+
+        plumber_doc = None
+        plumber_pages = None
+        if options.get("pdf_tables", True) and _pdfplumber_available():
+            try:
+                import pdfplumber
+
+                plumber_doc = pdfplumber.open(str(source))
+                plumber_pages = plumber_doc.pages
+            except Exception:
+                plumber_doc = None
+                plumber_pages = None
+
+        try:
+            with tempfile.TemporaryDirectory(prefix="doc2md_pdfocr_") as tmpdir:
+                for index in corrupt:
+                    png_path = Path(tmpdir) / f"page_{index + 1}.png"
+                    try:
+                        pix = doc[index].get_pixmap(dpi=dpi)
+                        pix.save(str(png_path))
+                        del pix
+                        text = self._ocr_page_with_tables(
+                            png_path, plumber_pages, index, scale, language
+                        )
+                    except Exception:
+                        failed += 1
+                        continue
+                    if text:
+                        pages[index] = (
+                            "> The text layer of this page is mis-encoded Thai; it was read by "
+                            f"OCR instead.\n\n{text}"
+                        )
+                        replaced.add(index)
+                    else:
+                        failed += 1
+        finally:
+            if plumber_doc is not None:
+                plumber_doc.close()
         if metrics is not None and replaced:
             metrics.ocr_backend = "tesseract"
             metrics.ocr_language = language
@@ -239,6 +331,51 @@ class PdfEngine(BaseEngine):
                 replaced,
             )
         return None, replaced
+
+    @staticmethod
+    def _ocr_page_with_tables(png_path, plumber_pages, index: int, scale: float, language: str) -> str:
+        """OCR of the rendered page at *png_path*, with any table on it (by
+        pdfplumber's own geometry, 0-based *index*) read cell by cell instead
+        of as flattened prose. Falls back to a plain whole-page OCR the
+        moment anything about the table path is unavailable or fails."""
+        tables = []
+        if plumber_pages is not None and index < len(plumber_pages):
+            try:
+                tables = plumber_pages[index].find_tables()
+            except Exception:
+                tables = []
+
+        if not tables:
+            return recognize(png_path, language).strip()
+
+        from PIL import Image
+
+        try:
+            with Image.open(png_path) as opened:
+                page_image = opened.convert("RGB")
+        except Exception:
+            return recognize(png_path, language).strip()
+
+        try:
+            masked_path = png_path.with_name(png_path.stem + "_masked.png")
+            _mask_table_regions(page_image, tables, scale).save(masked_path)
+            prose = recognize(masked_path, language).strip()
+
+            table_blocks = []
+            for t in tables:
+                grid = _grid_from_cell_ocr(t, page_image, scale, language)
+                markdown = render_table(grid) if grid else None
+                if markdown:
+                    table_blocks.append(markdown)
+        except Exception:
+            return recognize(png_path, language).strip()
+
+        if not table_blocks:
+            # Tables were found but every one failed to OCR into anything -
+            # the masked-prose read is missing that content for nothing;
+            # the plain whole-page read at least keeps it, flattened.
+            return recognize(png_path, language).strip()
+        return "\n\n".join(part for part in (prose, *table_blocks) if part)
 
     # ------------------------------------------------------------------ setup
 

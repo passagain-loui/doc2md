@@ -204,6 +204,20 @@ def _without_junk(plain: str, junk: set[str]) -> str:
     return "\n".join(kept).strip()
 
 
+def recognize_region(image, language: str) -> str:
+    """OCR of a single, already-isolated crop (a table cell) - no panel/gutter
+    splitting or line-confidence filtering, since a cell crop is already a
+    small, pre-separated fragment rather than a mixed page with pictures and
+    noise to tell apart from text."""
+    import pytesseract
+
+    prepared = prepare_for_ocr(image.convert("RGB"))
+    try:
+        return pytesseract.image_to_string(prepared, lang=language, config="--psm 6").strip()
+    except Exception:
+        return ""
+
+
 def recognize(image_path: str | Path, language: str) -> str:
     """Text of the image at *image_path*, panel by panel, noise removed."""
     import pytesseract

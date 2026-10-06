@@ -1,5 +1,41 @@
 # History
 
+## [1.4.8] - 2026-10-06 - Tables survive the OCR fallback too
+
+After 1.4.7 fixed the corrupt-page detector, the user looked at the actual
+re-OCR'd output for the Camry brochure's spec page and pointed out three
+rough edges, then asked which were real bugs worth fixing. Two were
+inherent to OCR itself (misread brand/technical words, unreadable
+stylised logo text) - no code change fixes those, so they were named as
+limits rather than faked as fixes. The third was real and scoped: the
+page's trim-comparison table (two columns, Premium Luxury vs Premium/
+Smart) came back as one flattened block of text with values from both
+columns interleaved, because the whole-page OCR path has no concept of a
+table at all.
+
+The fix leans on something already true elsewhere in this engine: a
+table's ruling lines are vector drawing, not text, so a font whose
+character map is completely broken still leaves the table's geometry
+intact - pdfplumber can find it on a corrupt page exactly as it would on a
+clean one. `_reread_corrupt_pages` now checks for a table via pdfplumber
+before running whole-page OCR; if one is found, its region is painted
+white on the rendered page image so the prose OCR doesn't also try to read
+it, and each cell is cropped from the *unmasked* image and OCR'd on its
+own (`recognize_region`, a new minimal direct-call sibling of the existing
+panel/gutter-aware `recognize`). Verified against the real file: the
+table now renders as an actual Markdown table with values grouped
+correctly by column, with no duplication against the surrounding prose.
+Row granularity stayed coarse because pdfplumber's own row-detection on
+this particular table (no dense horizontal ruling lines) is coarse - the
+same limitation the non-OCR table path already has, not a new one.
+
+Every step of the new path degrades on its own: no pdfplumber, no table
+found, or any crop/mask failure all fall straight back to the exact plain
+whole-page OCR this always did. Added two regression tests: one building a
+synthetic corrupt page with a real 2x2 ruling-line table (confirms a real
+Markdown table comes out, not flattened text) and one confirming the
+pdfplumber-unavailable path still falls back correctly.
+
 ## [1.4.7] - 2026-10-06 - Corruption worse than the detector expected
 
 The user converted a real Toyota Camry 2019 brochure PDF and pasted back a

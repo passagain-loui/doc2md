@@ -68,3 +68,70 @@ def test_the_fallback_respects_ocr_being_switched_off(tmp_path, thai_font):
     output = PdfEngine().convert(path, {"pdf_ocr_fallback": False})
 
     assert "OCR is switched off" in output
+
+
+def _pdf_with_corrupt_table(path, thai_font):
+    """A corrupt-text page with a real 2x2 ruling-line table on it - the
+    lines are vector drawing, not text, so they survive a broken font map
+    exactly as they would on a correctly-encoded page."""
+    doc = pymupdf.open()
+    page = doc.new_page()
+    y = 40
+    for chunk in [GARBLED[i:i + 55] for i in range(0, len(GARBLED), 55)]:
+        page.insert_text((50, y), chunk, fontname="TH", fontfile=thai_font, fontsize=12)
+        y += 18
+    x0, y0, x1, y1 = 50, 300, 250, 400
+    xm, ym = (x0 + x1) / 2, (y0 + y1) / 2
+    for p1, p2 in [
+        ((x0, y0), (x1, y0)), ((x0, ym), (x1, ym)), ((x0, y1), (x1, y1)),
+        ((x0, y0), (x0, y1)), ((xm, y0), (xm, y1)), ((x1, y0), (x1, y1)),
+    ]:
+        page.draw_line(p1, p2, width=1)
+    doc.save(str(path))
+    doc.close()
+    return path
+
+
+def test_a_corrupt_page_with_a_table_gets_cell_by_cell_ocr_not_flattened_text(
+    tmp_path, thai_font, monkeypatch
+):
+    """A comparison table flattens into one wall of running text under plain
+    whole-page OCR, with no way to tell which value belongs to which column.
+    A table's ruling lines are vector drawing, untouched by the font's
+    broken character map, so pdfplumber can still find the table's geometry
+    on a corrupt page - each cell should be OCR'd from its own crop and the
+    result rendered as a real Markdown table, not lumped into the page's
+    flat OCR text."""
+    pytest.importorskip("pdfplumber")
+    path = _pdf_with_corrupt_table(tmp_path / "c.pdf", thai_font)
+
+    monkeypatch.setattr(PdfEngine, "_ocr_unavailable_reason", staticmethod(lambda: None))
+    monkeypatch.setattr(pdf_engine, "prepare_tesseract", lambda language: "tesseract")
+    monkeypatch.setattr(pdf_engine, "recognize", lambda image_path, language: "หน้านี้ทั้งหมด")
+    monkeypatch.setattr(pdf_engine, "recognize_region", lambda image, language: "ค่าในเซลล์")
+
+    output = PdfEngine().convert_structured(path, {})
+
+    assert "| --- |" in output.markdown, "the table must render as a real Markdown table"
+    assert "ค่าในเซลล์" in output.markdown
+    assert "หน้านี้ทั้งหมด" in output.markdown, "the rest of the page is still OCR'd as prose"
+    assert "read by OCR" in output.markdown
+
+
+def test_a_corrupt_page_falls_back_to_plain_ocr_when_pdfplumber_is_unavailable(
+    tmp_path, thai_font, monkeypatch
+):
+    """The table-aware path must never be the only way a corrupt page can be
+    read - if pdfplumber can't be imported, the page still gets the plain
+    whole-page OCR it always did, never an empty or failed result."""
+    path = _pdf_with_corrupt_table(tmp_path / "c.pdf", thai_font)
+
+    monkeypatch.setattr(PdfEngine, "_ocr_unavailable_reason", staticmethod(lambda: None))
+    monkeypatch.setattr(pdf_engine, "prepare_tesseract", lambda language: "tesseract")
+    monkeypatch.setattr(pdf_engine, "recognize", lambda image_path, language: "ข้อความทั้งหน้า")
+    monkeypatch.setattr(pdf_engine, "_pdfplumber_available", lambda: False)
+
+    output = PdfEngine().convert_structured(path, {})
+
+    assert "ข้อความทั้งหน้า" in output.markdown
+    assert "read by OCR" in output.markdown

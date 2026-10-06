@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.4.8] (2026-10-06) - OCR KEEPS TABLE STRUCTURE ON CORRUPT PAGES
+
+### Added
+
+- **A table on a page re-read by OCR (mis-encoded text layer) now keeps its
+  grid instead of flattening into one wall of running text.** A table's
+  ruling lines are vector drawing, not text, so they survive a broken
+  font's character map exactly as they would on a correctly-encoded page -
+  pdfplumber's cell geometry is kept, and each cell is OCR'd from its own
+  cropped region instead of being read from the font's garbage text. The
+  table region is masked out of the page before the surrounding prose is
+  OCR'd, so content is never read (and duplicated) twice. Any failure in
+  this path - pdfplumber unavailable, no table found, a crop or mask
+  operation raising - falls back to the plain whole-page OCR this always
+  did; nothing about reading a corrupt page without a table changes.
+
 ## [1.4.7] (2026-10-06) - WORST-CASE TEXT-LAYER CORRUPTION NOW CAUGHT
 
 ### Fixed
