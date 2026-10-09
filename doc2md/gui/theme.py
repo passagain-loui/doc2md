@@ -240,6 +240,10 @@ QTreeWidget, QPlainTextEdit {{
     selection-background-color: {ACCENT_PRESSED};
 }}
 QTreeWidget::item {{ padding: 5px 2px; }}
+QTreeWidget::item:selected, QTreeWidget::item:selected:active, QTreeWidget::item:selected:!active {{
+    background-color: {ACCENT_PRESSED};
+    color: {TEXT};
+}}
 QHeaderView::section {{
     background-color: {SURFACE};
     color: {TEXT_MUTED};

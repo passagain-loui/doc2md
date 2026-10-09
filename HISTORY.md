@@ -1,5 +1,33 @@
 # History
 
+## [1.4.9] - 2026-10-09 - Making the selected row actually look selected
+
+The user converted a batch of files (a PPTX and several real brochure/
+catalogue/user-guide PDFs) and reported that clicking between rows in the
+FILES list to check each one's preview gave no visible indication of which
+row was currently selected.
+
+The stylesheet set the highlight colour with the widget-level
+`selection-background-color` property on `QTreeWidget` - a shorthand that
+Qt's own documentation and long-standing bug history flag as unreliable
+for tree/list views: depending on the native style in use it can paint
+correctly in one environment and silently fail to apply in another, since
+it only maps to the palette's Highlight role rather than being enforced
+per item. A sandboxed pixel-level test (grabbing the widget and sampling
+actual rendered colours) could not reproduce a failure under the offscreen
+Qt platform used for automated tests, which is expected - that platform
+uses a different, more permissive style than the native Windows rendering
+the user actually sees, so it would not surface this class of bug either
+way.
+
+Rather than chase an environment Claude cannot visually inspect, applied
+the fix Qt's own style sheet documentation recommends for exactly this
+problem: explicit `QTreeWidget::item:selected` rules, including the
+`:active` and `:!active` focus states, so the highlight is painted
+directly on the item regardless of which native style or focus state is
+in play - a strictly more robust rule than the shorthand it replaces, not
+a gamble on a guess.
+
 ## [1.4.8] - 2026-10-06 - Tables survive the OCR fallback too
 
 After 1.4.7 fixed the corrupt-page detector, the user looked at the actual

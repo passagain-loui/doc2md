@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.4.9] (2026-10-09) - RELIABLE ROW-SELECTION HIGHLIGHT
+
+### Fixed
+
+- **The selected row in the FILES list could be hard to tell apart from the
+  rest.** The highlight colour was set with the widget-level
+  `selection-background-color` style property, which Qt applies to
+  `QTreeWidget` inconsistently across native styles - it can read correctly
+  in one rendering path and fail to paint in another. Replaced with
+  explicit `QTreeWidget::item:selected` rules (Qt's documented, reliable
+  way to style tree-row selection), covering both the focused and
+  unfocused state explicitly, so clicking between converted files always
+  shows clearly which one is currently selected.
+
 ## [1.4.8] (2026-10-06) - OCR KEEPS TABLE STRUCTURE ON CORRUPT PAGES
 
 ### Added
