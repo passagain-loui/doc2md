@@ -558,40 +558,69 @@ class PdfEngine(BaseEngine):
         language = self._ocr_language(options)
         prepare_tesseract(language)
         dpi = self._ocr_dpi(options)
+        scale = dpi / 72.0
         out: list[str] = []
         pages_total = 0
         pages_failed = 0
         pages_with_text = 0
-        with tempfile.TemporaryDirectory(prefix="doc2md_pdfocr_") as tmpdir:
-            for index, page in enumerate(doc, start=1):
-                pages_total += 1
-                png_path = Path(tmpdir) / f"page_{index}.png"
-                try:
-                    pix = page.get_pixmap(dpi=dpi)
-                    pix.save(str(png_path))
-                    del pix
-                    text = recognize(png_path, language).strip()
-                except Exception as exc:
-                    # A page-level OCR exception must not be masked by other
-                    # pages succeeding: a batch where 1 of 2 pages raised
-                    # previously reported warning=None (because *a* page had
-                    # text), making a partially-failed OCR run
-                    # indistinguishable from a clean Success.
-                    pages_failed += 1
+
+        # A fully scanned page (no text layer at all) has exactly the same
+        # table-structure problem a mis-encoded-text-layer page does: plain
+        # whole-page OCR flattens a comparison table into running text with
+        # no way to tell which value belongs to which column. pdfplumber's
+        # table geometry comes from vector ruling lines, which a scan's
+        # *image* obviously has none of - but the PDF page itself can still
+        # carry them as real vector objects even though its text layer is
+        # empty (common for a print brochure re-exported to PDF), so it is
+        # still worth checking.
+        plumber_doc = None
+        plumber_pages = None
+        if options.get("pdf_tables", True) and _pdfplumber_available():
+            try:
+                import pdfplumber
+
+                plumber_doc = pdfplumber.open(str(source))
+                plumber_pages = plumber_doc.pages
+            except Exception:
+                plumber_doc = None
+                plumber_pages = None
+
+        try:
+            with tempfile.TemporaryDirectory(prefix="doc2md_pdfocr_") as tmpdir:
+                for index, page in enumerate(doc, start=1):
+                    pages_total += 1
+                    png_path = Path(tmpdir) / f"page_{index}.png"
+                    try:
+                        pix = page.get_pixmap(dpi=dpi)
+                        pix.save(str(png_path))
+                        del pix
+                        text = self._ocr_page_with_tables(
+                            png_path, plumber_pages, index - 1, scale, language
+                        )
+                    except Exception as exc:
+                        # A page-level OCR exception must not be masked by other
+                        # pages succeeding: a batch where 1 of 2 pages raised
+                        # previously reported warning=None (because *a* page had
+                        # text), making a partially-failed OCR run
+                        # indistinguishable from a clean Success.
+                        pages_failed += 1
+                        out.extend(
+                            [f"## Page {index} (OCR)", "", f"> OCR failed: {exc}", ""]
+                        )
+                        continue
+                    if text:
+                        pages_with_text += 1
                     out.extend(
-                        [f"## Page {index} (OCR)", "", f"> OCR failed: {exc}", ""]
+                        [
+                            f"## Page {index} (OCR)",
+                            "",
+                            text or "_(no text detected on this page)_",
+                            "",
+                        ]
                     )
-                    continue
-                if text:
-                    pages_with_text += 1
-                out.extend(
-                    [
-                        f"## Page {index} (OCR)",
-                        "",
-                        text or "_(no text detected on this page)_",
-                        "",
-                    ]
-                )
+        finally:
+            if plumber_doc is not None:
+                plumber_doc.close()
         if pages_failed and pages_failed == pages_total:
             warning = f"OCR failed on all {pages_total} page(s)."
         elif pages_failed:

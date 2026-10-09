@@ -1,5 +1,40 @@
 # History
 
+## [1.4.10] - 2026-10-09 - The other table-flattening path
+
+The user confirmed the selection-highlight fix worked, then asked for
+another look at two of the same brochure PDFs from before (Camry 2015,
+Fortuner Legender 2025). Both have a dense spec-comparison table near the
+end, and in the Camry file especially it came out as a wall of flattened
+text - the same symptom 1.4.8 fixed, but it was still broken here.
+
+The reason: 1.4.8 only wired table-aware OCR into `_reread_corrupt_pages`,
+the path for a page whose *text layer* is present but mis-encoded. These
+two brochures are older print catalogues scanned straight to PDF with no
+text layer at all, so they take a completely different path,
+`_render_scanned_pdf`, which still did plain whole-page OCR with no table
+awareness - the identical gap 1.4.8 closed elsewhere, just reachable from
+a different starting point.
+
+Confirmed the diagnosis by checking the page headers before writing any
+code: `_render_scanned_pdf` emits `## Page N (OCR)` directly, with no
+"mis-encoded Thai" note - exactly what the user's pasted output showed.
+Since the table-aware helper (`_ocr_page_with_tables`, built in 1.4.8) was
+already a self-contained, reusable method, wiring it into
+`_render_scanned_pdf` was a small, low-risk change: open pdfplumber once
+per document, pass the per-page image through the same mask-and-crop path.
+Added a regression test building a page with real ruling lines but zero
+text (forcing the scanned-PDF path specifically, not the corrupt-layer
+one) to prove the fix reaches this path and not just the other one.
+
+One verify.ps1 run crashed natively (exit `-1073740791`, a Windows stack
+violation) partway through the pytest suite. Did not treat that as a pass
+and did not touch the code to make it go away - re-ran the identical,
+unmodified code twice more, both clean. A transient, environment-level
+flake (most likely Windows/antivirus interference with the rapid
+temp-file churn across hundreds of tests) rather than a reproducible
+defect, but the distinction was established by observation, not assumed.
+
 ## [1.4.9] - 2026-10-09 - Making the selected row actually look selected
 
 The user converted a batch of files (a PPTX and several real brochure/

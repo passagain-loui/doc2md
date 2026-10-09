@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.4.10] (2026-10-09) - TABLE STRUCTURE ON SCANNED PAGES TOO
+
+### Added
+
+- **A table on a fully scanned page (no text layer at all - a print
+  brochure/catalogue exported straight to PDF) now keeps its grid instead
+  of flattening into running text, the same benefit 1.4.8 gave to
+  mis-encoded-text-layer pages.** These are two different code paths
+  (`_render_scanned_pdf` vs `_reread_corrupt_pages`) that shared the same
+  gap: plain whole-page OCR with no concept of a table. Both now call the
+  same table-aware OCR helper, so a spec-comparison table reads correctly
+  regardless of which path a given PDF takes to get there.
+
 ## [1.4.9] (2026-10-09) - RELIABLE ROW-SELECTION HIGHLIGHT
 
 ### Fixed

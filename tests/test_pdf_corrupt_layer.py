@@ -135,3 +135,45 @@ def test_a_corrupt_page_falls_back_to_plain_ocr_when_pdfplumber_is_unavailable(
 
     assert "ข้อความทั้งหน้า" in output.markdown
     assert "read by OCR" in output.markdown
+
+
+def _pdf_scanned_with_table(path):
+    """A page with NO text layer at all (triggers the fully-scanned-PDF
+    path, not the mis-encoded-text-layer reread path) but a real 2x2
+    ruling-line table drawn on it - as a print brochure exported straight to
+    PDF with no OCR layer would look before doc2md ever touches it."""
+    doc = pymupdf.open()
+    page = doc.new_page()
+    x0, y0, x1, y1 = 50, 100, 250, 200
+    xm, ym = (x0 + x1) / 2, (y0 + y1) / 2
+    for p1, p2 in [
+        ((x0, y0), (x1, y0)), ((x0, ym), (x1, ym)), ((x0, y1), (x1, y1)),
+        ((x0, y0), (x0, y1)), ((xm, y0), (xm, y1)), ((x1, y0), (x1, y1)),
+    ]:
+        page.draw_line(p1, p2, width=1)
+    doc.save(str(path))
+    doc.close()
+    return path
+
+
+def test_a_fully_scanned_page_with_a_table_gets_cell_by_cell_ocr_too(tmp_path, monkeypatch):
+    """Same problem as the corrupt-text-layer case, a different code path:
+    a page with no text layer at all (a print brochure scanned straight to
+    PDF, no OCR layer, no corrupt font to detect) goes through
+    _render_scanned_pdf, not _reread_corrupt_pages - it must get the same
+    table-aware OCR treatment, not just the mis-encoded-text-layer case,
+    or a real scanned catalogue's spec table flattens into running text
+    exactly like the mis-encoded case did before 1.4.8."""
+    pytest.importorskip("pdfplumber")
+    path = _pdf_scanned_with_table(tmp_path / "scan.pdf")
+
+    monkeypatch.setattr(PdfEngine, "_ocr_unavailable_reason", staticmethod(lambda: None))
+    monkeypatch.setattr(pdf_engine, "prepare_tesseract", lambda language: "tesseract")
+    monkeypatch.setattr(pdf_engine, "recognize", lambda image_path, language: "ข้อความหน้านี้")
+    monkeypatch.setattr(pdf_engine, "recognize_region", lambda image, language: "ค่าในเซลล์")
+
+    output = PdfEngine().convert_structured(path, {})
+
+    assert "| --- |" in output.markdown, "the table must render as a real Markdown table"
+    assert "ค่าในเซลล์" in output.markdown
+    assert "## Page 1 (OCR)" in output.markdown
