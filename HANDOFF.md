@@ -1,19 +1,19 @@
-# Handoff - doc2md v1.4.0
+# Handoff - doc2md v1.4.10
 
-Written 2026-10-04. Read this first, then README.md (what the tool does) and
-CLAUDE.md (the release pipeline rules).
+Written 2026-10-04, updated 2026-10-15. Read this first, then README.md (what
+the tool does) and CLAUDE.md (the release pipeline rules).
 
 ## 1. State right now
 
 | Item | Value |
 | --- | --- |
-| Version | 1.4.0 (`pyproject.toml` and `doc2md/__init__.py` agree) |
-| Last release commit | see `git log` |
-| Branch | `main`, working tree clean at the time of writing |
-| Remote | `origin` = https://github.com/passagain-loui/doc2md.git |
-| Unpushed work | `main` was **19 commits ahead of `origin/main`**. Push before leaving the old machine, or copy the whole folder including `.git`. |
-| Gate | `tools/verify.ps1` passed (EXIT_CODE 0) for 1.3.5 |
-| Installer | `dist/doc2md_Setup_v1.3.5.exe` (plus `dist/doc2md/` and `dist/doc2md.exe`) - **`dist/` and `build/` are git-ignored; rebuild on the new machine** |
+| Version | 1.4.10 (`pyproject.toml` and `doc2md/__init__.py` agree) |
+| Last release commit | `c9034d8` - "feat: v1.4.10 table-aware OCR on fully scanned pages too" |
+| Branch | `main`, working tree clean |
+| Remote | `origin` = https://github.com/passagain-loui/doc2md.git, `main` up to date with `origin/main` (nothing unpushed) |
+| Gate | `tools/verify.ps1` passed (EXIT_CODE 0) for 1.4.10, 2026-10-15: version/import/changelog/CLI checks all PASS, pytest suite green (1 expected skip, see section 2 step 6) |
+| Installer | not currently built - `dist/` and `build/` are git-ignored and were last purged by the gate run above; run `python build.py` to produce `dist/doc2md_Setup_v1.4.10.exe` |
+| Tesseract | tessdata present (`tha`/`eng` in `%LOCALAPPDATA%\doc2md\tessdata`) but the `tesseract` binary itself is **not on PATH on this machine** - run the app's OCR Diagnostics > Install OCR to finish setup before testing OCR by hand |
 
 Not in the repo, and therefore not on the new machine unless you copy them:
 
@@ -156,15 +156,18 @@ Not solved:
 - Legacy `.doc`: no bold/italic, headers, footnotes. Legacy `.ppt`: no notes,
   table layout, pictures.
 
-Small maintenance items seen in the last gate run:
+Small maintenance items seen in the last gate run (2026-10-15, v1.4.10):
 
-- `Image.getdata()` (used in `doc2md/core/ocr_text.py`, two places) is deprecated
-  in Pillow 14 (due 2027-10-15); move to `get_flattened_data()` before then.
-- On the old machine `pytest-timeout` was not installed, so the gate printed
-  "Unknown pytest.mark.timeout" warnings. `requirements-dev.txt` lists it, so a
-  fresh install will not show them.
-- Expected skips: symlink test, RapidOCR test, and one Thai test that needs a
-  real Tesseract.
+- `Image.getdata()` (used in `doc2md/core/ocr_text.py`, two places) is still
+  deprecated in Pillow 14 (due 2027-10-15, confirmed still raising the
+  `DeprecationWarning` in the pytest output); move to `get_flattened_data()`
+  before then. Not urgent.
+- `pytest-timeout` is installed (per `requirements-dev.txt`) - no more
+  "Unknown pytest.mark.timeout" warnings.
+- Expected skips on this machine: just the one Thai test that needs a real
+  Tesseract binary (tessdata is present but `tesseract.exe` itself is not on
+  PATH here - see section 1). The symlink and RapidOCR tests ran rather than
+  skipped this time, so whatever made them skip before no longer applies.
 
 Ideas not started:
 
