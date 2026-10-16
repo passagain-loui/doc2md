@@ -255,6 +255,10 @@ Run it before every release build, alongside the gate. The README's
 - `tools/regress.py` + `tests/test_regress_tool.py` (CHANGELOG/HISTORY
   `[Unreleased]`). Dev-only: the app and the 1.4.11 installer are unchanged.
   Fold the `[Unreleased]` notes into the next version's entries.
+- GitHub CI (`.github/workflows/ci.yml`, Python 3.11-3.13) had failed on
+  every push since 1.3.0 on one timing-dependent cancel test; fixed in the
+  test (see CHANGELOG `[Unreleased]`). Check `gh run list` after each push -
+  the local gate passing does not mean CI does, and nobody had looked.
 - Open UX question for the user: should the ` ⚠NN%` flags stay inside the
   exported Markdown (they cost tokens and can confuse an AI reading it), be
   optional, or show only in the app's preview/quality panel?

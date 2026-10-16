@@ -94,9 +94,20 @@ def test_convert_file_reports_a_cancelled_result_without_starting_work(tmp_path)
     assert "cancelled" in result.error
 
 
-def test_cancelling_a_real_pdf_conversion_returns_quickly(simple_pdf):
+def test_cancelling_a_real_pdf_conversion_returns_quickly(simple_pdf, monkeypatch):
+    # Cancel once the worker process has really been started, not after a fixed
+    # delay: a fast CI runner converted this one-page PDF in under the 0.3 s the
+    # timer used to wait, so the test failed there on every run since 1.3.0.
     cancel = threading.Event()
-    threading.Timer(0.3, cancel.set).start()
+    workers = []
+    real_wait = converter_module._wait_for_worker
+
+    def cancel_while_running(receiver, proc, *args, **kwargs):
+        workers.append(proc)
+        cancel.set()
+        return real_wait(receiver, proc, *args, **kwargs)
+
+    monkeypatch.setattr(converter_module, "_wait_for_worker", cancel_while_running)
     started = time.monotonic()
 
     result = Converter(timeout=120, cancel_event=cancel).convert_file(simple_pdf)
@@ -104,6 +115,7 @@ def test_cancelling_a_real_pdf_conversion_returns_quickly(simple_pdf):
     assert not result.success
     assert "cancelled" in result.error
     assert time.monotonic() - started < 15
+    assert len(workers) == 1 and not workers[0].is_alive()
 
 
 def test_a_large_spreadsheet_scan_checks_the_event(tmp_path):

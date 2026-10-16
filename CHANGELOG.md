@@ -15,6 +15,15 @@
   `approve` accepts a run's output as the new reference. Covered by
   `tests/test_regress_tool.py`.
 
+### Fixed (tests)
+
+- **GitHub CI had been red on every push since 1.3.0** because of one timing
+  race in `test_cancelling_a_real_pdf_conversion_returns_quickly`: it cancelled
+  after a fixed 0.3 s, and the CI runner converts the one-page test PDF faster
+  than that (about 0.47 s locally, so it always passed here). The test now
+  cancels once the worker process has actually started and also asserts that
+  the worker was terminated. The cancel code itself was correct.
+
 ## [1.4.11] (2026-10-16) - EXPORT EACH FILE, OCR CONFIDENCE FLAGS, REAL PAGE PROGRESS
 
 ### Added
