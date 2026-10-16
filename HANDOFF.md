@@ -8,7 +8,7 @@ the tool does) and CLAUDE.md (the release pipeline rules).
 | Item | Value |
 | --- | --- |
 | Version | 1.5.0 (`pyproject.toml` and `doc2md/__init__.py` agree) |
-| Last release commit | (pending - set after the 1.5.0 commit) |
+| Last release commit | `c32d307` - "release: v1.5.0 clean output, OCR review highlights" (CI green on 3.11-3.13) |
 | Branch | `main` |
 | Remote | `origin` = https://github.com/passagain-loui/doc2md.git - check `git status -sb` for unpushed commits; GitHub CI (Python 3.11-3.13) green since commit `8d9adde` |
 | Gate | `tools/verify.ps1` passed (EXIT_CODE 0) for 1.5.0 on 2026-10-17, twice (before the build and again after the last doc edits); 3 expected skips (symlink, RapidOCR not installed, Tesseract binary not installed) |
