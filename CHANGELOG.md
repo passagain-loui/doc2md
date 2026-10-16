@@ -1,5 +1,20 @@
 # Changelog
 
+## [Unreleased]
+
+### Added (developer tooling - the application itself is unchanged)
+
+- **`tools/regress.py`: a real-document regression check.** Converts a
+  folder of real samples kept outside the repository, compares each result
+  with output a person approved earlier, and writes the output, a diff and a
+  `report.md` per run. Optional `<sample>.expect.txt` files list phrases the
+  output must contain (whitespace ignored, so a wrong Thai letter is caught
+  but OCR spacing is not). Only objective losses count as a regression - a
+  worse status, a lost expected phrase, fewer pages with content - and make
+  `run` exit 1; any other difference is reported as "changed" for review.
+  `approve` accepts a run's output as the new reference. Covered by
+  `tests/test_regress_tool.py`.
+
 ## [1.4.11] (2026-10-16) - EXPORT EACH FILE, OCR CONFIDENCE FLAGS, REAL PAGE PROGRESS
 
 ### Added

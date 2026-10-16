@@ -1,5 +1,19 @@
 # History
 
+## [Unreleased] - Making real documents repeatable
+
+Every real improvement since 1.3 came from a document the user sent, and
+each check was done once, by hand, then lost. 1.3.2 showed the cost: a fix
+built from a brochure made a grey certificate worse, and that only came to
+light because the certificate happened to be run again. Unit tests with
+synthetic fixtures cannot catch that kind of loss. So the samples now get a
+harness: keep them in a folder outside git, approve an output once, and every
+later run is compared with it. A difference is only called a regression on
+evidence that does not need a judgement call, such as a status that got worse
+or a phrase the user listed as "must appear" that has gone. Everything else is
+shown as a diff for a person to judge, because "different" is not always
+"worse" when OCR is involved.
+
 ## [1.4.11] - 2026-10-16 - Three things the user asked for as a user, not a developer
 
 Asked, as a genuine user of the app rather than its developer, whether it

@@ -9,10 +9,10 @@ the tool does) and CLAUDE.md (the release pipeline rules).
 | --- | --- |
 | Version | 1.4.11 (`pyproject.toml` and `doc2md/__init__.py` agree) |
 | Last release commit | `a969db4` - "feat: v1.4.11 export each file, OCR confidence flags, real page progress" |
-| Branch | `main`, working tree clean |
+| Branch | `main`; `tools/regress.py` work (section 10) added after the 1.4.11 commit |
 | Remote | `origin` = https://github.com/passagain-loui/doc2md.git, `main` up to date with `origin/main` (nothing unpushed) |
-| Gate | `tools/verify.ps1` passed (EXIT_CODE 0) for 1.4.11, 2026-10-16: version/import/changelog/CLI checks all PASS, pytest suite green (1 expected skip, see section 2 step 6) |
-| Installer | not currently built - `dist/` and `build/` are git-ignored and were last purged by the gate run above; run `python build.py` to produce `dist/doc2md_Setup_v1.4.11.exe` |
+| Gate | `tools/verify.ps1` passed (EXIT_CODE 0) for 1.4.11, 2026-10-16: version/import/changelog/CLI checks all PASS, pytest suite green. Re-run the same day after adding `tools/regress.py`: EXIT_CODE 0 again, 3 expected skips (symlink, RapidOCR not installed, Tesseract binary not installed) |
+| Installer | built 2026-10-16 from the gated 1.4.11 tree: `dist/doc2md_Setup_v1.4.11.exe` (69 MB), `dist/doc2md.exe` (95 MB), `dist/doc2md/` - git-ignored, rebuild with `python build.py` on another machine |
 | Tesseract | tessdata present (`tha`/`eng` in `%LOCALAPPDATA%\doc2md\tessdata`) but the `tesseract` binary itself is **not on PATH on this machine** - run the app's OCR Diagnostics > Install OCR to finish setup before testing OCR by hand |
 
 ### What changed in 1.4.11 (not yet touched by a real human)
@@ -127,7 +127,7 @@ an entry headed `[x.y.z]` to **both** `CHANGELOG.md` and `HISTORY.md` (the gate'
 - **Bash heredocs lose a level of backslashes on the old machine.** A patch
   script holding `"\n"` wrote a real newline into source files. Use the
   Edit/Write tools, or `chr(92)`, for anything with escape sequences, and
-  `ast.parse` the result. Check whether the new machine behaves the same.
+  `ast.parse` the result. Confirmed on the new machine too (2026-10-16).
 - **Scripts that spawn processes must be guarded** with
   `if __name__ == "__main__":` - the converter uses the `spawn` start method, so
   an unguarded script re-imports itself and appears to hang (one PDF run took
@@ -240,7 +240,26 @@ The suite cannot cover these; nobody has done them on the built exe yet:
 Report findings as: file type, what the output should have said, what it said.
 Fixes so far came from exactly that kind of sample.
 
-## 10. First steps on the new machine
+**Make each tested sample permanent (added after 1.4.11).** Put the file in
+`D:\AI\OpenCode\doc2md-samples\` (outside git, the default for
+`tools/regress.py`), add `<file>.expect.txt` with a few phrases that must
+appear (names, amounts, the words OCR tends to get wrong), run
+`python tools/regress.py run`, check the output against the original, and
+`python tools/regress.py approve <file>` once it is right. From then on every
+`run` compares against it, and anything that gets worse shows as REGRESSED.
+Run it before every release build, alongside the gate. The README's
+"Real-document regression check" section has the details.
+
+## 10. Developer tooling not yet in a release
+
+- `tools/regress.py` + `tests/test_regress_tool.py` (CHANGELOG/HISTORY
+  `[Unreleased]`). Dev-only: the app and the 1.4.11 installer are unchanged.
+  Fold the `[Unreleased]` notes into the next version's entries.
+- Open UX question for the user: should the ` ⚠NN%` flags stay inside the
+  exported Markdown (they cost tokens and can confuse an AI reading it), be
+  optional, or show only in the app's preview/quality panel?
+
+## 11. First steps on the new machine
 
 1. Get the code: `git clone` (after pushing) or copy the folder.
 2. Section 2 setup, then run the gate.

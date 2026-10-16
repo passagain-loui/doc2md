@@ -300,6 +300,35 @@ release notes for the current version, smoke-tests the CLI, and runs the full
 test suite. It must exit 0 before a release is built. The release pipeline and the rules
 around it are in CLAUDE.md; project state, setup and gotchas are in HANDOFF.md.
 
+### Real-document regression check
+
+The unit tests use synthetic fixtures. To find out whether a change made a
+*real* document read worse, keep a folder of real samples outside the
+repository (they are often confidential) and run:
+
+```
+python tools/regress.py run
+```
+
+```
+python tools/regress.py approve scans/certificate.pdf
+```
+
+The default folder is `doc2md-samples` next to the repository; pass
+`--samples <folder>` to use another. `run` converts every sample with the
+Balanced AI preset and compares it with the output approved earlier, writing
+the output, a diff and `report.md` into `<samples>/.runs/<timestamp>/`. Next to
+any sample you can add `<name>.expect.txt` with phrases the output must contain,
+one per line. Whitespace is ignored, so OCR spacing does not matter but a wrong
+letter (ข read as ย) does.
+
+A file counts as **REGRESSED** only on objective evidence: a worse status
+(Success → Warning → Error), an expected phrase the approved output had and
+this run lost, or fewer pages with content. Other differences are reported as
+**changed** for a person to judge. `run` exits 1 if anything regressed or
+failed. `approve` copies the latest run's output for the named files (or
+`--all`) into `<samples>/.golden/`.
+
 ---
 
 # Release history
