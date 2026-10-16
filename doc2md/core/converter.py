@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from multiprocessing import get_context
 from pathlib import Path
 
-from doc2md.core import cleaner
+from doc2md.core import cleaner, review
 from doc2md.core.errors import (
     ConversionCancelledError,
     ConversionError,
@@ -63,6 +63,10 @@ class ConversionResult:
     """Structured extraction facts (pages, tables, rows, OCR outcome). Every
     field is ``None`` ("not measured") for engines that have not been
     migrated to :meth:`~doc2md.engine.base.BaseEngine.convert_structured`."""
+    review_lines: list = field(default_factory=list)
+    """:class:`~doc2md.core.review.ReviewLine` entries - lines of ``markdown``
+    that OCR kept but was unsure about. ``markdown`` itself never carries a
+    flag; see :mod:`doc2md.core.review`."""
 
     @property
     def token_estimate(self) -> int:
@@ -350,7 +354,15 @@ class Converter:
                 raw_markdown = raw_result
                 quality = QualityMetrics()
             warning, raw_markdown = split_warning(raw_markdown)
-            optimized = cleaner.optimize(raw_markdown)
+            optimized, review_lines = review.extract(cleaner.optimize(raw_markdown))
+            if warning:
+                # A warning is shown verbatim to the user; it must never carry
+                # a stray review sentinel.
+                warning = review.extract(warning)[0]
+            if review_lines or quality.ocr_review_lines is not None:
+                # The cleaner can drop duplicate lines, so the engine's own
+                # count may be higher than what survives in the final text.
+                quality.ocr_review_lines = len(review_lines)
             return ConversionResult(
                 source=source,
                 success=True,
@@ -361,6 +373,7 @@ class Converter:
                 meta={"mime": detection.mime, "confidence": detection.confidence},
                 warning=warning,
                 quality=quality,
+                review_lines=review_lines,
             )
         except ConversionTimeoutError as exc:
             if strict:

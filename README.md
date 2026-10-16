@@ -1,4 +1,4 @@
-# doc2md v1.3.5
+# doc2md v1.5.0
 
 Drag a document in, get clean Markdown out. PDF, Word, Excel, PowerPoint, HTML,
 e-mail, images and source files, with Thai text and Thai filenames handled
@@ -80,10 +80,12 @@ a scan silently produce metadata-only output.
  display text and text on dark gradients is often missed, Chinese is not
  installed, and tick/cross matrices come out as noise. Check important
  numbers against the original - a line Tesseract kept but was still unsure
- about is flagged inline with `⚠NN%` (its own confidence) on the PDF
- scanned/mis-encoded-page OCR path, so you know which lines are worth that
- check without reading the whole page; a single-image OCR (no page loop to
- carry the flag through) does not yet get this.
+ about is highlighted in the preview (amber, with its confidence on hover) on
+ the PDF scanned/mis-encoded-page OCR path, so you know which lines are worth
+ that check without reading the whole page; a single-image OCR (no page loop to
+ carry the flag through) does not yet get this. Exported and copied Markdown
+ is clean by default, so the marks are not in the text unless you turn them on
+ (see *Scanned pages and Thai text layers* below).
 - **Legacy `.doc` and `.ppt` are read without formatting** that the modern
  formats keep: no bold/italic, headers or footnotes in `.doc`; no speaker
  notes, table layout or pictures in `.ppt`.
@@ -138,6 +140,7 @@ Command line:
 python -m doc2md convert report.pdf
 python -m doc2md convert "C:/docs" --output "C:/out" --stats
 python -m doc2md convert scan.pdf --ocr-lang tha+eng
+python -m doc2md convert scan.pdf --mark-uncertain
 python -m doc2md convert big.pdf --no-tables --chunk 4000
 python -m doc2md convert "C:/docs" --output-policy converted-folder
 python -m doc2md convert report.pdf --report report-quality.json
@@ -257,6 +260,21 @@ PDFs exported from Excel with certain fonts). Known font-map errors (sara aa /
 sara am) are repaired; a page whose text is garbled in other ways is detected
 and re-read by OCR, or marked with a Warning if OCR is unavailable.
 
+Lines that OCR kept but is unsure of (mean confidence 40-70%; anything lower is
+dropped as noise) are highlighted in the preview with an amber background, and
+hovering shows the confidence. The preview toolbar counts them ("⚠ N lines to
+review") and **‹** and **Next ›** step backwards and forwards between them,
+wrapping at either end. Exported and copied Markdown
+stays clean by default. To write the marks into the text as well, which adds
+` ⚠NN%` after each flagged line, tick **Flag uncertain OCR lines in output** in
+the GUI (remembered between runs), pass `--mark-uncertain` to `convert` (or
+`--no-mark-uncertain` to force the flags off), or set `mark_uncertain = true` in
+`doc2md.toml`; the config key applies when neither flag is given. With flags on,
+a flagged line that is a Markdown table row carries its flag inside the last
+cell, before the closing pipe, so the table stays valid; any other line ends
+with ` ⚠NN%`. **Send to Sandbox** and `bridge` are
+always clean, whatever the setting, because they exist for AI ingestion.
+
 Token counts use `tiktoken` when it is installed and otherwise a heuristic
 fitted to it, so the figure is an estimate either way.
 
@@ -269,6 +287,7 @@ timeout = 60
 max_rows = 10000
 ocr_enabled = true
 ocr_lang = "tha+eng"
+mark_uncertain = false
 pdf_tables = true
 default_copy = false
 stats = false

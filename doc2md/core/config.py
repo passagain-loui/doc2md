@@ -16,11 +16,12 @@ DEFAULTS: dict = {
     "ocr_enabled": True,
     "ocr_lang": "tha+eng",
     "pdf_tables": True,
+    "mark_uncertain": False,
 }
 
 _INT_KEYS = {"chunk", "max_rows"}
 _FLOAT_KEYS = {"timeout"}
-_BOOL_KEYS = {"default_copy", "stats", "ocr_enabled", "pdf_tables"}
+_BOOL_KEYS = {"default_copy", "stats", "ocr_enabled", "pdf_tables", "mark_uncertain"}
 _STR_KEYS = {"ocr_lang"}
 
 

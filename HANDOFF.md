@@ -1,40 +1,59 @@
-# Handoff - doc2md v1.4.11
+# Handoff - doc2md v1.5.0
 
-Written 2026-10-04, updated 2026-10-16. Read this first, then README.md (what
+Written 2026-10-04, updated 2026-10-17. Read this first, then README.md (what
 the tool does) and CLAUDE.md (the release pipeline rules).
 
 ## 1. State right now
 
 | Item | Value |
 | --- | --- |
-| Version | 1.4.11 (`pyproject.toml` and `doc2md/__init__.py` agree) |
-| Last release commit | `a969db4` - "feat: v1.4.11 export each file, OCR confidence flags, real page progress" |
-| Branch | `main`; `tools/regress.py` work (section 10) added after the 1.4.11 commit |
-| Remote | `origin` = https://github.com/passagain-loui/doc2md.git, `main` up to date with `origin/main` (nothing unpushed) |
-| Gate | `tools/verify.ps1` passed (EXIT_CODE 0) for 1.4.11, 2026-10-16: version/import/changelog/CLI checks all PASS, pytest suite green. Re-run the same day after adding `tools/regress.py`: EXIT_CODE 0 again, 3 expected skips (symlink, RapidOCR not installed, Tesseract binary not installed) |
-| Installer | built 2026-10-16 from the gated 1.4.11 tree: `dist/doc2md_Setup_v1.4.11.exe` (69 MB), `dist/doc2md.exe` (95 MB), `dist/doc2md/` - git-ignored, rebuild with `python build.py` on another machine |
+| Version | 1.5.0 (`pyproject.toml` and `doc2md/__init__.py` agree) |
+| Last release commit | (pending - set after the 1.5.0 commit) |
+| Branch | `main` |
+| Remote | `origin` = https://github.com/passagain-loui/doc2md.git - check `git status -sb` for unpushed commits; GitHub CI (Python 3.11-3.13) green since commit `8d9adde` |
+| Gate | `tools/verify.ps1` passed (EXIT_CODE 0) for 1.5.0 on 2026-10-17, twice (before the build and again after the last doc edits); 3 expected skips (symlink, RapidOCR not installed, Tesseract binary not installed) |
+| Installer | built 2026-10-17 from the gated 1.5.0 tree: `dist/doc2md_Setup_v1.5.0.exe` (69 MB), `dist/doc2md.exe` (95 MB), `dist/doc2md/` - git-ignored, rebuild with `python build.py` on another machine |
 | Tesseract | tessdata present (`tha`/`eng` in `%LOCALAPPDATA%\doc2md\tessdata`) but the `tesseract` binary itself is **not on PATH on this machine** - run the app's OCR Diagnostics > Install OCR to finish setup before testing OCR by hand |
 
-### What changed in 1.4.11 (not yet touched by a real human)
+### What changed in 1.5.0
 
-Three features added in one session, from the user asking "as a user, is
-this good enough, what would you add" and picking all three suggestions:
+Clean output by default, with the review done in the app (the user's design
+choice; the reasoning is in HISTORY.md):
 
-- **"Export Each File…"** button next to "Export…" - writes every converted
-  file to its own `.md` in a chosen folder instead of combining the batch.
-- **OCR confidence flags.** A line Tesseract kept but was still unsure about
-  now gets ` ⚠NN%` appended right in the Markdown (PDF scanned/mis-encoded
-  page OCR only - `recognize()`, not the poster/photo `recognize_image()`
-  path). Also surfaced as `QualityMetrics.ocr_review_lines`.
-- **Real per-page progress** for the two PDF OCR paths that loop page by
-  page (`_render_scanned_pdf`, `_reread_corrupt_pages`) - the progress bar
-  shows "Page N/M" instead of a busy spinner. Everything else (every other
-  format, including single-image OCR) still shows the busy spinner, honestly,
-  since there is no page loop to report from.
+- **Exported and copied Markdown has no `⚠` flags by default.** 1.4.11 wrote
+  ` ⚠NN%` into the text itself, which an AI reads as data and which costs
+  tokens. Flags now travel beside the text: `doc2md/core/review.py`
+  (`ReviewLine(line, confidence, text)`, `extract`, `with_inline_flags`),
+  exposed as `ConversionResult.review_lines`. Engines mark lines with two
+  private-use characters that `Converter` removes after cleaning.
+  `QualityMetrics.ocr_review_lines` always equals the number of review lines
+  in the final text.
+- **Changes exported content versus 1.4.11**, which is why this is a MINOR bump.
+- **GUI preview:** amber full-width background on each flagged line, hover
+  shows the confidence; a "⚠ N lines to review" chip with "‹" and "Next ›"
+  buttons (both wrap; the chip shows "⚠ 1 / 2"-style position while the cursor
+  is on a flagged line; hidden when nothing is flagged). The quality summary
+  says "N line(s) to review" and has its own full-width row under the toolbar
+  (long text cut with "…", full text on hover).
+- **Opt-in inline flags:** checkbox "Flag uncertain OCR lines in output" (off by
+  default, remembered between runs) makes Copy Markdown, Copy Selected, Export…
+  and Export Each File… append ` ⚠NN%`. CLI: `--mark-uncertain/--no-mark-uncertain`
+  on `convert`; with neither given, the `mark_uncertain` key in `doc2md.toml`
+  applies, and `--no-mark-uncertain` forces flags off. With flags on, a flagged
+  pipe-table row gets its flag inside the last cell, before the closing pipe.
+- **Send to Sandbox / `bridge` is always clean**, whatever the setting.
+- Flag sources are unchanged: OCR'd PDF pages only. The threshold
+  `REVIEW_LINE_CONFIDENCE = 70.0` in `doc2md/core/ocr_text.py` is still untuned
+  against real bad scans.
 
-All covered by new unit/GUI tests and the full gate passed, but **none of
-the three has been tried by the user on a real document yet** - see the
-three new bullets added to section 9.
+### 1.4.11 (still not tried by a real user)
+
+Three features: "Export Each File…" writes each converted file to its own `.md`
+in a chosen folder; OCR lines Tesseract was unsure of were flagged (now clean by
+default, see 1.5.0); and the two PDF OCR loops report real "Page N/M" progress
+instead of a busy spinner. All covered by tests and the gate passed for 1.4.11,
+but none of the three has been tried by the user on a real document yet - see
+section 9.
 
 Not in the repo, and therefore not on the new machine unless you copy them:
 
@@ -227,12 +246,14 @@ The suite cannot cover these; nobody has done them on the built exe yet:
 7. **(new in 1.4.11) "Export Each File…"** on a batch of several real,
    differently-named documents - confirm the files land correctly and
    `unique` numbering kicks in if two share a stem.
-8. **(new in 1.4.11) OCR confidence flags** on a real poor-quality Thai
-   scan - confirm the ` ⚠NN%` markers actually land on lines that are
-   genuinely wrong, not on clean text (the threshold,
+8. **(1.4.11, changed in 1.5.0) OCR review highlights** on a real poor-quality
+   Thai scan - confirm the amber highlights in the preview land on lines that
+   are genuinely wrong, not on clean text (the threshold,
    `REVIEW_LINE_CONFIDENCE = 70.0` in `ocr_text.py`, was picked to avoid
    false positives on the synthetic test fixtures, never tuned against a
-   real bad scan).
+   real bad scan). Also confirm that Copy Markdown and Export output has no
+   ` ⚠NN%` marks by default, and that they appear only with the "Flag
+   uncertain OCR lines in output" checkbox on.
 9. **(new in 1.4.11) Real page-count progress** on a large real scanned
    PDF - confirm "Page N/M" tracks correctly and the bar does not get
    stuck between files in a batch.
@@ -253,15 +274,16 @@ Run it before every release build, alongside the gate. The README's
 ## 10. Developer tooling not yet in a release
 
 - `tools/regress.py` + `tests/test_regress_tool.py` (CHANGELOG/HISTORY
-  `[Unreleased]`). Dev-only: the app and the 1.4.11 installer are unchanged.
-  Fold the `[Unreleased]` notes into the next version's entries.
+  `[1.5.0]`, under developer tooling). Dev-only, under `tools/`.
 - GitHub CI (`.github/workflows/ci.yml`, Python 3.11-3.13) had failed on
   every push since 1.3.0 on one timing-dependent cancel test; fixed in the
-  test (see CHANGELOG `[Unreleased]`). Check `gh run list` after each push -
+  test (see CHANGELOG `[1.5.0]`). Check `gh run list` after each push -
   the local gate passing does not mean CI does, and nobody had looked.
-- Open UX question for the user: should the ` ⚠NN%` flags stay inside the
-  exported Markdown (they cost tokens and can confuse an AI reading it), be
-  optional, or show only in the app's preview/quality panel?
+- Decided in 1.5.0 (was an open question): the ` ⚠NN%` flags are kept out of
+  exported Markdown by default, because they cost tokens and can confuse an AI
+  reading it. They show as highlights in the app's preview, and can be written
+  into the text on request (GUI checkbox, `--mark-uncertain/--no-mark-uncertain`, `mark_uncertain`
+  in `doc2md.toml`). Sandbox output is always clean.
 
 ## 11. First steps on the new machine
 

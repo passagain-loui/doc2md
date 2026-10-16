@@ -10,7 +10,7 @@ import pytest
 PIL = pytest.importorskip("PIL")
 from PIL import Image, ImageDraw  # noqa: E402
 
-from doc2md.core import ocr_text  # noqa: E402
+from doc2md.core import ocr_text, review  # noqa: E402
 
 
 def _page(panels: int, width=2000, height=600, gap=14, background="white", ink="black"):
@@ -126,7 +126,11 @@ def test_mark_uncertain_flags_only_shaky_surviving_lines():
 
     marked = ocr_text._mark_uncertain(text, means)
 
-    assert marked == "good line\nshaky line ⚠55%"
+    assert marked == "good line\n" + review.encode("shaky line", 55)
+    assert "⚠" not in marked
+    clean, flagged = review.extract(marked)
+    assert clean == "good line\nshaky line"
+    assert flagged == [review.ReviewLine(1, 55, "shaky line")]
 
 
 def test_mark_uncertain_leaves_lines_with_no_known_confidence_alone():
@@ -134,9 +138,15 @@ def test_mark_uncertain_leaves_lines_with_no_known_confidence_alone():
 
 
 def test_count_uncertain_lines_counts_the_marker_not_words():
-    text = "clean line\nshaky one ⚠55%\nanother shaky ⚠60%"
+    text = "\n".join([
+        "clean line",
+        review.encode("shaky one", 55),
+        review.encode("another shaky", 60),
+    ])
 
     assert ocr_text.count_uncertain_lines(text) == 2
+    # a visible warning sign in ordinary text is just text, not a flag
+    assert ocr_text.count_uncertain_lines("a literal ⚠ in a document") == 0
 
 
 def test_recognize_marks_a_shaky_surviving_line_with_its_confidence(tmp_path, monkeypatch):
@@ -153,7 +163,8 @@ def test_recognize_marks_a_shaky_surviving_line_with_its_confidence(tmp_path, mo
 
     result = ocr_text.recognize(image_path, "tha")
 
-    assert result == "ข้อความชัดเจน\nข้อความไม่ชัด ⚠52%"
+    assert result == "ข้อความชัดเจน\n" + review.encode("ข้อความไม่ชัด", 52)
+    assert "⚠" not in result
 
 
 # ------------------------------------------------------------------ recognize

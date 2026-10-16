@@ -245,8 +245,11 @@ def test_no_progress_sender_in_options_is_a_silent_no_op(tmp_path, monkeypatch):
 
 def test_scanned_pdf_counts_review_flagged_lines_in_metrics(tmp_path, monkeypatch):
     """A line Tesseract kept but was still shaky about (see
-    doc2md.core.ocr_text._mark_uncertain) must be both flagged inline in the
-    Markdown and counted in QualityMetrics.ocr_review_lines."""
+    doc2md.core.ocr_text._mark_uncertain) must be both marked in the engine's
+    text (with the invisible review sentinel, never a visible flag) and
+    counted in QualityMetrics.ocr_review_lines. The Converter lifts the
+    marker out afterwards (see tests/test_review.py)."""
+    from doc2md.core import review
     import doc2md.engine.pdf_engine as pdf_engine_module
 
     path = _blank_pdf(tmp_path, pages=1)
@@ -267,7 +270,16 @@ def test_scanned_pdf_counts_review_flagged_lines_in_metrics(tmp_path, monkeypatc
     output = PdfEngine().convert_structured(path, {})
 
     assert output.metrics.ocr_review_lines == 1
-    assert "⚠" in output.markdown
+    assert review.REVIEW_OPEN in output.markdown
+    assert "⚠" not in output.markdown
+
+    clean, flagged = review.extract(output.markdown)
+    assert review.REVIEW_OPEN not in clean and review.REVIEW_CLOSE not in clean
+    assert "⚠" not in clean
+    assert len(flagged) == 1
+    assert flagged[0].confidence == 52
+    assert flagged[0].text == "shaky line"
+    assert clean.split("\n")[flagged[0].line].strip() == "shaky line"
 
 
 # --- GUI wording (pure logic check via the quality dataclass) -------------------

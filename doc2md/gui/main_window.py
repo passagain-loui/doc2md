@@ -22,8 +22,16 @@ import logging
 import threading
 from pathlib import Path
 
-from PyQt6.QtCore import QObject, QSettings, Qt, QThread, QUrl, pyqtSignal
-from PyQt6.QtGui import QColor, QDesktopServices, QGuiApplication, QPixmap
+from PyQt6.QtCore import QEvent, QObject, QSettings, QSize, Qt, QThread, QUrl, pyqtSignal
+from PyQt6.QtGui import (
+    QColor,
+    QDesktopServices,
+    QFontMetrics,
+    QGuiApplication,
+    QPixmap,
+    QTextCursor,
+    QTextFormat,
+)
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -40,8 +48,11 @@ from PyQt6.QtWidgets import (
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
+    QSizePolicy,
     QSplitter,
     QStackedWidget,
+    QTextEdit,
+    QToolTip,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -52,6 +63,7 @@ from doc2md import __version__
 from doc2md.core.converter import ConversionResult, Converter
 from doc2md.core.presets import CUSTOM, PRESET_NAMES, matching_preset, options_for
 from doc2md.core.quality import build_report, write_report_atomic
+from doc2md.core.review import with_inline_flags
 from doc2md.core.router import RECURSIVE_SCAN_EXCLUDED_SUFFIXES, FileKind, detect
 from doc2md.gui import theme
 from doc2md.gui.ocr_dialog import OcrDiagnosticsDialog
@@ -303,6 +315,43 @@ class ConversionWorker(QObject):
         self.finished.emit(succeeded, failed, self._cancelled)
 
 
+class ElidedLabel(QLabel):
+    """One-line label that shortens itself with an ellipsis to fit its width.
+
+    ``text()`` always returns the full text (so callers and tests see what was
+    set); the shortened form is only what is painted. The panel height stays
+    stable and the label never forces its pane wider.
+    """
+
+    def __init__(self, text: str = "", parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._full = ""
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.setText(text)
+
+    def setText(self, text: str) -> None:  # noqa: N802 - Qt naming
+        self._full = text
+        self._elide()
+
+    def text(self) -> str:
+        return self._full
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802 - Qt naming
+        return QSize(0, super().minimumSizeHint().height())
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        super().resizeEvent(event)
+        self._elide()
+
+    def _elide(self) -> None:
+        width = max(self.contentsRect().width(), 0)
+        shown = QFontMetrics(self.font()).elidedText(
+            self._full, Qt.TextElideMode.ElideRight, width
+        ) if width else self._full
+        if shown != super().text():
+            super().setText(shown)
+
+
 class DropZone(QFrame):
     """Drop target for files and folders."""
 
@@ -403,6 +452,14 @@ class MainWindow(QMainWindow):
         self._files: list[Path] = []
         self._items: list[QTreeWidgetItem] = []
         self._markdown: dict[int, str] = {}
+        # Uncertain-OCR lines per row (ReviewLine list), kept in lockstep with
+        # self._markdown: whenever a row's Markdown goes, so do its flags.
+        self._review: dict[int, list] = {}
+        # Preview state for the selected row: flagged block number -> confidence
+        # (sorted block list alongside), and whether the user has stepped through yet.
+        self._flagged_blocks: dict[int, int] = {}
+        self._flagged_order: list[int] = []
+        self._review_started = False
         self._results: dict[int, object] = {}
         self._output_paths: dict[int, Path] = {}
         self._warnings = 0
@@ -508,9 +565,21 @@ class MainWindow(QMainWindow):
         self.hidden_sheets_check.setToolTip(
             "Also convert worksheets that are hidden in the Excel file"
         )
+        self.mark_uncertain_check = QCheckBox("Flag uncertain OCR lines in output")
+        self.mark_uncertain_check.setToolTip(
+            "Off: copied and exported Markdown stays clean (best for AI tools).\n"
+            "On: \"⚠NN%\" is appended to OCR lines the engine was unsure about, "
+            "so a person can proofread the file.\n"
+            "The preview always highlights those lines either way."
+        )
+        self.mark_uncertain_check.setChecked(
+            self._settings.value("output/mark_uncertain", False, type=bool)
+        )
+        self.mark_uncertain_check.toggled.connect(self._on_mark_uncertain_toggled)
         for widget in (
             self.ocr_check,
             self.tables_check,
+            self.mark_uncertain_check,
         ):
             options.addWidget(widget)
         options.addStretch(1)
@@ -601,17 +670,42 @@ class MainWindow(QMainWindow):
         layout.setSpacing(4)
         layout.addWidget(self._section_label("MARKDOWN PREVIEW"))
 
-        # Single toolbar row: badge + quality metrics + action buttons
+        # Toolbar row: badge, review navigator, action buttons. The quality
+        # facts get their own full-width line just below (quality_detail).
         toolbar = QHBoxLayout()
         toolbar.setSpacing(6)
         self.quality_badge = QLabel("")
         self.quality_badge.setObjectName("QualityBadge")
         self.quality_badge.hide()
-        self.quality_detail = QLabel("Select a converted file to see its quality summary.")
+        self.quality_detail = ElidedLabel("Select a converted file to see its quality summary.")
         self.quality_detail.setObjectName("Muted")
-        self.quality_detail.setWordWrap(False)
         toolbar.addWidget(self.quality_badge)
-        toolbar.addWidget(self.quality_detail, 1)
+        toolbar.addStretch(1)
+
+        # Review navigator: only visible while the selected file has OCR
+        # lines worth checking (see _refresh_review_ui).
+        self.review_nav = QWidget()
+        nav = QHBoxLayout(self.review_nav)
+        nav.setContentsMargins(0, 0, 0, 0)
+        nav.setSpacing(4)
+        self.review_chip = QLabel("")
+        self.review_chip.setObjectName("ReviewChip")
+        self.review_prev_button = QPushButton("‹")
+        self.review_prev_button.setObjectName("ReviewNav")
+        self.review_prev_button.setToolTip("Previous line to review")
+        self.review_prev_button.clicked.connect(lambda: self.goto_review_line(-1))
+        self.review_next_button = QPushButton("Next ›")
+        self.review_next_button.setObjectName("ReviewNav")
+        self.review_next_button.setToolTip("Jump to the next line to review")
+        self.review_next_button.clicked.connect(lambda: self.goto_review_line(1))
+        # Compact pills: never stretch to fill spare room in the toolbar.
+        for widget in (self.review_chip, self.review_prev_button, self.review_next_button):
+            widget.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        nav.addWidget(self.review_chip)
+        nav.addWidget(self.review_prev_button)
+        nav.addWidget(self.review_next_button)
+        self.review_nav.hide()
+        toolbar.addWidget(self.review_nav)
 
         self.open_original_button = QPushButton("Open Original")
         self.open_original_button.clicked.connect(self.open_original)
@@ -622,6 +716,7 @@ class MainWindow(QMainWindow):
             button.setEnabled(False)
             toolbar.addWidget(button)
         layout.addLayout(toolbar)
+        layout.addWidget(self.quality_detail)
 
         self.warning_banner = QLabel("")
         self.warning_banner.setObjectName("WarningBanner")
@@ -655,6 +750,9 @@ class MainWindow(QMainWindow):
         # without letting the window see the drag; opt out so it bubbles up.
         self.preview.setAcceptDrops(False)
         self.preview.viewport().setAcceptDrops(False)
+        # Hover tooltips on highlighted review lines (see eventFilter).
+        self.preview.viewport().installEventFilter(self)
+        self.preview.cursorPositionChanged.connect(self._update_review_chip)
         layout.addWidget(self.preview, 1)
 
         return container
@@ -839,6 +937,7 @@ class MainWindow(QMainWindow):
         self._files.clear()
         self._items.clear()
         self._markdown.clear()
+        self._review.clear()
         self._results.clear()
         self._output_paths.clear()
         self._warnings = 0
@@ -882,6 +981,11 @@ class MainWindow(QMainWindow):
             new_i: self._markdown[old_i]
             for new_i, old_i in enumerate(keep_positions)
             if old_i in self._markdown
+        }
+        self._review = {
+            new_i: self._review[old_i]
+            for new_i, old_i in enumerate(keep_positions)
+            if old_i in self._review
         }
         self._results = {
             new_i: self._results[old_i]
@@ -1026,6 +1130,7 @@ class MainWindow(QMainWindow):
             self._paint_status(item, STATUS_QUEUED)
             item.setText(COLUMN_DETAIL, "")
         self._markdown.clear()
+        self._review.clear()
         self._results.clear()
         self._output_paths.clear()
         self._reset_preview_panel()
@@ -1053,6 +1158,7 @@ class MainWindow(QMainWindow):
             # new attempt is in flight - and if this attempt fails outright,
             # it must stay gone rather than silently keep the old content.
             self._markdown.pop(i, None)
+            self._review.pop(i, None)
             self._results.pop(i, None)
             self._output_paths.pop(i, None)
             self._paint_status(self._items[i], STATUS_QUEUED)
@@ -1121,6 +1227,7 @@ class MainWindow(QMainWindow):
             self._results[index] = result
         if ok:
             self._markdown[index] = markdown
+            self._review[index] = list(getattr(result, "review_lines", None) or [])
             if warning:
                 self._warnings += 1
                 self._paint_status(item, STATUS_WARNING)
@@ -1193,10 +1300,25 @@ class MainWindow(QMainWindow):
     def output_directory_for(self, source: Path) -> Path:
         return Path(self.output_edit.text().strip() or source.parent)
 
+    def _on_mark_uncertain_toggled(self, checked: bool) -> None:
+        self._settings.setValue("output/mark_uncertain", bool(checked))
+        self._settings.sync()
+
+    def _output_markdown(self, index: int) -> str:
+        """Markdown for *index* as it leaves the app (copy / export).
+
+        Clean by default; with "Flag uncertain OCR lines in output" on, a
+        visible `` ⚠NN%`` is appended to each review line.
+        """
+        markdown = self._markdown[index]
+        if self.mark_uncertain_check.isChecked():
+            return with_inline_flags(markdown, self._review.get(index, []))
+        return markdown
+
     def collected_markdown(self) -> str:
         """Concatenate every successful result in queue order."""
         return "\n\n---\n\n".join(
-            self._markdown[index] for index in sorted(self._markdown)
+            self._output_markdown(index) for index in sorted(self._markdown)
         )
 
     def copy_markdown(self, *, quiet: bool = False) -> bool:
@@ -1219,6 +1341,9 @@ class MainWindow(QMainWindow):
     def build_bridge_payload(self):
         """Assemble the payload the integration bridge sends downstream."""
         from doc2md.core.bridge import BridgeDocument, BridgePayload
+
+        # Always the CLEAN Markdown, whatever the "flag uncertain lines"
+        # toggle says: this goes to AI ingestion, where "⚠58%" reads as data.
 
         documents = [
             BridgeDocument(
@@ -1337,7 +1462,7 @@ class MainWindow(QMainWindow):
             source = self._files[index]
             try:
                 claim_and_publish_text(
-                    source, target, ".md", self._markdown[index], OutputPolicy.UNIQUE
+                    source, target, ".md", self._output_markdown(index), OutputPolicy.UNIQUE
                 )
                 written += 1
             except OSError as exc:
@@ -1407,6 +1532,7 @@ class MainWindow(QMainWindow):
 
         self._current_index = index
         self.preview.setPlainText(self._markdown.get(index, "") if index is not None else "")
+        self._refresh_review_ui(index)
         self._show_quality_summary(index)
         self._update_warning_banner(index)
         self._update_row_actions(index)
@@ -1415,12 +1541,109 @@ class MainWindow(QMainWindow):
     def _reset_preview_panel(self) -> None:
         self._current_index = None
         self.preview.clear()
+        self._refresh_review_ui(None)
         self._show_quality_summary(None)
         self._update_warning_banner(None)
         self._update_row_actions(None)
         self._update_thumbnail(None)
 
     # ------------------------------------------------------- review extras
+
+    def _refresh_review_ui(self, index: int | None) -> None:
+        """Highlight the selected row's review lines and (re)build the navigator.
+
+        Runs right after the preview text is replaced. Review lines whose block
+        does not exist in the shown text are ignored, so the highlights, the
+        chip count and Next/Previous always agree.
+        """
+        document = self.preview.document()
+        flagged: dict[int, int] = {}
+        selections: list = []
+        for entry in self._review.get(index, []) if index is not None else []:
+            block = document.findBlockByNumber(entry.line)
+            if not block.isValid() or entry.line in flagged:
+                continue
+            flagged[entry.line] = entry.confidence
+            selection = QTextEdit.ExtraSelection()
+            selection.cursor = QTextCursor(block)
+            selection.format.setBackground(QColor(*theme.REVIEW_HIGHLIGHT_RGBA))
+            selection.format.setProperty(QTextFormat.Property.FullWidthSelection, True)
+            selections.append(selection)
+        self._flagged_blocks = flagged
+        self._flagged_order = sorted(flagged)
+        self._review_started = False
+        self.preview.setExtraSelections(selections)
+        self.review_nav.setVisible(bool(flagged))
+        self._update_review_chip()
+
+    def _update_review_chip(self) -> None:
+        total = len(self._flagged_order)
+        if not total:
+            self.review_chip.setText("")
+            return
+        block = self.preview.textCursor().blockNumber()
+        if block in self._flagged_blocks:
+            position = self._flagged_order.index(block) + 1
+            self.review_chip.setText(f"⚠ {position} / {total}")
+        else:
+            noun = "line" if total == 1 else "lines"
+            self.review_chip.setText(f"⚠ {total} {noun} to review")
+
+    def goto_review_line(self, step: int = 1) -> bool:
+        """Move the preview cursor to the next (+1) or previous (-1) review line.
+
+        Wraps around at either end. Returns False when there is nothing to visit.
+        """
+        order = self._flagged_order
+        if not order:
+            return False
+        current = self.preview.textCursor().blockNumber()
+        if step >= 0:
+            # Before the first jump the cursor sits at the top of the text;
+            # a flagged first line is then still "next", not skipped.
+            strict = self._review_started or current != 0
+            later = [b for b in order if (b > current if strict else b >= current)]
+            target = later[0] if later else order[0]
+        else:
+            earlier = [b for b in order if b < current]
+            target = earlier[-1] if earlier else order[-1]
+        self._review_started = True
+        cursor = QTextCursor(self.preview.document().findBlockByNumber(target))
+        cursor.movePosition(
+            QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor
+        )
+        self.preview.setTextCursor(cursor)
+        self.preview.centerCursor()
+        self._update_review_chip()
+        return True
+
+    def _review_tooltip_text(self, block: int) -> str | None:
+        confidence = self._flagged_blocks.get(block)
+        if confidence is None:
+            return None
+        return (
+            f"OCR confidence {confidence}% — check this line against the original"
+        )
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802 - Qt naming
+        if watched is self.preview.viewport() and event.type() == QEvent.Type.ToolTip:
+            pos = event.pos()
+            cursor = self.preview.cursorForPosition(pos)
+            rect = self.preview.cursorRect(cursor)
+            # cursorForPosition snaps to the nearest line, so hovering the empty
+            # area below the last line would otherwise count as that line.
+            text = (
+                self._review_tooltip_text(cursor.blockNumber())
+                if rect.top() <= pos.y() <= rect.bottom()
+                else None
+            )
+            if text:
+                QToolTip.showText(event.globalPos(), text, self.preview.viewport())
+            else:
+                QToolTip.hideText()
+                event.ignore()
+            return True
+        return super().eventFilter(watched, event)
 
     def _update_warning_banner(self, index: int | None) -> None:
         if index is None or not (0 <= index < len(self._items)):
@@ -1453,9 +1676,9 @@ class MainWindow(QMainWindow):
         index = self._current_index
         if index is None:
             return False
-        markdown = self._markdown.get(index)
-        if not markdown:
+        if not self._markdown.get(index):
             return False
+        markdown = self._output_markdown(index)
         clipboard = QGuiApplication.clipboard()
         if clipboard is None:  # pragma: no cover - headless only
             return False
@@ -1530,6 +1753,7 @@ class MainWindow(QMainWindow):
         if index is None or index not in self._results:
             self.quality_badge.hide()
             self.quality_detail.setText("Select a converted file to see its quality summary.")
+            self.quality_detail.setToolTip("")
             return
 
         item = self._items[index]
@@ -1580,11 +1804,12 @@ class MainWindow(QMainWindow):
                 if quality.ocr_pages_failed:
                     facts.append(f"{quality.ocr_pages_failed} OCR page(s) failed")
                 if quality.ocr_review_lines:
-                    facts.append(f"{quality.ocr_review_lines} OCR line(s) marked ⚠ for review")
+                    facts.append(f"{quality.ocr_review_lines} line(s) to review")
             elif quality.ocr_pages_success is not None or quality.ocr_pages_empty is not None:
                 facts.append("OCR: no backend available")
 
         self.quality_detail.setText(" · ".join(facts))
+        self.quality_detail.setToolTip(" · ".join(facts))
 
     def _update_actions(self) -> None:
         running = self._is_running()

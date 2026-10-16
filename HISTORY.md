@@ -1,6 +1,28 @@
 # History
 
-## [Unreleased] - Making real documents repeatable
+## [1.5.0] - 2026-10-17 - Flags beside the text, not in it
+
+1.4.11 made uncertain OCR lines easy to find by writing their confidence
+straight into the Markdown: ` ⚠58%` after any line Tesseract kept but was not
+sure of. That worked for a person reading the preview. It did not work for the
+files the same text went into. Every output carried the marker, including the
+files handed to AI tools, and there "58%" reads like a figure from the document
+itself - a discount, a price, a count - while every marker costs tokens for a
+reader who never asked for it.
+
+The question was never whether to flag the uncertain lines, only where the flag
+should live. The user picked the design: clean output by default, with the
+review done in the app. An uncertain line gets an amber background in the
+preview, its confidence on hover, and a navigator that steps through them. The
+flag is kept beside the text as data (`ReviewLine` records on the conversion
+result), so it can be shown without being written into the file. Anyone who
+does want the marks in the text can turn them on with a checkbox, a flag or a
+config key. The Sandbox bundle ignores that setting and is always clean, because
+it exists for AI ingestion.
+
+Flags still come only from OCR'd PDF pages, and the 70% threshold has still not
+been tuned against a real bad scan. Exported files now differ from 1.4.11's,
+which is why this is a minor release rather than a patch.
 
 Every real improvement since 1.3 came from a document the user sent, and
 each check was done once, by hand, then lost. 1.3.2 showed the cost: a fix

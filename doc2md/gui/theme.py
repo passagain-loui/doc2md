@@ -26,6 +26,10 @@ SUCCESS = "#10B981"
 WARNING = "#F59E0B"
 DANGER = "#EF4444"
 
+# Preview highlight for OCR lines worth checking (R, G, B, A): the WARNING
+# amber at ~18% so the text on top keeps its contrast on the dark surface.
+REVIEW_HIGHLIGHT_RGBA = (245, 158, 11, 46)
+
 STATUS_COLORS = {
     "queued": TEXT_MUTED,
     "converting": ACCENT,
@@ -166,6 +170,24 @@ QLabel#QualityBadge[status="success"] {{ background-color: rgba(16, 185, 129, 0.
 QLabel#QualityBadge[status="warning"] {{ background-color: rgba(245, 158, 11, 0.15); color: {WARNING}; }}
 QLabel#QualityBadge[status="error"] {{ background-color: rgba(239, 68, 68, 0.15); color: {DANGER}; }}
 QLabel#QualityBadge[status="skipped"] {{ background-color: rgba(245, 158, 11, 0.15); color: {WARNING}; }}
+
+QLabel#ReviewChip {{
+    padding: 3px 10px;
+    border-radius: 10px;
+    font-weight: 600;
+    font-size: 11px;
+    background-color: rgba(245, 158, 11, 0.15);
+    color: {WARNING};
+}}
+QPushButton#ReviewNav {{
+    padding: 3px 10px;
+    border-radius: 10px;
+    font-size: 11px;
+    border: 1px solid rgba(245, 158, 11, 0.45);
+    color: {WARNING};
+}}
+QPushButton#ReviewNav:hover {{ border-color: {WARNING}; color: #FBBF24; }}
+QPushButton#ReviewNav:pressed {{ background-color: rgba(245, 158, 11, 0.15); }}
 
 QLabel#WarningBanner {{
     background-color: rgba(245, 158, 11, 0.12);

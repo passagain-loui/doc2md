@@ -1,8 +1,57 @@
 # Changelog
 
-## [Unreleased]
+## [1.5.0] (2026-10-17) - CLEAN OUTPUT, OCR REVIEW HIGHLIGHTS
 
-### Added (developer tooling - the application itself is unchanged)
+### Changed
+
+- **Exported and copied Markdown is clean by default.** In 1.4.11 each OCR
+  line that was kept but unsure (mean confidence 40-70%) had its confidence
+  appended to the text as ` ⚠NN%`, so every output carried it - including
+  files handed to AI tools, where "58%" reads like a figure from the document
+  (a discount, a price) and every marker costs tokens. The flags now travel
+  beside the text instead: `doc2md/core/review.py` holds them as
+  `ReviewLine(line, confidence, text)` records (with `extract` and
+  `with_inline_flags`), exposed on `ConversionResult.review_lines`. The
+  engines mark flagged lines with two invisible private-use characters, which
+  the converter removes after cleaning. `QualityMetrics.ocr_review_lines` now
+  always equals the number of review lines in the final text.
+- **This changes what exported files contain compared with 1.4.11.** Files
+  exported from 1.4.11 can carry ` ⚠NN%` markers; files from 1.5.0 do not,
+  unless the opt-in flags below are switched on. The converted text itself is
+  unchanged. Because the default content of exported files changes, this is a
+  minor release rather than a patch.
+- **Send to Sandbox and `bridge` are always clean**, whatever the setting
+  below says, because the bundle exists for AI ingestion.
+- **Where the flags come from is unchanged.** They are still produced only for
+  PDF pages read by OCR (scanned pages, and pages whose Thai text layer is
+  mis-encoded). Images, normal text PDFs, Word, Excel and PowerPoint produce
+  none.
+- **The quality summary's facts line has its own full-width row under the
+  preview toolbar**, so the new navigator cannot hide it. Long text is cut with
+  "…" and shown in full on hover.
+
+### Added
+
+- **Review highlights in the preview.** Each line to review gets a soft amber
+  full-width background; hovering it shows "OCR confidence 58% - check this
+  line against the original".
+- **Review navigator.** The preview toolbar shows a "⚠ N lines to review" chip,
+  a "‹" previous button and a "Next ›" button. Both buttons jump between the
+  flagged lines and wrap around at either end. While the cursor is on a flagged
+  line, the chip shows its position instead, e.g. "⚠ 1 / 2". The whole navigator
+  is hidden when nothing needs review. The quality summary gives the same count
+  as "N line(s) to review".
+- **Opt-in inline flags.** A "Flag uncertain OCR lines in output" checkbox in
+  the GUI (off by default, remembered between runs) makes Copy Markdown, Copy
+  Selected, Export… and Export Each File… append ` ⚠NN%` to each flagged line.
+  The CLI option is `--mark-uncertain/--no-mark-uncertain` on `convert`: when
+  neither is given, the `mark_uncertain` key in `doc2md.toml` applies, and
+  `--no-mark-uncertain` turns the flags off even if the config says true. With
+  flags on, a flagged Markdown pipe-table row gets the flag inside its last
+  cell, before the closing pipe (`| a | b ⚠58% |`), so the table stays valid;
+  every other line gets ` ⚠NN%` at its end.
+
+### Added (developer tooling)
 
 - **`tools/regress.py`: a real-document regression check.** Converts a
   folder of real samples kept outside the repository, compares each result

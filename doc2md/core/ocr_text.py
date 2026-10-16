@@ -23,13 +23,14 @@ import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
+from doc2md.core import review
+
 MIN_LINE_CONFIDENCE = 40.0
 MIN_SHORT_LINE_CONFIDENCE = 60.0
 SHORT_LINE_CHARS = 3
 # A line above the drop floor is still kept, but one this shaky is worth a
 # reader double-checking against the original - see _mark_uncertain().
 REVIEW_LINE_CONFIDENCE = 70.0
-LOW_CONFIDENCE_MARK = "⚠"
 EDGE_STRENGTH = 40
 GUTTER_INK_LEVEL = 3  # of 255: a column with ink on at most ~1% of its rows is blank
 MIN_GUTTER_FRACTION = 0.0035
@@ -236,10 +237,14 @@ def _line_mean_confidences(data: dict) -> dict[str, float]:
 
 
 def _mark_uncertain(text: str, means: dict[str, float]) -> str:
-    """Append a trailing confidence marker to a line that survived the drop
-    floor but is still shaky, so a reader sees at a glance - right in the
-    Markdown, not only in a document-level warning - which lines are worth
-    checking against the original scan.
+    """Append a review marker to a line that survived the drop floor but is
+    still shaky, so the lines worth checking against the original scan can be
+    told apart from the rest.
+
+    The marker is invisible private-use text (:func:`review.encode`), not a
+    visible ``⚠58%``: :class:`~doc2md.core.converter.Converter` lifts it out
+    into ``ConversionResult.review_lines`` so the Markdown handed to an AI
+    stays clean. The visible flag is opt-in (:func:`review.with_inline_flags`).
     """
     marked: list[str] = []
     for line in text.splitlines():
@@ -247,14 +252,14 @@ def _mark_uncertain(text: str, means: dict[str, float]) -> str:
         if stripped:
             confidence = means.get(_normalized(line))
             if confidence is not None and confidence < REVIEW_LINE_CONFIDENCE:
-                line = line.rstrip() + f" {LOW_CONFIDENCE_MARK}{round(confidence)}%"
+                line = review.encode(line, confidence)
         marked.append(line)
     return "\n".join(marked)
 
 
 def count_uncertain_lines(text: str) -> int:
     """How many lines in *text* carry the :func:`_mark_uncertain` flag."""
-    return text.count(LOW_CONFIDENCE_MARK)
+    return review.count_marked(text)
 
 
 def recognize_region(image, language: str) -> str:

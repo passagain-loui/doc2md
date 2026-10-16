@@ -20,6 +20,7 @@ from doc2md.core.exporter import (
     commit_output_set,
 )
 from doc2md.core.quality import build_report, write_report_atomic
+from doc2md.core.review import with_inline_flags
 from doc2md.core.router import (
     CODE_EXTENSIONS,
     EXTENSION_KINDS,
@@ -231,6 +232,12 @@ def convert(
         None, "--no-tables", help="Skip PDF table extraction (faster, text only). "
              "Overrides doc2md.toml's pdf_tables when given.",
     ),
+    mark_uncertain: Optional[bool] = typer.Option(
+        None, "--mark-uncertain/--no-mark-uncertain",
+        help="Append ⚠NN% after OCR lines that need checking (off by default so "
+             "output stays clean for AI tools). Either form overrides "
+             "doc2md.toml's mark_uncertain when given.",
+    ),
     include_hidden: bool = typer.Option(
         False, "--include-hidden",
         help="Also convert worksheets that are hidden in an Excel file "
@@ -279,6 +286,9 @@ def convert(
     # forcing the built-in default and ignoring the config file.
     effective_pdf_tables = (not no_tables) if no_tables is not None else bool(cfg["pdf_tables"])
     effective_ocr_lang = ocr_lang if ocr_lang else cfg["ocr_lang"]
+    effective_mark_uncertain = (
+        mark_uncertain if mark_uncertain is not None else bool(cfg.get("mark_uncertain", False))
+    )
 
     converter = Converter(
         timeout=effective_timeout,
@@ -334,6 +344,13 @@ def convert(
 
     failures = [r for r in results if r.success is False]
     successes = [r for r in results if r.success]
+
+    if effective_mark_uncertain:
+        # Done once, before anything is echoed, chunked, written or copied, so
+        # every output of this run carries the same visible flags. The result's
+        # Markdown is clean by default (see doc2md.core.review).
+        for result in successes:
+            result.markdown = with_inline_flags(result.markdown, result.review_lines)
 
     if stdout:
         for result in successes:
