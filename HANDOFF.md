@@ -1,19 +1,40 @@
-# Handoff - doc2md v1.4.10
+# Handoff - doc2md v1.4.11
 
-Written 2026-10-04, updated 2026-10-15. Read this first, then README.md (what
+Written 2026-10-04, updated 2026-10-16. Read this first, then README.md (what
 the tool does) and CLAUDE.md (the release pipeline rules).
 
 ## 1. State right now
 
 | Item | Value |
 | --- | --- |
-| Version | 1.4.10 (`pyproject.toml` and `doc2md/__init__.py` agree) |
-| Last release commit | `c9034d8` - "feat: v1.4.10 table-aware OCR on fully scanned pages too" |
+| Version | 1.4.11 (`pyproject.toml` and `doc2md/__init__.py` agree) |
+| Last release commit | `a969db4` - "feat: v1.4.11 export each file, OCR confidence flags, real page progress" |
 | Branch | `main`, working tree clean |
 | Remote | `origin` = https://github.com/passagain-loui/doc2md.git, `main` up to date with `origin/main` (nothing unpushed) |
-| Gate | `tools/verify.ps1` passed (EXIT_CODE 0) for 1.4.10, 2026-10-15: version/import/changelog/CLI checks all PASS, pytest suite green (1 expected skip, see section 2 step 6) |
-| Installer | not currently built - `dist/` and `build/` are git-ignored and were last purged by the gate run above; run `python build.py` to produce `dist/doc2md_Setup_v1.4.10.exe` |
+| Gate | `tools/verify.ps1` passed (EXIT_CODE 0) for 1.4.11, 2026-10-16: version/import/changelog/CLI checks all PASS, pytest suite green (1 expected skip, see section 2 step 6) |
+| Installer | not currently built - `dist/` and `build/` are git-ignored and were last purged by the gate run above; run `python build.py` to produce `dist/doc2md_Setup_v1.4.11.exe` |
 | Tesseract | tessdata present (`tha`/`eng` in `%LOCALAPPDATA%\doc2md\tessdata`) but the `tesseract` binary itself is **not on PATH on this machine** - run the app's OCR Diagnostics > Install OCR to finish setup before testing OCR by hand |
+
+### What changed in 1.4.11 (not yet touched by a real human)
+
+Three features added in one session, from the user asking "as a user, is
+this good enough, what would you add" and picking all three suggestions:
+
+- **"Export Each File…"** button next to "Export…" - writes every converted
+  file to its own `.md` in a chosen folder instead of combining the batch.
+- **OCR confidence flags.** A line Tesseract kept but was still unsure about
+  now gets ` ⚠NN%` appended right in the Markdown (PDF scanned/mis-encoded
+  page OCR only - `recognize()`, not the poster/photo `recognize_image()`
+  path). Also surfaced as `QualityMetrics.ocr_review_lines`.
+- **Real per-page progress** for the two PDF OCR paths that loop page by
+  page (`_render_scanned_pdf`, `_reread_corrupt_pages`) - the progress bar
+  shows "Page N/M" instead of a busy spinner. Everything else (every other
+  format, including single-image OCR) still shows the busy spinner, honestly,
+  since there is no page loop to report from.
+
+All covered by new unit/GUI tests and the full gate passed, but **none of
+the three has been tried by the user on a real document yet** - see the
+three new bullets added to section 9.
 
 Not in the repo, and therefore not on the new machine unless you copy them:
 
@@ -127,6 +148,23 @@ an entry headed `[x.y.z]` to **both** `CHANGELOG.md` and `HISTORY.md` (the gate'
 - Downloads of language data or models need the user's explicit say-so. The user
   approved `tessdata_best` once (measured, not adopted); Chinese language data
   was **not** approved.
+- **A `verify.ps1` run that crashes natively partway through pytest**
+  (exit `-1073740791` / `0xC0000409`, a Windows stack violation) is not
+  automatically a flake. 1.4.10's history recorded one as unexplained; in
+  1.4.11 the exact same crash turned out to be caused by three earlier
+  `pytest`/Qt processes still running, stuck forever in a real modal
+  `QMessageBox.exec()` with no one to click it (a test bug - see the next
+  bullet). Before re-running and shrugging it off as a flake, check for
+  and kill stray `python.exe` pytest processes first:
+  `powershell -Command "Get-CimInstance Win32_Process -Filter \"name='python.exe'\" | Select-Object ProcessId, CommandLine"`.
+- **A GUI test that triggers `self._warn(...)` hangs forever in a headless
+  run**, not just "runs slowly" - `_warn()` is a real `QMessageBox.warning()`,
+  a blocking modal with no one to dismiss it under the offscreen Qt
+  platform. Stub `QMessageBox.warning`/`.question` via monkeypatch (see
+  `test_closing_window_during_conversion_does_not_force_delete_thread` and
+  `test_export_each_file_refuses_when_nothing_converted` in
+  `tests/test_gui_qt.py`) before writing a test for any "nothing to do"
+  refusal path that does not already take a `quiet=` flag.
 
 ## 7. What was measured (so it is not redone)
 
@@ -156,7 +194,7 @@ Not solved:
 - Legacy `.doc`: no bold/italic, headers, footnotes. Legacy `.ppt`: no notes,
   table layout, pictures.
 
-Small maintenance items seen in the last gate run (2026-10-15, v1.4.10):
+Small maintenance items seen in the last gate run (2026-10-16, v1.4.11):
 
 - `Image.getdata()` (used in `doc2md/core/ocr_text.py`, two places) is still
   deprecated in Pillow 14 (due 2027-10-15, confirmed still raising the
@@ -186,6 +224,18 @@ The suite cannot cover these; nobody has done them on the built exe yet:
 4. Cancel during a large scanned PDF.
 5. Legacy .doc / .xls / .ppt through the GUI.
 6. Very large files (memory and time).
+7. **(new in 1.4.11) "Export Each File…"** on a batch of several real,
+   differently-named documents - confirm the files land correctly and
+   `unique` numbering kicks in if two share a stem.
+8. **(new in 1.4.11) OCR confidence flags** on a real poor-quality Thai
+   scan - confirm the ` ⚠NN%` markers actually land on lines that are
+   genuinely wrong, not on clean text (the threshold,
+   `REVIEW_LINE_CONFIDENCE = 70.0` in `ocr_text.py`, was picked to avoid
+   false positives on the synthetic test fixtures, never tuned against a
+   real bad scan).
+9. **(new in 1.4.11) Real page-count progress** on a large real scanned
+   PDF - confirm "Page N/M" tracks correctly and the bar does not get
+   stuck between files in a batch.
 
 Report findings as: file type, what the output should have said, what it said.
 Fixes so far came from exactly that kind of sample.
