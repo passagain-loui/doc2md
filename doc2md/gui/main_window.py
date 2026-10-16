@@ -229,6 +229,12 @@ class ConversionWorker(QObject):
     # unexpected exception the converter itself did not package.
     file_finished = pyqtSignal(int, bool, str, str, str, object)
     progress = pyqtSignal(int, int)
+    # (row index, current page, total pages) - only PDF OCR paths (scanned
+    # pages, mis-encoded pages re-read by OCR) emit this; a file with no
+    # page loop to report from (every other format, including image OCR)
+    # simply never fires it, and the busy spinner set in _on_file_started
+    # stands for the whole file as before.
+    page_progress = pyqtSignal(int, int, int)
     finished = pyqtSignal(int, int, bool)
 
     def __init__(
@@ -251,8 +257,21 @@ class ConversionWorker(QObject):
         self._cancel_event.set()
 
     def run(self) -> None:
+        # One Converter for the whole batch, so this closure must track
+        # which row is currently converting rather than capturing it once -
+        # by the time the progress_callback fires, `index` has already
+        # moved on to whichever file convert_file() is blocked on right now.
+        current_index = -1
+
+        def on_progress(_source, current, total) -> None:
+            if current_index >= 0:
+                self.page_progress.emit(current_index, current, total)
+
         converter = Converter(
-            timeout=self._timeout, options=self._options, cancel_event=self._cancel_event
+            timeout=self._timeout,
+            options=self._options,
+            cancel_event=self._cancel_event,
+            progress_callback=on_progress,
         )
         total = len(self._files)
         succeeded = 0
@@ -260,6 +279,7 @@ class ConversionWorker(QObject):
         for position, (index, path) in enumerate(self._files.items()):
             if self._cancelled:
                 break
+            current_index = index
             self.file_started.emit(index, path.name)
             try:
                 result = converter.convert_file(path)
@@ -395,6 +415,7 @@ class MainWindow(QMainWindow):
         self._ocr_dpi = 300
         self._syncing_preset = False
         self._current_index: int | None = None
+        self._current_converting_index: int = -1
 
         self._build_ui()
         self._update_actions()
@@ -710,10 +731,19 @@ class MainWindow(QMainWindow):
         )
         self.export_report_button.clicked.connect(self.export_content)
 
+        self.export_each_file_button = QPushButton("Export Each File…")
+        self.export_each_file_button.setIcon(theme.make_icon("document"))
+        self.export_each_file_button.setToolTip(
+            "Save every converted file separately into a folder you choose, "
+            "one .md per source file (instead of combining them all into one)."
+        )
+        self.export_each_file_button.clicked.connect(self.export_each_file)
+
         row.addWidget(self.clear_button)
         row.addStretch(1)
         row.addWidget(self.copy_button)
         row.addWidget(self.export_report_button)
+        row.addWidget(self.export_each_file_button)
         row.addWidget(self.cancel_button)
         row.addWidget(self.convert_button)
         return row
@@ -1049,6 +1079,7 @@ class MainWindow(QMainWindow):
         self._worker.file_started.connect(self._on_file_started)
         self._worker.file_finished.connect(self._on_file_finished)
         self._worker.progress.connect(self._on_progress)
+        self._worker.page_progress.connect(self._on_page_progress)
         self._worker.finished.connect(self._on_batch_finished)
         self._thread.start()
 
@@ -1061,15 +1092,24 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Cancelling…")
 
     def _on_file_started(self, index: int, name: str) -> None:
+        self._current_converting_index = index
         if 0 <= index < len(self._items):
             self._paint_status(self._items[index], STATUS_CONVERTING)
         self.statusBar().showMessage(f"Converting {name}…")
-        # No per-page progress exists for the file that's actively
-        # converting (OCR runs in an isolated process that only reports
-        # back once, at the end) - an indeterminate/busy bar says "still
-        # working" honestly, rather than sitting frozen at a stale percent
-        # for however long that one file takes.
+        # Indeterminate/busy by default - honest for the common case where
+        # this file's format has no page loop to report real progress from.
+        # _on_page_progress switches this to a real page count the moment
+        # a PDF OCR path reports one; it is reset here so a previous file's
+        # "Page N/M" format never lingers on a file that won't send any.
+        self.progress_bar.setFormat("%p%")
         self.progress_bar.setRange(0, 0)
+
+    def _on_page_progress(self, index: int, current: int, total: int) -> None:
+        if total <= 0 or index != self._current_converting_index:
+            return
+        self.progress_bar.setRange(0, total)
+        self.progress_bar.setValue(current)
+        self.progress_bar.setFormat(f"Page {current}/{total}")
 
     def _on_file_finished(
         self, index: int, ok: bool, markdown: str, error: str, warning: str, result
@@ -1106,11 +1146,13 @@ class MainWindow(QMainWindow):
     def _on_progress(self, done: int, total: int) -> None:
         # Back to determinate now that this file's outcome is known - shows
         # real, file-level progress between files in the batch.
+        self.progress_bar.setFormat("%p%")
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(int(done * 100 / total) if total else 0)
         self.progress_label.setText(f"{done} / {total}")
 
     def _on_batch_finished(self, succeeded: int, failed: int, cancelled: bool) -> None:
+        self._current_converting_index = -1
         self._teardown_thread()
         warn_note = f", {self._warnings} with warnings" if self._warnings else ""
         verb = "Cancelled" if cancelled else "Done"
@@ -1261,6 +1303,54 @@ class MainWindow(QMainWindow):
                 self._warn("Export failed", f"Could not write the file: {exc}")
                 return False
         self.statusBar().showMessage(f"Exported to {path_str}")
+        return True
+
+    def export_each_file(self) -> bool:
+        """Write every converted file to its own ``.md`` in a chosen folder.
+
+        Unlike :meth:`export_content`, nothing is combined: each source file
+        keeps its own name and its own destination, going through the same
+        atomic claim-and-publish path (:mod:`doc2md.core.exporter`) every
+        other write in this application uses, with ``unique`` numbering so
+        two source files that happen to share a stem (``report.pdf`` and
+        ``report.docx``) both land without one overwriting the other.
+        """
+        if not self._markdown:
+            self._warn("Nothing to export", "Convert at least one document first.")
+            return False
+
+        default_dir = self.output_edit.text().strip() or str(Path.home())
+        directory = QFileDialog.getExistingDirectory(
+            self, "Export each file to folder", default_dir
+        )
+        if not directory:
+            return False
+
+        from doc2md.core.exporter import OutputPolicy, claim_and_publish_text
+
+        target = Path(directory)
+        written = 0
+        failures: list[str] = []
+        for index in sorted(self._markdown):
+            if index >= len(self._files):
+                continue
+            source = self._files[index]
+            try:
+                claim_and_publish_text(
+                    source, target, ".md", self._markdown[index], OutputPolicy.UNIQUE
+                )
+                written += 1
+            except OSError as exc:
+                failures.append(f"{source.name}: {exc}")
+
+        if not written:
+            self._warn("Export failed", "\n".join(failures) or "No files could be written.")
+            return False
+
+        message = f"Exported {written} file(s) to {directory}"
+        if failures:
+            message += f" ({len(failures)} failed)"
+        self.statusBar().showMessage(message)
         return True
 
     def build_error_report(self) -> list[dict]:
@@ -1489,6 +1579,8 @@ class MainWindow(QMainWindow):
                 facts.append(f"OCR: {quality.ocr_backend} ({quality.ocr_language or 'default'})")
                 if quality.ocr_pages_failed:
                     facts.append(f"{quality.ocr_pages_failed} OCR page(s) failed")
+                if quality.ocr_review_lines:
+                    facts.append(f"{quality.ocr_review_lines} OCR line(s) marked ⚠ for review")
             elif quality.ocr_pages_success is not None or quality.ocr_pages_empty is not None:
                 facts.append("OCR: no backend available")
 
@@ -1507,6 +1599,7 @@ class MainWindow(QMainWindow):
         self.clear_button.setEnabled(has_files and not running)
         self.copy_button.setEnabled(has_output and not running)
         self.export_report_button.setEnabled(bool(self._markdown or self._results) and not running)
+        self.export_each_file_button.setEnabled(bool(self._markdown) and not running)
         self.retry_failed_button.setEnabled(has_errors and not running)
         self.retry_warnings_button.setEnabled(has_warnings and not running)
         self.clear_completed_button.setEnabled(has_successes and not running)

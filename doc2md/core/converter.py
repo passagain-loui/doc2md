@@ -86,9 +86,23 @@ def _execute_payload(payload: dict) -> "str | EngineOutput":
     return engine.convert_structured(Path(payload["source"]), dict(payload["options"]))
 
 
-def _isolated_convert_entry(payload: dict, sender) -> None:
-    """Spawn-context entry point: never raises, reports over the pipe."""
+def _isolated_convert_entry(payload: dict, sender, report_progress: bool = False) -> None:
+    """Spawn-context entry point: never raises, reports over the pipe.
+
+    When *report_progress* is set, the very same ``sender`` the final
+    result is sent over is also handed to the engine (as
+    ``options["_progress_sender"]``) so a page loop deep inside it (PDF OCR)
+    can send ``("progress", (current, total))`` messages before the final
+    ``("ok"|"error", ...)`` one. This mutation happens entirely inside the
+    already-spawned child process - *payload* was already pickled across
+    the process boundary by ``multiprocessing`` itself to get here, so
+    adding a live Connection to it now never needs to survive a second
+    pickling pass the way a value placed in it back in the parent would.
+    """
     try:
+        if report_progress:
+            payload = dict(payload)
+            payload["options"] = {**payload["options"], "_progress_sender": sender}
         sender.send(("ok", _execute_payload(payload)))
     except BaseException as exc:
         try:
@@ -105,7 +119,9 @@ def _isolated_convert_entry(payload: dict, sender) -> None:
 _CANCEL_POLL_S = 0.1
 
 
-def _wait_for_worker(receiver, proc, source: str, timeout: float, cancel=None) -> str:
+def _wait_for_worker(
+    receiver, proc, source: str, timeout: float, cancel=None, on_progress=None
+) -> str:
     deadline = time.monotonic() + max(0.05, timeout)
     try:
         while True:
@@ -117,17 +133,27 @@ def _wait_for_worker(receiver, proc, source: str, timeout: float, cancel=None) -
                     f"{source}: conversion exceeded hard timeout "
                     f"of {timeout:.0f}s and the worker was terminated"
                 )
-            if receiver.poll(min(remaining, _CANCEL_POLL_S)):
-                break
-        try:
-            status, value = receiver.recv()
-        except (EOFError, OSError) as exc:
-            raise ConversionError(
-                f"{source}: worker process died unexpectedly ({exc})"
-            ) from exc
-        if status == "error":
-            raise ConversionError(value)
-        return value
+            if not receiver.poll(min(remaining, _CANCEL_POLL_S)):
+                continue
+            try:
+                status, value = receiver.recv()
+            except (EOFError, OSError) as exc:
+                raise ConversionError(
+                    f"{source}: worker process died unexpectedly ({exc})"
+                ) from exc
+            if status == "progress":
+                # Not the final word - keep waiting for "ok"/"error" after
+                # relaying this to the caller. A callback that raises must
+                # never take the whole conversion down with it.
+                if on_progress is not None:
+                    try:
+                        on_progress(*value)
+                    except Exception:
+                        pass
+                continue
+            if status == "error":
+                raise ConversionError(value)
+            return value
     finally:
         if proc.is_alive():
             proc.terminate()
@@ -138,18 +164,18 @@ def _wait_for_worker(receiver, proc, source: str, timeout: float, cancel=None) -
         receiver.close()
 
 
-def _run_in_process(payload: dict, timeout: float, cancel=None) -> str:
+def _run_in_process(payload: dict, timeout: float, cancel=None, on_progress=None) -> str:
     ctx = get_context("spawn")
     receiver, sender = ctx.Pipe(False)
     proc = ctx.Process(
         target=_isolated_convert_entry,
-        args=(payload, sender),
+        args=(payload, sender, on_progress is not None),
         name=f"doc2md-{Path(payload['source']).stem}",
         daemon=True,
     )
     proc.start()
     sender.close()
-    return _wait_for_worker(receiver, proc, payload["source"], timeout, cancel)
+    return _wait_for_worker(receiver, proc, payload["source"], timeout, cancel, on_progress)
 
 
 def _run_in_thread(payload: dict, timeout: float, cancel=None) -> str:
@@ -201,6 +227,7 @@ class Converter:
         timeout: float = DEFAULT_TIMEOUT_S,
         options: dict | None = None,
         cancel_event=None,
+        progress_callback=None,
     ) -> None:
         self.timeout = float(timeout)
         self.options: dict = dict(options or {})
@@ -208,6 +235,12 @@ class Converter:
         # in flight. Process-isolated engines are terminated; in-thread engines
         # stop at their next check.
         self.cancel_event = cancel_event
+        # Called as ``progress_callback(source, current, total)`` from
+        # whichever thread ``convert_file()`` runs on. Only PDF OCR paths
+        # (scanned pages, mis-encoded pages re-read by OCR) currently report
+        # through this - a single-image OCR has no page loop to hook into,
+        # so callers must not assume every file reports progress.
+        self.progress_callback = progress_callback
 
     def convert_file(self, path: Path | str, *, strict: bool = False) -> ConversionResult:
         started = time.perf_counter()
@@ -301,7 +334,13 @@ class Converter:
                 effective_timeout = max(self.timeout, OCR_TIMEOUT_S)
 
             if engine.requires_process_isolation:
-                raw_result = _run_in_process(payload, effective_timeout, self.cancel_event)
+                on_progress = None
+                if self.progress_callback is not None:
+                    def on_progress(current, total, _source=source):
+                        self.progress_callback(_source, current, total)
+                raw_result = _run_in_process(
+                    payload, effective_timeout, self.cancel_event, on_progress
+                )
             else:
                 raw_result = _run_in_thread(payload, effective_timeout, self.cancel_event)
             if isinstance(raw_result, EngineOutput):

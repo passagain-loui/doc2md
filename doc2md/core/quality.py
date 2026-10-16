@@ -69,6 +69,12 @@ class QualityMetrics:
     ocr_pages_success: int | None = None
     ocr_pages_empty: int | None = None
     ocr_pages_failed: int | None = None
+    ocr_review_lines: int | None = None
+    """Lines Tesseract kept but was still shaky about (see
+    ``doc2md.core.ocr_text._mark_uncertain``) - each is flagged inline in the
+    Markdown body itself, not just counted here. Only populated for the PDF
+    scanned/mis-encoded-page OCR path; ``None`` elsewhere, same as every
+    other "not measured" field."""
 
     def to_dict(self) -> dict:
         return asdict(self)

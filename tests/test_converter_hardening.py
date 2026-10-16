@@ -88,6 +88,170 @@ def test_wait_for_worker_ok_passthrough():
     assert _wait_for_worker(receiver, StubProc(False), "ok.bin", 2) == "# fine"
 
 
+class _SequenceReceiver:
+    """Like StubReceiver, but recv() walks through a fixed list of messages -
+    for exercising the progress-then-final-result loop in _wait_for_worker."""
+
+    def __init__(self, messages):
+        self._messages = list(messages)
+        self.closed = False
+
+    def poll(self, timeout=None):
+        return bool(self._messages)
+
+    def recv(self):
+        return self._messages.pop(0)
+
+    def close(self):
+        self.closed = True
+
+
+def test_wait_for_worker_relays_progress_then_returns_final_result():
+    seen = []
+    receiver = _SequenceReceiver(
+        [("progress", (1, 3)), ("progress", (2, 3)), ("ok", "# done")]
+    )
+    result = _wait_for_worker(
+        receiver, StubProc(False), "scan.pdf", 2, on_progress=lambda c, t: seen.append((c, t))
+    )
+    assert result == "# done"
+    assert seen == [(1, 3), (2, 3)]
+
+
+def test_wait_for_worker_progress_callback_errors_do_not_abort_conversion():
+    receiver = _SequenceReceiver([("progress", (1, 2)), ("ok", "# done")])
+
+    def boom(current, total):
+        raise RuntimeError("gui callback exploded")
+
+    assert _wait_for_worker(receiver, StubProc(False), "x.pdf", 2, on_progress=boom) == "# done"
+
+
+def test_wait_for_worker_without_progress_callback_ignores_progress_messages():
+    receiver = _SequenceReceiver([("progress", (1, 2)), ("ok", "# done")])
+
+    assert _wait_for_worker(receiver, StubProc(False), "x.pdf", 2) == "# done"
+
+
+_captured_progress_options: dict = {}
+
+
+def _record_progress_sender(source, options):
+    from doc2md.core.quality import EngineOutput
+
+    _captured_progress_options["sender"] = options.get("_progress_sender")
+    return EngineOutput(markdown="# ok")
+
+
+def test_isolated_entry_injects_progress_sender_when_requested(tmp_path):
+    _captured_progress_options.clear()
+    sender = StubSender()
+    payload = {
+        # __name__ rather than a hardcoded "tests.test_converter_hardening":
+        # pytest's default "prepend" import mode (no tests/__init__.py)
+        # loads this file as plain "test_converter_hardening", and importing
+        # it a second time under the "tests." prefix inside
+        # _execute_payload's importlib call would create a second module
+        # object with its own, separately-mutated module-global dict.
+        "target": (__name__, "_record_progress_sender"),
+        "source": str(tmp_path / "x"),
+        "options": {},
+    }
+
+    _isolated_convert_entry(payload, sender, report_progress=True)
+
+    assert _captured_progress_options["sender"] is sender
+    assert sender.sent[0][0] == "ok"
+
+
+def test_isolated_entry_omits_progress_sender_by_default(tmp_path):
+    _captured_progress_options.clear()
+    sender = StubSender()
+    payload = {
+        "target": (__name__, "_record_progress_sender"),
+        "source": str(tmp_path / "x"),
+        "options": {},
+    }
+
+    _isolated_convert_entry(payload, sender)
+
+    assert _captured_progress_options["sender"] is None
+
+
+class _IsolatedStubEngine:
+    """A minimal process-isolated engine stand-in - real PdfEngine/OcrEngine
+    would require a real spawned subprocess (and, for OCR, a real Tesseract
+    install) to exercise end to end; this proves Converter's own progress
+    wiring without either."""
+
+    name = "stub"
+    requires_process_isolation = True
+
+    def convert(self, source, options):
+        return "# stub"
+
+    def convert_structured(self, source, options):
+        from doc2md.core.quality import EngineOutput
+
+        return EngineOutput(markdown="# stub")
+
+
+def test_converter_progress_callback_receives_source_and_page_counts(monkeypatch, tmp_path):
+    from doc2md.core.quality import EngineOutput
+    from doc2md.core.router import Detection, FileKind
+
+    source = tmp_path / "scan.pdf"
+    source.write_bytes(b"irrelevant - detect() is stubbed out below")
+
+    captured = {}
+
+    def fake_run_in_process(payload, timeout, cancel=None, on_progress=None):
+        captured["on_progress"] = on_progress
+        if on_progress is not None:
+            on_progress(1, 3)
+            on_progress(2, 3)
+        return EngineOutput(markdown="# done")
+
+    monkeypatch.setattr(conv_mod, "_run_in_process", fake_run_in_process)
+    monkeypatch.setattr(
+        conv_mod, "detect", lambda path: Detection(kind=FileKind.PDF, mime="application/pdf", confidence="high")
+    )
+    monkeypatch.setattr(conv_mod, "get_engine", lambda kind: _IsolatedStubEngine())
+
+    seen = []
+    result = Converter(
+        progress_callback=lambda src, current, total: seen.append((src, current, total))
+    ).convert_file(source)
+
+    assert result.success is True
+    assert captured["on_progress"] is not None
+    assert seen == [(source, 1, 3), (source, 2, 3)]
+
+
+def test_converter_without_progress_callback_passes_none_through(monkeypatch, tmp_path):
+    from doc2md.core.quality import EngineOutput
+    from doc2md.core.router import Detection, FileKind
+
+    source = tmp_path / "scan.pdf"
+    source.write_bytes(b"irrelevant - detect() is stubbed out below")
+
+    captured = {}
+
+    def fake_run_in_process(payload, timeout, cancel=None, on_progress=None):
+        captured["on_progress"] = on_progress
+        return EngineOutput(markdown="# done")
+
+    monkeypatch.setattr(conv_mod, "_run_in_process", fake_run_in_process)
+    monkeypatch.setattr(
+        conv_mod, "detect", lambda path: Detection(kind=FileKind.PDF, mime="application/pdf", confidence="high")
+    )
+    monkeypatch.setattr(conv_mod, "get_engine", lambda kind: _IsolatedStubEngine())
+
+    Converter().convert_file(source)
+
+    assert captured["on_progress"] is None
+
+
 def test_strict_mode_raises_on_unknown_type(tmp_path):
     blob = tmp_path / "blob.bin"
     blob.write_bytes(bytes(range(256)) * 8)

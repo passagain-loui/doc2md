@@ -108,6 +108,54 @@ def test_unreadable_confidence_values_do_not_crash():
     assert ocr_text._low_confidence_lines(data) == set()
 
 
+def test_line_mean_confidences_covers_kept_and_dropped_lines():
+    data = _data([
+        (1, 1, 1, [("ข้อความ", 91), ("จริง", 88)]),
+        (1, 1, 2, [("@", 12), ("ee", 20), ("&", 15), ("ZB", 18)]),
+    ])
+
+    means = ocr_text._line_mean_confidences(data)
+
+    assert means["ข้อความจริง"] == pytest.approx(89.5)
+    assert means["@ee&ZB"] == pytest.approx(16.25)
+
+
+def test_mark_uncertain_flags_only_shaky_surviving_lines():
+    means = {"goodline": 95.0, "shakyline": 55.0}
+    text = "good line\nshaky line\n"
+
+    marked = ocr_text._mark_uncertain(text, means)
+
+    assert marked == "good line\nshaky line ⚠55%"
+
+
+def test_mark_uncertain_leaves_lines_with_no_known_confidence_alone():
+    assert ocr_text._mark_uncertain("mystery line\n", {}) == "mystery line"
+
+
+def test_count_uncertain_lines_counts_the_marker_not_words():
+    text = "clean line\nshaky one ⚠55%\nanother shaky ⚠60%"
+
+    assert ocr_text.count_uncertain_lines(text) == 2
+
+
+def test_recognize_marks_a_shaky_surviving_line_with_its_confidence(tmp_path, monkeypatch):
+    image_path = tmp_path / "p.png"
+    Image.new("RGB", (800, 300), "white").save(image_path)
+    fake = _FakeTesseract(
+        "ข้อความชัดเจน\nข้อความไม่ชัด\n",
+        _data([
+            (1, 1, 1, [("ข้อความ", 92), ("ชัดเจน", 90)]),
+            (1, 1, 2, [("ข้อความ", 55), ("ไม่ชัด", 50)]),
+        ]),
+    )
+    monkeypatch.setitem(sys.modules, "pytesseract", fake)
+
+    result = ocr_text.recognize(image_path, "tha")
+
+    assert result == "ข้อความชัดเจน\nข้อความไม่ชัด ⚠52%"
+
+
 # ------------------------------------------------------------------ recognize
 
 

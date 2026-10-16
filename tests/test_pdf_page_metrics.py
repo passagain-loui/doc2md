@@ -192,6 +192,84 @@ def test_ocr_per_page_failure_excludes_failed_pages_from_content_count(tmp_path,
     assert m.pages_with_content == 1
 
 
+# --- per-page progress reporting -------------------------------------------------
+
+
+class _RecordingSender:
+    """Stands in for the multiprocessing.Connection _report_progress() sends
+    over - only the one method pdf_engine actually calls on it."""
+
+    def __init__(self):
+        self.sent = []
+
+    def send(self, message):
+        self.sent.append(message)
+
+
+def test_scanned_pdf_reports_progress_once_per_page(tmp_path, monkeypatch):
+    import doc2md.engine.pdf_engine as pdf_engine_module
+
+    path = _blank_pdf(tmp_path, pages=3)
+    monkeypatch.setattr(pdf_engine_module.shutil, "which", lambda name: "C:/fake/tesseract.exe")
+
+    fake = types.ModuleType("pytesseract")
+    fake.image_to_string = lambda *a, **k: "recognized text"
+    monkeypatch.setitem(sys.modules, "pytesseract", fake)
+
+    sender = _RecordingSender()
+    PdfEngine().convert_structured(path, {"_progress_sender": sender})
+
+    assert sender.sent == [
+        ("progress", (1, 3)),
+        ("progress", (2, 3)),
+        ("progress", (3, 3)),
+    ]
+
+
+def test_no_progress_sender_in_options_is_a_silent_no_op(tmp_path, monkeypatch):
+    """options without "_progress_sender" (every caller except the isolated
+    worker that was asked to report) must convert exactly as before."""
+    import doc2md.engine.pdf_engine as pdf_engine_module
+
+    path = _blank_pdf(tmp_path, pages=1)
+    monkeypatch.setattr(pdf_engine_module.shutil, "which", lambda name: "C:/fake/tesseract.exe")
+
+    fake = types.ModuleType("pytesseract")
+    fake.image_to_string = lambda *a, **k: "recognized text"
+    monkeypatch.setitem(sys.modules, "pytesseract", fake)
+
+    output = PdfEngine().convert_structured(path, {})
+
+    assert output.metrics.pages_with_content == 1
+
+
+def test_scanned_pdf_counts_review_flagged_lines_in_metrics(tmp_path, monkeypatch):
+    """A line Tesseract kept but was still shaky about (see
+    doc2md.core.ocr_text._mark_uncertain) must be both flagged inline in the
+    Markdown and counted in QualityMetrics.ocr_review_lines."""
+    import doc2md.engine.pdf_engine as pdf_engine_module
+
+    path = _blank_pdf(tmp_path, pages=1)
+    monkeypatch.setattr(pdf_engine_module.shutil, "which", lambda name: "C:/fake/tesseract.exe")
+
+    fake = types.ModuleType("pytesseract")
+    fake.Output = types.SimpleNamespace(DICT="dict")
+    fake.image_to_string = lambda *a, **k: "shaky line"
+    fake.image_to_data = lambda *a, **k: {
+        "text": ["shaky", "line"],
+        "conf": [55, 50],
+        "block_num": [1, 1],
+        "par_num": [1, 1],
+        "line_num": [1, 1],
+    }
+    monkeypatch.setitem(sys.modules, "pytesseract", fake)
+
+    output = PdfEngine().convert_structured(path, {})
+
+    assert output.metrics.ocr_review_lines == 1
+    assert "⚠" in output.markdown
+
+
 # --- GUI wording (pure logic check via the quality dataclass) -------------------
 
 

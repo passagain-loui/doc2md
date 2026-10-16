@@ -79,7 +79,11 @@ a scan silently produce metadata-only output.
  a small stroke (ข/ย) are still occasionally confused on poor scans, stylised
  display text and text on dark gradients is often missed, Chinese is not
  installed, and tick/cross matrices come out as noise. Check important
- numbers against the original.
+ numbers against the original - a line Tesseract kept but was still unsure
+ about is flagged inline with `⚠NN%` (its own confidence) on the PDF
+ scanned/mis-encoded-page OCR path, so you know which lines are worth that
+ check without reading the whole page; a single-image OCR (no page loop to
+ carry the flag through) does not yet get this.
 - **Legacy `.doc` and `.ppt` are read without formatting** that the modern
  formats keep: no bold/italic, headers or footnotes in `.doc`; no speaker
  notes, table layout or pictures in `.ppt`.
@@ -115,8 +119,9 @@ found, OCR outcome - see *Quality report* below), Compare Metadata
 PDFs and images. `Open Original` / `Open Output` launch the file in its
 default application; the per-row `Copy Markdown` copies just that file, while
 the toolbar's `Copy Markdown` copies the whole batch. `Send to Sandbox` writes
-an ingest bundle (see below); `Export Report` writes the JSON quality report
-for the whole batch.
+an ingest bundle (see below); `Export…` writes the batch to one combined
+Markdown/text/JSON file, while `Export Each File…` writes every converted
+file to its own `.md` in a folder you choose instead of combining them.
 
 **Retry and recovery.** `Retry Failed` and `Retry Warnings` re-run only the
 matching rows in place - a retry updates its row's existing result rather

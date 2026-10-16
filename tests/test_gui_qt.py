@@ -389,6 +389,57 @@ def test_copy_markdown_refuses_when_there_is_nothing_to_copy(window):
     assert window.copy_markdown(quiet=True) is False
 
 
+# --- export each file ---------------------------------------------------------
+
+
+def test_export_each_file_writes_one_md_per_source(window, qapp, tmp_path, monkeypatch):
+    out_dir = tmp_path / "exported"
+    window.add_paths(
+        [make_txt(tmp_path, "หนึ่ง.txt", "อัลฟา"), make_txt(tmp_path, "song.txt", "beta")]
+    )
+    run_batch(window, qapp)
+
+    monkeypatch.setattr(
+        "doc2md.gui.main_window.QFileDialog.getExistingDirectory",
+        lambda *args, **kwargs: str(out_dir),
+    )
+
+    assert window.export_each_file() is True
+
+    written = sorted(p.name for p in out_dir.iterdir())
+    assert written == ["song.md", "หนึ่ง.md"]
+    assert "อัลฟา" in (out_dir / "หนึ่ง.md").read_text(encoding="utf-8")
+    assert "beta" in (out_dir / "song.md").read_text(encoding="utf-8")
+
+
+def test_export_each_file_is_a_no_op_when_the_folder_dialog_is_cancelled(
+    window, qapp, tmp_path, monkeypatch
+):
+    window.add_paths([make_txt(tmp_path, "x.txt")])
+    run_batch(window, qapp)
+
+    monkeypatch.setattr(
+        "doc2md.gui.main_window.QFileDialog.getExistingDirectory",
+        lambda *args, **kwargs: "",
+    )
+
+    assert window.export_each_file() is False
+
+
+def test_export_each_file_refuses_when_nothing_converted(window, monkeypatch):
+    # export_each_file() has no quiet= escape hatch (unlike copy_markdown()),
+    # so the "nothing to export" path really calls QMessageBox.warning() -
+    # a real modal .exec() that blocks forever with no one to click it in a
+    # headless test. Stub the box itself, the same way
+    # test_closing_window_during_conversion_does_not_force_delete_thread
+    # stubs QMessageBox.question() below.
+    from PyQt6.QtWidgets import QMessageBox
+
+    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **k: None))
+
+    assert window.export_each_file() is False
+
+
 def test_bridge_payload_carries_the_converted_documents(window, qapp, tmp_path):
     window.add_paths([make_txt(tmp_path, "รายงาน.txt", "เนื้อหา")])
     run_batch(window, qapp)

@@ -23,7 +23,7 @@ from pathlib import Path
 from doc2md.core.errors import ConversionError, EngineUnavailableError, wrap_warning
 from doc2md.core.quality import EngineOutput, QualityMetrics
 from doc2md.core.ocr_setup import find_tesseract, prepare_tesseract
-from doc2md.core.ocr_text import recognize, recognize_region
+from doc2md.core.ocr_text import count_uncertain_lines, recognize, recognize_region
 from doc2md.core.pdf_text import (
     find_sara_bug_fonts,
     page_lines,
@@ -43,6 +43,25 @@ from doc2md.engine.ocr_engine import DEFAULT_OCR_LANG
 SCANNED_TEXT_THRESHOLD = 16
 
 DEFAULT_OCR_DPI = 300
+
+
+def _report_progress(options: dict, current: int, total: int) -> None:
+    """Tell the parent process which page a scanned/OCR'd PDF is up to.
+
+    ``_progress_sender`` is a live ``multiprocessing.Connection`` injected
+    only inside the already-spawned worker (see
+    ``doc2md.core.converter._isolated_convert_entry``) - it never crosses
+    the picklable-options filter, so most callers simply never find it in
+    *options* and this is a no-op. A broken pipe (parent gave up waiting) is
+    not this conversion's problem, so any send failure is swallowed.
+    """
+    sender = options.get("_progress_sender")
+    if sender is None:
+        return
+    try:
+        sender.send(("progress", (current, total)))
+    except Exception:
+        pass
 
 
 def _pdfplumber_available() -> bool:
@@ -297,7 +316,8 @@ class PdfEngine(BaseEngine):
 
         try:
             with tempfile.TemporaryDirectory(prefix="doc2md_pdfocr_") as tmpdir:
-                for index in corrupt:
+                for position, index in enumerate(corrupt, start=1):
+                    _report_progress(options, position, len(corrupt))
                     png_path = Path(tmpdir) / f"page_{index + 1}.png"
                     try:
                         pix = doc[index].get_pixmap(dpi=dpi)
@@ -324,6 +344,9 @@ class PdfEngine(BaseEngine):
             metrics.ocr_backend = "tesseract"
             metrics.ocr_language = language
             metrics.ocr_pages_success = len(replaced)
+            metrics.ocr_review_lines = sum(
+                count_uncertain_lines(pages[index]) for index in replaced
+            )
         if failed:
             return (
                 f"The text layer of {failed} page(s) is mis-encoded Thai and OCR could not "
@@ -589,6 +612,7 @@ class PdfEngine(BaseEngine):
             with tempfile.TemporaryDirectory(prefix="doc2md_pdfocr_") as tmpdir:
                 for index, page in enumerate(doc, start=1):
                     pages_total += 1
+                    _report_progress(options, index, doc.page_count)
                     png_path = Path(tmpdir) / f"page_{index}.png"
                     try:
                         pix = page.get_pixmap(dpi=dpi)
@@ -637,6 +661,7 @@ class PdfEngine(BaseEngine):
             metrics.ocr_pages_success = pages_with_text
             metrics.ocr_pages_failed = pages_failed
             metrics.ocr_pages_empty = max(pages_total - pages_with_text - pages_failed, 0)
+            metrics.ocr_review_lines = count_uncertain_lines("\n".join(out))
         return out, warning
 
     @staticmethod

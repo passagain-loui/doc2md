@@ -1,5 +1,69 @@
 # History
 
+## [1.4.11] - 2026-10-16 - Three things the user asked for as a user, not a developer
+
+Asked, as a genuine user of the app rather than its developer, whether it
+was good enough yet and what to add. The honest answer: the OCR/table
+engine keeps improving on real problems, but three gaps were worth
+closing before calling it done - combining every converted file into one
+export always, Tesseract's own per-word confidence being computed then
+thrown away, and the progress bar lying by omission (a busy spinner for a
+PDF OCR run that already knows exactly which page it is on).
+
+Scoped all three by reading the actual code first, not guessing:
+`export_content()`'s per-file markdown was already held in a dict keyed
+by row index, so a sibling "Export Each File…" writing one `.md` per source
+through the existing atomic `exporter.py` path was a small, low-risk
+addition - no architecture change. The confidence data was the same
+story: `ocr_text.py` already calls `pytesseract.image_to_data()` and
+computes a mean confidence per line to decide which lines to drop as
+noise; it just never kept that number for the lines it *didn't* drop.
+Added a second, additive pass (`_mark_uncertain`) that flags a surviving-
+but-shaky line with its own `⚠NN%` right in the Markdown, matched
+carefully against the existing `_low_confidence_lines`/`_without_junk`
+tests' exact fixture confidences (all either comfortably high or already
+dropped) so nothing already pinned down broke. Deliberately did *not*
+extend this to `recognize_image()` (the poster/photo path): its
+`merge_readings()` has its own exact-match tests with a confidence of 60
+in a kept reading, and marking there would have broken a pinned
+assertion for no real gain - a poster's merged, deduplicated readings
+are a different shape of problem than a scanned page's lines.
+
+The progress bar was the one real architecture question. The isolated
+worker process talks to the parent over a `multiprocessing.Pipe` that,
+before this, was a strict one-shot request/response: the worker sent
+exactly one final message and the parent called `recv()` exactly once.
+Rather than opening a second pipe, reused the same connection as a
+small message stream - the worker can now also send `("progress",
+(current, total))` before its final `("ok"|"error", ...)`, and the
+parent's wait loop treats "progress" as "keep waiting" instead of "done".
+The connection itself is injected into the engine's own `options` dict,
+but only *inside* the already-spawned child process, after the normal
+picklability filter has already run in the parent - a live Connection
+object was never going to survive that filter if it went in beforehand.
+`PdfEngine._render_scanned_pdf` and `_reread_corrupt_pages` already loop
+page by page, so wiring in an emit-per-page call was direct; a
+single-image OCR has no such loop (one opaque multi-pass Tesseract call
+over the whole image), so it keeps the busy spinner, honestly, rather
+than pretending page progress it cannot report.
+
+One of the new tests (`export_each_file`'s "nothing to export yet" case)
+called `self._warn()`, which is a real modal `QMessageBox.warning()` -
+in a headless test with no one to click it, that blocks forever. Found
+it by bisecting with `-k` down to the single hanging test rather than
+accepting "the GUI suite is just slow", fixed by stubbing the dialog the
+same way an existing test already stubs `QMessageBox.question()`. A side
+effect of that bug cost more time than the bug itself: the three
+pytest processes stuck in that endless modal wait were still running,
+unkilled, when the next `verify.ps1` run was started, and that run
+crashed natively partway through the suite (`-1073740791`, the same
+Windows stack-violation exit code 1.4.10's own history recorded once as
+an unexplained flake). This time the cause did not stay unexplained:
+killed the three stuck processes, re-ran the identical code, and it
+passed clean on the first try - strong evidence that at least one
+instance of that "flake" was never random at all, just resource
+contention from a still-running earlier process.
+
 ## [1.4.10] - 2026-10-09 - The other table-flattening path
 
 The user confirmed the selection-highlight fix worked, then asked for

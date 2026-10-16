@@ -1,5 +1,40 @@
 # Changelog
 
+## [1.4.11] (2026-10-16) - EXPORT EACH FILE, OCR CONFIDENCE FLAGS, REAL PAGE PROGRESS
+
+### Added
+
+- **"Export Each File…" writes every converted file to its own `.md`** in a
+  folder you choose, instead of only combining the whole batch into one
+  file the way "Export…" always has. Each source keeps its own name and
+  goes through the same atomic claim-and-publish path
+  (`doc2md.core.exporter`) every other write in this application uses,
+  with `unique` numbering so two sources that happen to share a stem
+  (`report.pdf` and `report.docx`) both land without one overwriting the
+  other.
+- **A line Tesseract kept but was still unsure about is now flagged inline**
+  with its own confidence (` ⚠NN%`) right in the Markdown body, not only in
+  a document-level warning - so it is obvious at a glance which lines are
+  worth checking against the original scan, without reading the whole
+  page. Tesseract already computed per-word confidence internally (to
+  decide which lines to drop as noise); it was simply discarded once a
+  line survived that filter. Covers the PDF scanned/mis-encoded-page OCR
+  path (`doc2md.core.ocr_text.recognize`); a single-image OCR
+  (`recognize_image`, used for posters/photos) has no page concept to
+  carry the flag through and is unchanged. The count of flagged lines is
+  also surfaced as `QualityMetrics.ocr_review_lines` and shown in the
+  quality summary.
+- **The progress bar shows a real page count during PDF OCR**, not just a
+  busy spinner, for the two paths that already loop page by page - a fully
+  scanned PDF and a page re-read because its text layer is mis-encoded.
+  The isolated worker process previously reported back exactly once, when
+  the whole file was done (see 1.4.6); it now also sends
+  `("progress", (current, total))` messages over the same pipe as the
+  loop runs, which the GUI relays into "Page N/M" on the progress bar. A
+  file whose format has no page loop to report from (every other format,
+  including single-image OCR) keeps the honest busy spinner exactly as
+  before.
+
 ## [1.4.10] (2026-10-09) - TABLE STRUCTURE ON SCANNED PAGES TOO
 
 ### Added

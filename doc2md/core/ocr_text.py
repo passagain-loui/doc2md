@@ -26,6 +26,10 @@ from pathlib import Path
 MIN_LINE_CONFIDENCE = 40.0
 MIN_SHORT_LINE_CONFIDENCE = 60.0
 SHORT_LINE_CHARS = 3
+# A line above the drop floor is still kept, but one this shaky is worth a
+# reader double-checking against the original - see _mark_uncertain().
+REVIEW_LINE_CONFIDENCE = 70.0
+LOW_CONFIDENCE_MARK = "⚠"
 EDGE_STRENGTH = 40
 GUTTER_INK_LEVEL = 3  # of 255: a column with ink on at most ~1% of its rows is blank
 MIN_GUTTER_FRACTION = 0.0035
@@ -204,6 +208,55 @@ def _without_junk(plain: str, junk: set[str]) -> str:
     return "\n".join(kept).strip()
 
 
+def _line_mean_confidences(data: dict) -> dict[str, float]:
+    """Mean Tesseract confidence for every line, including ones that pass
+    the drop floor - keyed the same way :func:`_low_confidence_lines` keys
+    its junk set (space-free line text), so a caller can look a surviving
+    line back up by the same normalization.
+    """
+    lines: dict[tuple, tuple[list[str], list[float]]] = {}
+    for index, text in enumerate(data.get("text", [])):
+        word = (text or "").strip()
+        if not word:
+            continue
+        try:
+            confidence = float(data["conf"][index])
+        except (KeyError, ValueError, TypeError):
+            continue
+        key = (data["block_num"][index], data["par_num"][index], data["line_num"][index])
+        words, confidences = lines.setdefault(key, ([], []))
+        words.append(word)
+        if confidence >= 0:
+            confidences.append(confidence)
+    means: dict[str, float] = {}
+    for words, confidences in lines.values():
+        text = "".join(words)
+        means[_normalized(text)] = sum(confidences) / len(confidences) if confidences else 0.0
+    return means
+
+
+def _mark_uncertain(text: str, means: dict[str, float]) -> str:
+    """Append a trailing confidence marker to a line that survived the drop
+    floor but is still shaky, so a reader sees at a glance - right in the
+    Markdown, not only in a document-level warning - which lines are worth
+    checking against the original scan.
+    """
+    marked: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped:
+            confidence = means.get(_normalized(line))
+            if confidence is not None and confidence < REVIEW_LINE_CONFIDENCE:
+                line = line.rstrip() + f" {LOW_CONFIDENCE_MARK}{round(confidence)}%"
+        marked.append(line)
+    return "\n".join(marked)
+
+
+def count_uncertain_lines(text: str) -> int:
+    """How many lines in *text* carry the :func:`_mark_uncertain` flag."""
+    return text.count(LOW_CONFIDENCE_MARK)
+
+
 def recognize_region(image, language: str) -> str:
     """OCR of a single, already-isolated crop (a table cell) - no panel/gutter
     splitting or line-confidence filtering, since a cell crop is already a
@@ -245,6 +298,7 @@ def recognize(image_path: str | Path, language: str) -> str:
                 band, lang=language, output_type=pytesseract.Output.DICT
             )
             text = _without_junk(text, _low_confidence_lines(data))
+            text = _mark_uncertain(text, _line_mean_confidences(data))
         except Exception as exc:
             if _is_missing_language(exc):
                 raise
