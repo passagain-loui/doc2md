@@ -3,6 +3,18 @@
 Written 2026-10-04, updated 2026-10-17. Read this first, then README.md (what
 the tool does) and CLAUDE.md (the release pipeline rules).
 
+> **In progress when the machine was shut down (2026-10-17):** v1.5.3, table OCR speed-up.
+> Pages OCR'd because their text layer is bad fill each pdfplumber table cell with its own
+> Tesseract call (`_grid_from_cell_ocr`); the Fortuner catalog's spec-table page takes most of
+> its ~80-115 s. Planned design: whiten cell borders, OCR the table crop once
+> (`image_to_data`), assign each word to the cell holding its centre, per-cell fallback only for
+> cells with ink but no words. Acceptance: >= 5x faster on that page, no accuracy loss
+> (disagreeing cells checked against crops by eye), and `python tools/regress.py run` showing
+> no REGRESSED file. Any uncommitted edits to `doc2md/engine/pdf_engine.py`,
+> `doc2md/core/ocr_text.py` or `tests/test_table_ocr.py` are that unfinished work - review them
+> before trusting them. All 8 samples in `D:\AI\OpenCode\doc2md-samples\` were approved from a
+> fresh v1.5.2 run (the regression reference).
+
 ## 1. State right now
 
 | Item | Value |
