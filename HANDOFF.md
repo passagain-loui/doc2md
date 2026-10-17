@@ -359,9 +359,9 @@ The suite cannot cover these; nobody has done them on the built exe yet:
     `D:\AI\OpenCode\doc2md-samples\` by the user's decision, from a fresh run of
     the 1.5.2 code; all 8 samples are now regression references. The 1.5.3 run
     `.runs\20261017-215241` changes Fortuner and mu-X on purpose (one-pass table
-    OCR, frame tables; checked by eye, no REGRESSED file). Re-approving those two
-    from that run waits for the user's go-ahead:
-    `python tools/regress.py approve "Fortuner_Leader_Catalog_2025.pdf" "mu_x_brochure_2026_5d17d1513d.pdf"`.
+    OCR, frame tables; checked by eye, no REGRESSED file). The user approved
+    both, and they were re-approved from that run on 2026-10-17, so all 8
+    references now hold 1.5.3 output.
 
 Report findings as: file type, what the output should have said, what it said.
 Fixes so far came from exactly that kind of sample.
