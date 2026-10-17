@@ -1,5 +1,29 @@
 # History
 
+## [1.5.2] - 2026-10-17 - Pages that were never there
+
+The routing that splits text PDFs from scanned ones was decided once per
+document. A text PDF therefore never reached the OCR branch, even when one of
+its pages was nothing but a picture. Such a page has a text layer of its own,
+usually only a footer, and the converter had no reason to look past it. On a
+29-page tour brochure, pages 19-29 are full pages of Thai terms and conditions
+set as images. The output had nothing for them, the status was Success, and no
+warning was given. A 4-page company guide lost two pages of direction photos,
+and a car brochure lost its cover slogan the same way. None of these showed up
+as a failure anywhere.
+
+The quality report made it worse. It said 29 of 29 pages had content, because
+the footer on each missing page counted. The check measured whether a page had
+any text at all, not whether the text was the page's content, so the report
+looked complete while eleven pages were empty. The fix routes each page on its
+own: a page with under 16 characters of its own text layer and images covering
+at least a quarter of it is read by OCR, using the same pass as the mis-encoded
+pages. Pure text pages still never reach OCR, so the fast path is unchanged for
+them, and a page where OCR finds nothing is reported as such rather than as
+content. On the samples, the brochure's pages, the guide's two pages and the
+cover are now read, and nothing else changed. The brochure went from 2 s to 92 s
+because the pages are now read, which is the cost of reading them at all.
+
 ## [1.5.1] - 2026-10-17 - The flags pointed at the wrong lines
 
 The first real scanned procedure run after 1.5.0 showed that the review

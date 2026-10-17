@@ -1,5 +1,34 @@
 # Changelog
 
+## [1.5.2] (2026-10-17) - IMAGE PAGES INSIDE TEXT PDFS
+
+### Fixed
+
+- **Image-only pages inside a text PDF were silently dropped.** Text-vs-scanned
+  routing was decided once for the whole PDF, so in a text PDF a page that was
+  only an image was never sent to OCR, and nothing said so. A 29-page tour
+  brochure whose pages 19-29 are full pages of Thai terms and conditions as
+  images came out with nothing for those pages, status Success, and the quality
+  report said 29/29 pages with content, because each page's footer counted. A
+  4-page company guide lost pages 3-4 (direction photos with logos), and a car
+  brochure lost its cover slogan.
+- **Routing is now decided per page inside a text PDF.** A page counts as
+  image-only when its own text layer is under 16 characters and images cover at
+  least 25% of the page (overlapping images counted once). These pages go
+  through the same OCR pass as mis-encoded pages, with one combined page
+  progress, the same DPI and the same table handling, and the quality metrics
+  add both kinds into `ocr_pages_success`, `ocr_pages_empty` and
+  `ocr_pages_failed`. The page keeps its footer, then the note "> This page has
+  no text layer (it is an image); it was read by OCR.", then the OCR text. Pure
+  text pages still never go through OCR.
+- **An image page with nothing to read says so.** If OCR finds no text on it
+  (a photo, for example), the page says so and is not counted as content. If
+  OCR is off or unavailable, the result is a Warning that names the pages as
+  ranges, such as "Page(s) 19-29 are images with no text layer". At most 100
+  image-only pages are OCR'd per document; beyond that a warning is given.
+- **`pages_with_content` no longer counts a footer-only image page** unless OCR
+  found text on it.
+
 ## [1.5.1] (2026-10-17) - THAI UPPER MARKS ON SCANS
 
 ### Fixed

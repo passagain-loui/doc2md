@@ -260,6 +260,11 @@ PDFs exported from Excel with certain fonts). Known font-map errors (sara aa /
 sara am) are repaired; a page whose text is garbled in other ways is detected
 and re-read by OCR, or marked with a Warning if OCR is unavailable.
 
+Inside a text PDF, routing is also decided per page: a page that has no text
+layer of its own (a full-page image, such as scanned terms and conditions in an
+otherwise digital brochure) is read by OCR and marked as such, while pages with
+real text never go through OCR.
+
 Upper vowels and tone marks that Tesseract splits off into a separate row above
 their line are re-read together with that line and merged back only where the
 two readings agree, with the letters always taken from the first read. Sara am

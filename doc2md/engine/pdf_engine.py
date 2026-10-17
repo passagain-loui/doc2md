@@ -12,12 +12,17 @@ Two distinct paths, chosen per document rather than per installation:
 * **Scanned PDF** - detected when the text layer yields almost nothing, the
   page is rendered to a bitmap and pushed through Tesseract with the Thai +
   English models. No manual switch, no silent empty output.
+
+Inside a text PDF, routing is also decided per page: a page whose own text layer
+is mis-encoded Thai, or that is only an image with no text layer, is read by OCR
+page by page instead of being dropped.
 """
 
 from __future__ import annotations
 
 import shutil
 import tempfile
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from doc2md.core.errors import ConversionError, EngineUnavailableError, wrap_warning
@@ -43,6 +48,71 @@ from doc2md.engine.ocr_engine import DEFAULT_OCR_LANG
 SCANNED_TEXT_THRESHOLD = 16
 
 DEFAULT_OCR_DPI = 300
+
+# In a text PDF, a page whose own text is shorter than SCANNED_TEXT_THRESHOLD
+# and which is at least this much picture is an image page (a scanned appendix,
+# a photo spread) and is read by OCR; a small logo or icon does not make one.
+IMAGE_ONLY_MIN_COVERAGE = 0.25
+# Safety cap: a text PDF never sends more than this many image pages to OCR.
+MAX_IMAGE_ONLY_PAGES = 100
+MAX_LISTED_PAGE_RANGES = 10
+
+IMAGE_PAGE_OCR_NOTE = "> This page has no text layer (it is an image); it was read by OCR."
+IMAGE_PAGE_EMPTY_NOTE = "> This page is an image; OCR found no text on it."
+IMAGE_PAGE_OCR_FAILED_NOTE = "> This page is an image; OCR failed on it."
+
+
+@dataclass
+class _OcrOutcome:
+    """What the OCR pass over a text PDF's weak pages did (zero-based pages)."""
+
+    warning: str | None = None
+    replaced: set[int] = field(default_factory=set)
+    """Pages whose text is now OCR text (their pdfplumber tables are dropped)."""
+    touched: set[int] = field(default_factory=set)
+    """Image pages whose text was changed (a note was added), read or not."""
+    unread_images: set[int] = field(default_factory=set)
+    """Image pages OCR gave no text for: whatever text layer they have (a
+    footer) is not content."""
+
+
+def _page_ranges(indexes, limit: int = MAX_LISTED_PAGE_RANGES) -> str:
+    """Zero-based page indexes as 1-based numbers with consecutive runs
+    compressed: ``[18, 19, 20, 25]`` -> ``"19-21, 26"``. Past *limit* runs the
+    list ends with ``...``."""
+    runs: list[list[int]] = []
+    for number in sorted({index + 1 for index in indexes}):
+        if runs and number == runs[-1][1] + 1:
+            runs[-1][1] = number
+        else:
+            runs.append([number, number])
+    parts = [str(a) if a == b else f"{a}-{b}" for a, b in runs[:limit]]
+    return ", ".join(parts) + ("..." if len(runs) > limit else "")
+
+
+def _join_blocks(*blocks: str) -> str:
+    """Non-empty *blocks* separated by a blank line."""
+    return "\n\n".join(block for block in blocks if block)
+
+
+def _union_area(boxes) -> float:
+    """Area covered by the union of ``(x0, y0, x1, y1)`` boxes."""
+    if not boxes:
+        return 0.0
+    xs = sorted({x for box in boxes for x in (box[0], box[2])})
+    total = 0.0
+    for left, right in zip(xs, xs[1:]):
+        spans = sorted((b[1], b[3]) for b in boxes if b[0] < right and b[2] > left)
+        covered, end = 0.0, None
+        for top, bottom in spans:
+            if end is None or top > end:
+                covered += bottom - top
+                end = bottom
+            elif bottom > end:
+                covered += bottom - end
+                end = bottom
+        total += covered * (right - left)
+    return total
 
 
 def _report_progress(options: dict, current: int, total: int) -> None:
@@ -218,19 +288,29 @@ class PdfEngine(BaseEngine):
 
             warning = None
             if has_text:
-                if metrics is not None:
-                    metrics.pages_with_content = sum(1 for text in pages if text.strip())
                 corrupt = [i for i, text in enumerate(pages) if thai_text_is_corrupt(text)]
-                reread: set[int] = set()
-                if corrupt:
-                    warning, reread = self._reread_corrupt_pages(
-                        source, doc, pages, corrupt, options, metrics
+                image_only = self._image_only_pages(doc, pages, skip=set(corrupt))
+                outcome = _OcrOutcome()
+                if corrupt or image_only:
+                    outcome = self._ocr_weak_pages(
+                        source, doc, pages, corrupt, image_only, options, metrics
+                    )
+                    warning = outcome.warning
+                if metrics is not None:
+                    # A page counts when its final text is real content: a footer
+                    # on a page that is only a picture is not.
+                    metrics.pages_with_content = sum(
+                        1
+                        for index, text in enumerate(pages)
+                        if text.strip()
+                        and index not in outcome.unread_images
                     )
                 tables_by_page, outside_text_by_page = self._extract_tables(
                     source, options, doc, buggy
                 )
-                for index in reread:
+                for index in outcome.replaced:
                     tables_by_page.pop(index + 1, None)
+                for index in outcome.replaced | outcome.touched:
                     outside_text_by_page.pop(index + 1, None)
                 if metrics is not None and options.get("pdf_tables", True) and _pdfplumber_available():
                     # Only a genuine "we looked and found N" is 0/N - when
@@ -262,12 +342,55 @@ class PdfEngine(BaseEngine):
             except Exception:
                 pass
 
-    def _reread_corrupt_pages(self, source, doc, pages, corrupt, options, metrics):
-        """Replace pages whose text layer is mis-encoded Thai with OCR of the page.
+    @staticmethod
+    def _image_coverage(page) -> float:
+        """Share of *page*'s area covered by placed images (0.0 - 1.0).
 
-        Returns ``(warning_or_none, set_of_zero_based_pages_replaced)``. When OCR
-        cannot run, the text is kept (it is all there is) and the result carries a
-        warning, so it is never presented as a clean read.
+        Uses where the images are drawn (PyMuPDF's image placement boxes), clipped
+        to the page and unioned, so an image drawn twice or overlapping another
+        is not counted twice. Any failure reads as "no images".
+        """
+        try:
+            bounds = page.rect
+            area = bounds.width * bounds.height
+            if area <= 0:
+                return 0.0
+            boxes = []
+            for info in page.get_image_info():
+                x0, y0, x1, y1 = info["bbox"]
+                x0, y0 = max(x0, bounds.x0), max(y0, bounds.y0)
+                x1, y1 = min(x1, bounds.x1), min(y1, bounds.y1)
+                if x1 > x0 and y1 > y0:
+                    boxes.append((x0, y0, x1, y1))
+            return _union_area(boxes) / area
+        except Exception:
+            return 0.0
+
+    def _image_only_pages(self, doc, pages: list[str], skip=frozenset()) -> list[int]:
+        """Zero-based pages with (almost) no text layer that are mostly picture.
+
+        A text PDF can hold whole pages that are only an image (a scanned
+        appendix, a photo spread); the document-level text check never sees them
+        and they would vanish from the output. A page with a stray footer
+        ("19 | P a g e") is still such a page, so the test is the page's own
+        text length, not whether it is empty.
+        """
+        found: list[int] = []
+        for index, text in enumerate(pages):
+            if index in skip or len(text.strip()) >= SCANNED_TEXT_THRESHOLD:
+                continue
+            if self._image_coverage(doc[index]) >= IMAGE_ONLY_MIN_COVERAGE:
+                found.append(index)
+        return found
+
+    def _ocr_weak_pages(self, source, doc, pages, corrupt, image_only, options, metrics):
+        """OCR the pages of a text PDF whose text layer cannot be trusted.
+
+        Two kinds go through one pass (one progress count, one set of metrics):
+        pages whose text layer is mis-encoded Thai (*corrupt*), and pages that
+        are only a picture (*image_only*). Returns an :class:`_OcrOutcome`.
+        When OCR cannot run, the text is kept (it is all there is) and the
+        result carries a warning, so it is never presented as a clean read.
 
         A page that also has a table loses that structure to plain OCR text
         otherwise - a comparison table flattens into running text with no way
@@ -287,20 +410,35 @@ class PdfEngine(BaseEngine):
         else:
             reason = self._ocr_unavailable_reason()
         if reason:
-            return (
-                f"The text layer of page(s) {numbers} is mis-encoded Thai (symbols in place of "
-                f"tone marks and vowels) and OCR is unavailable to read it instead: {reason}",
-                set(),
-            )
+            warnings = []
+            if corrupt:
+                warnings.append(
+                    f"The text layer of page(s) {numbers} is mis-encoded Thai (symbols in place of "
+                    f"tone marks and vowels) and OCR is unavailable to read it instead: {reason}"
+                )
+            if image_only:
+                warnings.append(
+                    f"Page(s) {_page_ranges(image_only)} are images with no text layer and OCR is "
+                    f"unavailable to read them: {reason}"
+                )
+            return _OcrOutcome(warning=" ".join(warnings), unread_images=set(image_only))
 
         import pytesseract  # noqa: F401  (availability was checked above)
 
+        to_read_images = image_only[:MAX_IMAGE_ONLY_PAGES]
+        skipped_images = image_only[MAX_IMAGE_ONLY_PAGES:]
+        targets = sorted([*corrupt, *to_read_images])
         language = self._ocr_language(options)
         prepare_tesseract(language)
         dpi = self._ocr_dpi(options)
         scale = dpi / 72.0
-        replaced: set[int] = set()
-        failed = 0
+        corrupt_set = set(corrupt)
+        replaced: set[int] = set()  # pages whose text is now OCR text
+        failed = 0  # mis-encoded pages OCR could not replace
+        image_success: set[int] = set()
+        image_empty: set[int] = set()
+        image_failed: list[int] = []
+        touched: set[int] = set()
 
         plumber_doc = None
         plumber_pages = None
@@ -316,8 +454,9 @@ class PdfEngine(BaseEngine):
 
         try:
             with tempfile.TemporaryDirectory(prefix="doc2md_pdfocr_") as tmpdir:
-                for position, index in enumerate(corrupt, start=1):
-                    _report_progress(options, position, len(corrupt))
+                for position, index in enumerate(targets, start=1):
+                    _report_progress(options, position, len(targets))
+                    is_corrupt = index in corrupt_set
                     png_path = Path(tmpdir) / f"page_{index + 1}.png"
                     try:
                         pix = doc[index].get_pixmap(dpi=dpi)
@@ -327,33 +466,69 @@ class PdfEngine(BaseEngine):
                             png_path, plumber_pages, index, scale, language
                         )
                     except Exception:
-                        failed += 1
+                        if is_corrupt:
+                            failed += 1
+                        else:
+                            image_failed.append(index)
+                            pages[index] = _join_blocks(pages[index], IMAGE_PAGE_OCR_FAILED_NOTE)
+                            touched.add(index)
                         continue
-                    if text:
-                        pages[index] = (
-                            "> The text layer of this page is mis-encoded Thai; it was read by "
-                            f"OCR instead.\n\n{text}"
-                        )
+                    if is_corrupt:
+                        if text:
+                            pages[index] = (
+                                "> The text layer of this page is mis-encoded Thai; it was read by "
+                                f"OCR instead.\n\n{text}"
+                            )
+                            replaced.add(index)
+                        else:
+                            failed += 1
+                    elif text:
+                        pages[index] = _join_blocks(pages[index], IMAGE_PAGE_OCR_NOTE, text)
                         replaced.add(index)
+                        image_success.add(index)
+                        touched.add(index)
                     else:
-                        failed += 1
+                        # A photo page is legitimately textless: say so on the
+                        # page rather than leaving it silently absent.
+                        pages[index] = _join_blocks(pages[index], IMAGE_PAGE_EMPTY_NOTE)
+                        image_empty.add(index)
+                        touched.add(index)
         finally:
             if plumber_doc is not None:
                 plumber_doc.close()
-        if metrics is not None and replaced:
+        if metrics is not None and targets:
             metrics.ocr_backend = "tesseract"
             metrics.ocr_language = language
             metrics.ocr_pages_success = len(replaced)
-            metrics.ocr_review_lines = sum(
-                count_uncertain_lines(pages[index]) for index in replaced
-            )
+            metrics.ocr_pages_failed = failed + len(image_failed)
+            metrics.ocr_pages_empty = len(image_empty)
+            if replaced:
+                metrics.ocr_review_lines = sum(
+                    count_uncertain_lines(pages[index]) for index in replaced
+                )
+        warnings = []
         if failed:
-            return (
+            warnings.append(
                 f"The text layer of {failed} page(s) is mis-encoded Thai and OCR could not "
-                "replace it; those pages may contain wrong characters.",
-                replaced,
+                "replace it; those pages may contain wrong characters."
             )
-        return None, replaced
+        if image_failed:
+            warnings.append(
+                f"OCR failed on page(s) {_page_ranges(image_failed)}, which are images with "
+                "no text layer; those pages are missing from the output."
+            )
+        if skipped_images:
+            warnings.append(
+                f"{len(skipped_images)} more page(s) that are images with no text layer were not "
+                f"read (at most {MAX_IMAGE_ONLY_PAGES} are OCR'd per document): "
+                f"{_page_ranges(skipped_images)}."
+            )
+        return _OcrOutcome(
+            warning=" ".join(warnings) or None,
+            replaced=replaced,
+            touched=touched,
+            unread_images=(set(image_only) - image_success),
+        )
 
     @staticmethod
     def _ocr_page_with_tables(png_path, plumber_pages, index: int, scale: float, language: str) -> str:

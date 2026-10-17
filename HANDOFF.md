@@ -1,4 +1,4 @@
-# Handoff - doc2md v1.5.1
+# Handoff - doc2md v1.5.2
 
 Written 2026-10-04, updated 2026-10-17. Read this first, then README.md (what
 the tool does) and CLAUDE.md (the release pipeline rules).
@@ -7,13 +7,31 @@ the tool does) and CLAUDE.md (the release pipeline rules).
 
 | Item | Value |
 | --- | --- |
-| Version | 1.5.1 (`pyproject.toml` and `doc2md/__init__.py` agree) |
-| Last release commit | `a70613f` - "release: v1.5.1 rejoin Thai upper marks on scans, normalise sara am" (CI green on 3.11-3.13) |
+| Version | 1.5.2 (`pyproject.toml` and `doc2md/__init__.py` agree) |
+| Last release commit | (pending - set after the 1.5.2 commit) |
 | Branch | `main` |
 | Remote | `origin` = https://github.com/passagain-loui/doc2md.git - check `git status -sb` for unpushed commits; GitHub CI (Python 3.11-3.13) green since commit `8d9adde` |
-| Gate | `tools/verify.ps1` passed (EXIT_CODE 0) for 1.5.1 on 2026-10-17; 3 expected skips (symlink, RapidOCR not installed, PATH-only Tesseract check) |
-| Installer | built 2026-10-17 from the gated 1.5.1 tree: `dist/doc2md_Setup_v1.5.1.exe` (69 MB), `dist/doc2md.exe` (95 MB), `dist/doc2md/` - git-ignored, rebuild with `python build.py` on another machine |
+| Gate | `tools/verify.ps1` passed (EXIT_CODE 0) for 1.5.2 on 2026-10-17; 3 expected skips (symlink, RapidOCR not installed, PATH-only Tesseract check) |
+| Installer | built 2026-10-17 from the gated 1.5.2 tree: `dist/doc2md_Setup_v1.5.2.exe` (69 MB), `dist/doc2md.exe` (95 MB), `dist/doc2md/` - git-ignored, rebuild with `python build.py` on another machine |
 | Tesseract | **installed and working on this machine** (checked 2026-10-17): v5.4.0 at `C:/Program Files/Tesseract-OCR/tesseract.exe`, languages `eng` + `tha`. It is not on PATH, but `find_tesseract()` locates it in the standard install folder, so the app uses it. A real Thai test image and scanned PDF converted correctly apart from a lost tone mark (นี้ read as นี). The gate's one 'Tesseract not installed' skip (`tests/test_thai_documents.py`) checks `shutil.which("tesseract")`, i.e. PATH only, so it skips here; add the folder to PATH if you want that real-OCR test to run |
+
+### What changed in 1.5.2
+
+Image-only pages inside text PDFs are now read by OCR (`doc2md/engine/pdf_engine.py`):
+
+- Routing is per page inside a text PDF too. A page with under 16 characters of
+  its own text layer, and images covering at least 25% of it (overlaps counted
+  once), is image-only.
+- Image-only and mis-encoded pages share one OCR pass (one combined page
+  progress, same DPI and table handling). Metrics add both kinds into
+  `ocr_pages_success` / `ocr_pages_empty` / `ocr_pages_failed`.
+- The page keeps its footer, then "> This page has no text layer (it is an
+  image); it was read by OCR.", then the OCR text. If OCR finds nothing, the
+  page says so and is not counted as content. If OCR is off or unavailable, the
+  result is a Warning naming the pages as ranges.
+- At most 100 image-only pages are OCR'd per document, with a warning beyond that.
+- `pages_with_content` no longer counts a footer-only image page unless OCR
+  found text on it.
 
 ### What changed in 1.5.1
 
@@ -221,6 +239,12 @@ an entry headed `[x.y.z]` to **both** `CHANGELOG.md` and `HISTORY.md` (the gate'
   63. Seven pages 36 s -> 52.5 s (extra single-line re-reads, capped at 40 per
   band). Every changed line across all 7 pages was compared; no correctly read
   base word was replaced. The phrase list is the samples folder's `.expect.txt`.
+- **Image-only pages in text PDFs (1.5.2), real samples:** the 29-page tour
+  brochure's pages 19-29 (images, footer-only text layer), the 4-page company
+  guide's pages 3-4 and a car brochure's cover are all read now. Nothing else
+  changed; the approved scanned reference is identical. The brochure took 2 s
+  before (pages skipped) and 92 s now. Before the fix its report said 29/29
+  pages with content, because each image page's footer counted.
 
 ## 8. Known limits and open ideas
 
@@ -238,6 +262,13 @@ Not solved:
 - Latin read as Thai: "QM" comes out as Thai "อห". A Latin-vs-Thai disagreement
   keeps the first read.
 - Logo noise rows with no line under them remain.
+- Low-resolution embedded images: the brochure's terms pages embed their images
+  at 96 dpi, so small Thai text OCRs poorly (e.g. "รายสะเอียด" for
+  "รายละเอียด"). Rendering at a higher DPI cannot recover detail the file does
+  not contain.
+- Table speed on OCR'd pages: tables are read cell by cell (one Tesseract call
+  per cell). A 6-page catalogue with a mis-encoded spec-table page takes about
+  115 s. The planned fix is under Ideas below.
 
 Small maintenance items seen in the last gate run (2026-10-16, v1.4.11):
 
@@ -258,6 +289,9 @@ Ideas not started:
 - Chinese (and other) language data, with the user's permission to download.
 - Code-signing the installer.
 - Per-cell vertical alignment for merged cells in tables.
+- OCR each page once and place its words into table cells by position, instead
+  of one Tesseract call per cell (the planned fix for the slow spec-table pages
+  in section 8).
 
 ## 9. Waiting on real-world testing by the user
 
@@ -289,6 +323,10 @@ The suite cannot cover these; nobody has done them on the built exe yet:
     listed in section 8). Every `python tools/regress.py run` now compares
     against it - run it before each release build. Add more real scans the
     same way so one document's fix cannot quietly break another.
+11. **(new 2026-10-17) Seven new real samples** in `D:\AI\OpenCode\doc2md-samples\`,
+    not yet approved; only `QP 7.pdf` is. Check each run's output against its
+    original, and approve a file with `python tools/regress.py approve "<file>"`
+    once the user confirms the output.
 
 Report findings as: file type, what the output should have said, what it said.
 Fixes so far came from exactly that kind of sample.
