@@ -8,7 +8,7 @@ the tool does) and CLAUDE.md (the release pipeline rules).
 | Item | Value |
 | --- | --- |
 | Version | 1.5.1 (`pyproject.toml` and `doc2md/__init__.py` agree) |
-| Last release commit | (pending - set after the 1.5.1 commit) |
+| Last release commit | `a70613f` - "release: v1.5.1 rejoin Thai upper marks on scans, normalise sara am" (CI green on 3.11-3.13) |
 | Branch | `main` |
 | Remote | `origin` = https://github.com/passagain-loui/doc2md.git - check `git status -sb` for unpushed commits; GitHub CI (Python 3.11-3.13) green since commit `8d9adde` |
 | Gate | `tools/verify.ps1` passed (EXIT_CODE 0) for 1.5.1 on 2026-10-17; 3 expected skips (symlink, RapidOCR not installed, PATH-only Tesseract check) |
@@ -283,11 +283,12 @@ The suite cannot cover these; nobody has done them on the built exe yet:
 9. **(new in 1.4.11) Real page-count progress** on a large real scanned
    PDF - confirm "Page N/M" tracks correctly and the bar does not get
    stuck between files in a batch.
-10. **(new in 1.5.1) Detached upper marks on `QP 7.pdf`** in
-    `D:\AI\OpenCode\doc2md-samples\` - the file now has its `.expect.txt`. Once
-    the user has checked the converted output against the scan, approve it with
-    `python tools/regress.py approve "QP 7.pdf"`. Until then it has no approved
-    output to compare against.
+10. **(done 2026-10-17) `QP 7.pdf` approved** in the samples folder as the
+    regression reference, by the user's decision, from a fresh run of the
+    released 1.5.1 code (22/24 expected phrases; the two known misses are
+    listed in section 8). Every `python tools/regress.py run` now compares
+    against it - run it before each release build. Add more real scans the
+    same way so one document's fix cannot quietly break another.
 
 Report findings as: file type, what the output should have said, what it said.
 Fixes so far came from exactly that kind of sample.
