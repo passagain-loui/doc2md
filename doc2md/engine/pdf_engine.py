@@ -28,7 +28,14 @@ from pathlib import Path
 from doc2md.core.errors import ConversionError, EngineUnavailableError, wrap_warning
 from doc2md.core.quality import EngineOutput, QualityMetrics
 from doc2md.core.ocr_setup import find_tesseract, prepare_tesseract
-from doc2md.core.ocr_text import count_uncertain_lines, recognize, recognize_region
+from doc2md.core.ocr_text import (
+    count_uncertain_lines,
+    join_word_pieces,
+    normalize_thai,
+    prepare_for_ocr,
+    recognize,
+    recognize_region,
+)
 from doc2md.core.pdf_text import (
     find_sara_bug_fonts,
     page_lines,
@@ -223,6 +230,268 @@ def _grid_from_cell_ocr(table, page_image, scale: float, language: str) -> list[
     except Exception:
         return None
     return grid if any(any(cell for cell in row) for row in grid) else None
+
+
+# One Tesseract read of a whole table instead of one per cell (psm 6; psm 4 and
+# 11 scored 0.91-0.93 at best). Full Fortuner conversion, Balanced AI, same
+# session; accuracy = difflib ratio of table 1 (71 rows x 8) against a hand
+# transcription (spacing, bars, dots, dashes ignored):
+#
+#   config              total    _ocr_page_with_tables   table-1 accuracy
+#   per-cell (old)     118.6 s         93.0 s                 0.831
+#   NEW, conf < 70      74.3 s         50.8 s                 0.941
+#   NEW, conf < 50      51.3 s         27.4 s                 0.934   <- chosen
+#   NEW, no re-read     38.5 s         15.0 s                 0.930
+#
+# About 9.6 s of the NEW page time is prose OLD never read: the page-sized frame
+# table masked the whole page. Doubtful cells are re-read alone because that
+# restores short labels the big read garbles; the per-cell reader's own accuracy
+# is low as pdfplumber splits a merged value cell into column boxes.
+TABLE_OCR_CONFIG = "--psm 6"
+TABLE_CELL_MIN_CONFIDENCE: float | None = 50.0  # a cell below this mean word confidence is re-read alone
+TABLE_BORDER_PX = 3  # width painted white along every cell edge before reading
+TABLE_CELL_INSET_PX = 4  # a cell's inner area for the ink test excludes this margin
+TABLE_CELL_INK_SHARE = 0.01  # dark share of a wordless cell above which it is re-read alone
+TABLE_DARK_CELL_LEVEL = 170  # mean gray (of 255) below which a cell is light-on-dark (a grey bar is ~110-140, a light row ~215)
+_INK_LEVEL = 128
+
+
+def _whiten_cell_borders(image, boxes) -> None:
+    """Paint a few pixels along every edge of every ``(x0, y0, x1, y1)`` box
+    white, in place. Ruling lines read as strokes (``|``, ``l``, ``1``) and break
+    Tesseract's layout analysis; the cell boxes say exactly where they are."""
+    from PIL import ImageDraw
+
+    draw = ImageDraw.Draw(image)
+    for x0, y0, x1, y1 in boxes:
+        for edge in ((x0, y0, x1, y0), (x0, y1, x1, y1), (x0, y0, x0, y1), (x1, y0, x1, y1)):
+            draw.line(edge, fill=(255, 255, 255) if image.mode == "RGB" else 255, width=TABLE_BORDER_PX)
+
+
+def _invert_dark_cells(image, boxes) -> int:
+    """Invert, in place, every cell whose fill is dark (a section bar or header
+    with white text), so the whole table reads as dark text on light paper.
+
+    A per-cell read handles such a cell itself (a dark crop is left alone and
+    Tesseract reads light-on-dark); in the one read of a whole table the
+    surrounding light paper decides and white-on-dark text is lost. Returns the
+    number of cells inverted.
+    """
+    from PIL import ImageOps, ImageStat
+
+    inverted = 0
+    for x0, y0, x1, y1 in boxes:
+        if x1 <= x0 or y1 <= y0:
+            continue
+        region = image.crop((x0, y0, x1, y1))
+        if ImageStat.Stat(region.convert("L")).mean[0] < TABLE_DARK_CELL_LEVEL:
+            # Inverting alone leaves a mid-grey fill; the page-wide contrast
+            # stretch that follows would turn it dark again. Stretching the cell
+            # on its own makes the fill white and the text black.
+            image.paste(ImageOps.autocontrast(ImageOps.invert(region), cutoff=2), (x0, y0))
+            inverted += 1
+    return inverted
+
+
+def _cell_has_ink(gray, box) -> bool:
+    """Whether the inner area of *box* in the grayscale *gray* holds enough dark
+    pixels to be text rather than an empty cell."""
+    x0, y0, x1, y1 = box
+    inner = (x0 + TABLE_CELL_INSET_PX, y0 + TABLE_CELL_INSET_PX, x1 - TABLE_CELL_INSET_PX, y1 - TABLE_CELL_INSET_PX)
+    if inner[2] <= inner[0] or inner[3] <= inner[1]:
+        return False
+    histogram = gray.crop(inner).histogram()
+    total = sum(histogram)
+    return total > 0 and sum(histogram[:_INK_LEVEL]) / total > TABLE_CELL_INK_SHARE
+
+
+def _is_symbol_only(words) -> bool:
+    """Whether a cell's words hold no letter and no digit: a bullet, a dash, a dot.
+
+    Tesseract is always unsure of those, and a crop of such a cell reads back as
+    noise ("0", "5๐031"), so re-reading them alone only costs time."""
+    return not any(char.isalnum() for word in words for char in word[1])
+
+
+def _cell_is_doubtful(words) -> bool:
+    """Whether the single read was unsure of a cell: the mean confidence of its
+    words (Tesseract's -1 "no confidence" values left out) is below
+    ``TABLE_CELL_MIN_CONFIDENCE``. Symbol-only cells (:func:`_is_symbol_only`)
+    are never doubtful."""
+    if TABLE_CELL_MIN_CONFIDENCE is None or _is_symbol_only(words):
+        return False
+    confidences = [word[6] for word in words if word[6] >= 0]
+    return bool(confidences) and sum(confidences) / len(confidences) < TABLE_CELL_MIN_CONFIDENCE
+
+
+def _cell_text(words) -> str:
+    """The text of one cell from its words ``(line key, text, left, top, width, height, conf)``.
+
+    Lines in Tesseract's order (by where they start), words left to right, each
+    line joined with the spacing rule posters use; lines joined with ``\\n`` like
+    a per-cell read."""
+    lines: dict[tuple, list] = {}
+    for key, text, left, top, width, height, _conf in words:
+        lines.setdefault(key, []).append((text, left, width, height, top))
+    ordered = sorted(lines.items(), key=lambda item: (min(w[4] for w in item[1]), item[0]))
+    rows = [
+        join_word_pieces([w[:4] for w in sorted(line_words, key=lambda w: w[1])])
+        for _key, line_words in ordered
+    ]
+    return normalize_thai("\n".join(row for row in rows if row.strip()))
+
+
+def _grid_from_table_ocr(
+    table, page_image, scale: float, language: str, stats: dict | None = None
+) -> list[list[str]] | None:
+    """Table cells filled from ONE Tesseract read of the whole table.
+
+    The table is cropped once, its cell borders painted white and the crop read
+    with a single ``image_to_data`` call; every word goes to the cell holding
+    the centre of its box. A cell that got no words but has ink (text Tesseract
+    skipped in the big read) is read on its own as :func:`_grid_from_cell_ocr`
+    would. If the single read fails or finds nothing at all, the whole table
+    falls back to that per-cell reading.
+
+    *stats*, if given, is filled in for measurement: ``big_read_s`` (the time of
+    the one read), ``reread_ink`` / ``reread_low_confidence`` (cells re-read alone,
+    by reason) and ``cells``.
+    """
+    import time
+
+    if stats is not None:
+        stats.update(big_read_s=0.0, reread_ink=0, reread_low_confidence=0, cells=0)
+    try:
+        import pytesseract
+
+        width, height = page_image.size
+        crop_box = _scaled_box(table.bbox, scale, width, height)
+        if crop_box is None:
+            return _grid_from_cell_ocr(table, page_image, scale, language)
+        origin_x, origin_y = crop_box[0], crop_box[1]
+        crop = page_image.crop(crop_box).convert("RGB")
+        crop_w, crop_h = crop.size
+
+        # cell boxes in crop pixels (None for a merged-away cell)
+        layout: list[list[tuple[int, int, int, int] | None]] = []
+        for row in table.rows:
+            cells = []
+            for cell in row.cells:
+                box = _scaled_box(cell, scale, width, height) if cell else None
+                if box is None:
+                    cells.append(None)
+                    continue
+                cells.append((
+                    max(0, box[0] - origin_x), max(0, box[1] - origin_y),
+                    min(crop_w, box[2] - origin_x), min(crop_h, box[3] - origin_y),
+                ))
+            layout.append(cells)
+
+        boxes = [box for row in layout for box in row if box]
+        _invert_dark_cells(crop, boxes)
+        _whiten_cell_borders(crop, boxes)
+        prepared = prepare_for_ocr(crop)
+        started = time.perf_counter()
+        data = pytesseract.image_to_data(
+            prepared, lang=language, config=TABLE_OCR_CONFIG, output_type=pytesseract.Output.DICT
+        )
+        if stats is not None:
+            stats["big_read_s"] = time.perf_counter() - started
+            stats["cells"] = len(boxes)
+
+        owners = [(r, c, box) for r, row in enumerate(layout) for c, box in enumerate(row) if box]
+        words_by_cell: dict[tuple[int, int], list] = {}
+        for index, text in enumerate(data.get("text", [])):
+            word = (text or "").strip()
+            if not word:
+                continue
+            left, top = int(data["left"][index]), int(data["top"][index])
+            w, h = int(data["width"][index]), int(data["height"][index])
+            try:
+                conf = float(data["conf"][index])
+            except (KeyError, ValueError, TypeError, IndexError):
+                conf = -1.0
+            centre_x, centre_y = left + w / 2, top + h / 2
+            for r, c, (x0, y0, x1, y1) in owners:
+                if x0 <= centre_x < x1 and y0 <= centre_y < y1:
+                    key = (data["block_num"][index], data["par_num"][index], data["line_num"][index])
+                    words_by_cell.setdefault((r, c), []).append((key, word, left, top, w, h, conf))
+                    break
+        if not words_by_cell:
+            return _grid_from_cell_ocr(table, page_image, scale, language)
+
+        gray = prepared.convert("L")
+        grid: list[list[str]] = []
+        for r, row in enumerate(layout):
+            cells_text = []
+            for c, box in enumerate(row):
+                if box is None:
+                    cells_text.append("")
+                elif (r, c) in words_by_cell:
+                    text = _cell_text(words_by_cell[(r, c)])
+                    if _cell_is_doubtful(words_by_cell[(r, c)]):
+                        page_box = _scaled_box(table.rows[r].cells[c], scale, width, height)
+                        alone = recognize_region(page_image.crop(page_box), language) if page_box else ""
+                        text = alone or text
+                        if stats is not None:
+                            stats["reread_low_confidence"] += 1
+                    cells_text.append(text)
+                elif _cell_has_ink(gray, box):
+                    if stats is not None:
+                        stats["reread_ink"] += 1
+                    page_box = _scaled_box(table.rows[r].cells[c], scale, width, height)
+                    cells_text.append(
+                        recognize_region(page_image.crop(page_box), language) if page_box else ""
+                    )
+                else:
+                    cells_text.append("")
+            grid.append(cells_text)
+    except Exception:
+        return _grid_from_cell_ocr(table, page_image, scale, language)
+    return grid if any(any(cell for cell in row) for row in grid) else None
+
+
+# pdfplumber sometimes reports the layout frame of a page (a spread's outline) as
+# a "table" whose box holds the real tables. Read as cells it duplicates the whole
+# page in one blob and costs a giant read. Such a frame has a handful of cells
+# (2-3 on the samples) and contains another detected table's box, give or take a
+# few points; a real table that merely has a small table nested in one cell (88
+# cells on one sample) is not a frame and is kept.
+FRAME_TABLE_TOLERANCE_PT = 2.0
+FRAME_TABLE_MAX_CELLS = 4
+
+
+def _without_frame_tables(
+    tables, tolerance: float = FRAME_TABLE_TOLERANCE_PT, max_cells: int = FRAME_TABLE_MAX_CELLS
+) -> list:
+    """*tables* without any frame table: one with at most *max_cells* cells whose
+    bbox contains another table's bbox (within *tolerance* points). The order of
+    the others is kept. Two tables that only overlap, a single table, and a big
+    table with a small one inside it are all kept."""
+
+    def area(table) -> float:
+        return (table.bbox[2] - table.bbox[0]) * (table.bbox[3] - table.bbox[1])
+
+    def cell_count(table) -> int:
+        return sum(1 for row in table.rows for cell in row.cells if cell)
+
+    def contains(outer, inner) -> bool:
+        return (
+            area(outer) > area(inner)  # two tables with the same box are not frames of each other
+            and outer.bbox[0] <= inner.bbox[0] + tolerance
+            and outer.bbox[1] <= inner.bbox[1] + tolerance
+            and outer.bbox[2] >= inner.bbox[2] - tolerance
+            and outer.bbox[3] >= inner.bbox[3] - tolerance
+        )
+
+    return [
+        table
+        for table in tables
+        if not (
+            cell_count(table) <= max_cells
+            and any(other is not table and contains(table, other) for other in tables)
+        )
+    ]
 
 
 def _mask_table_regions(page_image, tables, scale: float):
@@ -543,6 +812,7 @@ class PdfEngine(BaseEngine):
             except Exception:
                 tables = []
 
+        tables = _without_frame_tables(tables)
         if not tables:
             return recognize(png_path, language).strip()
 
@@ -561,7 +831,7 @@ class PdfEngine(BaseEngine):
 
             table_blocks = []
             for t in tables:
-                grid = _grid_from_cell_ocr(t, page_image, scale, language)
+                grid = _grid_from_table_ocr(t, page_image, scale, language)
                 markdown = render_table(grid) if grid else None
                 if markdown:
                     table_blocks.append(markdown)
@@ -691,6 +961,11 @@ class PdfEngine(BaseEngine):
                         tables = page.find_tables()
                     except Exception:
                         continue
+                    # A page-sized frame "table" around the real ones would render
+                    # the whole page again as one giant cell and, by excluding its
+                    # box, hide the page's prose. The same list feeds the rendered
+                    # tables and the outside-text box below.
+                    tables = _without_frame_tables(tables)
                     if not tables:
                         continue
                     fitz_page = doc[index - 1] if doc is not None else None

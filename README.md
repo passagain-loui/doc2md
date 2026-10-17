@@ -1,4 +1,4 @@
-# doc2md v1.5.0
+# doc2md v1.5.3
 
 Drag a document in, get clean Markdown out. PDF, Word, Excel, PowerPoint, HTML,
 e-mail, images and source files, with Thai text and Thai filenames handled
@@ -264,6 +264,14 @@ Inside a text PDF, routing is also decided per page: a page that has no text
 layer of its own (a full-page image, such as scanned terms and conditions in an
 otherwise digital brochure) is read by OCR and marked as such, while pages with
 real text never go through OCR.
+
+Tables on scanned pages, and on pages whose text layer is bad, are read in one
+pass: the table is OCR'd as a whole and each word is placed in the cell it sits
+in, so a value that spans several columns stays together. A cell is read again
+on its own only when it has ink but no words, or when its words are unsure.
+Some PDFs draw a frame around a whole page; a frame that only wraps real tables
+is not shown as a table, so the page's text is kept instead of hidden inside one
+large cell. Short labels and bullet rows in a table are still sometimes misread.
 
 Upper vowels and tone marks that Tesseract splits off into a separate row above
 their line are re-read together with that line and merged back only where the

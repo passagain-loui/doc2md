@@ -1,5 +1,51 @@
 # History
 
+## [1.5.3] - 2026-10-17 - Tables read whole, and the frame that hid the page
+
+Tables on OCR'd pages were the slowest part of a scanned catalogue, and the
+same reader was also the least accurate. Every table cell was OCR'd on its own:
+one Tesseract call per cell, on a small crop with no context. On the Fortuner
+catalogue's spec-table page that took about 93 s of the file's 118.6 s. Speed
+was not the only cost. A value that runs across two columns was cut at the
+cell border, so each half was read separately and neither crop held the whole
+value. Checked against a hand transcription of a 74-row table, the per-cell
+reader scored 0.831.
+
+The fix reads the table as one image. The cell borders are painted white, so
+the grid does not compete with the text, and dark header and section-bar cells
+are inverted and contrast-stretched so their light lettering can be read. The
+whole table goes through Tesseract once, in single-block mode (`--psm 6`), and
+each word is given to the cell that holds the centre of its box. A cell is read
+again on its own only when it has ink but no words, or when its words came out
+with a mean confidence under 50. A cell made only of bullets, dashes or dots is
+never read alone. If the single pass fails or finds nothing, the table falls
+back to the old per-cell reader, which is kept for that purpose. On page 1 of
+the Fortuner catalogue the table reading went from about 93 s to about 18 s,
+the whole file from 118.6 s to 51.3 s, and accuracy from 0.831 to 0.934. The
+rest of the file's time goes partly to page prose that was never read before.
+
+That prose was hidden by the second problem, a layout frame. Some catalogues
+draw a frame around a whole page or a spread, and the PDF library reads the
+frame as a table with the real tables inside it. The whole page was then
+duplicated inside one enormous cell, and the prose under it was lost. Fortuner
+pages 1, 5 and 6 and page 8 of the mu-X brochure were all affected. A detected
+table with at most 4 cells that contains another detected table, within a 2 pt
+tolerance, is now treated as a frame. It is not drawn as a table, and its prose
+is kept. The rule applies both to pages read by OCR and to pages with a text
+layer. The small cell limit is what keeps real tables safe: a table of 5 or more
+cells that holds a small table is still kept, and the itinerary table on page 2
+of the EU2043 sample is unchanged.
+
+The eight approved real samples were re-run with `tools/regress.py`, and none
+regressed. The Fortuner and mu-X outputs changed as intended. Any other
+differences will be recorded by the maintainer.
+
+Three things remain. Short Thai labels and bullet rows are still sometimes
+misread in the single read. Fortuner page 5's text layer contains mojibake (Ē,
+ĕ) that the corrupt-Thai detector does not flag, which was already true before
+this release. And the mu-X page 8 text layer has labels clipped by the PDF
+itself.
+
 ## [1.5.2] - 2026-10-17 - Pages that were never there
 
 The routing that splits text PDFs from scanned ones was decided once per

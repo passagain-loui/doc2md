@@ -707,6 +707,11 @@ def _join_pieces(pieces: list[tuple[str, float, float, float]]) -> str:
     return out
 
 
+# Public name for callers outside this module (table OCR joins a cell's words
+# with exactly the rule posters use).
+join_word_pieces = _join_pieces
+
+
 def _readings(data: dict, scale: float) -> list[_Reading]:
     lines: dict[tuple, list[int]] = {}
     for index, text in enumerate(data.get("text", [])):

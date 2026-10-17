@@ -1,5 +1,62 @@
 # Changelog
 
+## [1.5.3] (2026-10-17) - FASTER TABLE OCR, LAYOUT FRAMES
+
+### Changed
+
+- **Tables on OCR'd pages are read in one pass, not one call per cell.** A
+  table on a page sent to OCR (a scanned page, or a page with a mis-encoded
+  text layer) is now read with a single Tesseract pass (`--psm 6`) instead of
+  one per cell. Cell borders are painted white first, and dark header and
+  section-bar cells are inverted and contrast-stretched. Each word is assigned
+  to the cell that contains the centre of its box.
+- **A cell is re-read on its own only when needed.** A cell is re-read alone
+  when it has ink but got no words, or when its words' mean confidence is below
+  50 (`TABLE_CELL_MIN_CONFIDENCE`). Cells holding only symbols (bullets, dashes,
+  dots) are never re-read alone. If the single pass fails or finds nothing, the
+  whole table falls back to the per-cell reader, which is kept as
+  `_grid_from_cell_ocr`.
+- **Measured on `Fortuner_Leader_Catalog_2025.pdf`, page 1** (a two-table spec
+  sheet with a mis-encoded text layer): table reading went from about 93 s to
+  about 18 s, and the whole file from 118.6 s to 51.3 s. Accuracy against a
+  hand-transcribed 74-row table went from 0.831 to 0.934, mainly because values
+  spanning several columns are now read whole instead of being cut apart.
+- New functions in `doc2md/engine/pdf_engine.py`: `_grid_from_table_ocr` and
+  `_is_symbol_only`.
+- **Regression check.** All 8 approved samples were re-run with
+  `tools/regress.py`. None regressed. Fortuner and mu-X outputs changed as
+  intended.
+
+### Fixed
+
+- **Layout frames no longer hide a page's text.** Some PDFs draw a frame around
+  a whole page or spread. pdfplumber reports it as a table that contains the
+  real tables, so the whole page was duplicated inside one giant cell and its
+  prose was hidden. A detected table with at most 4 cells
+  (`FRAME_TABLE_MAX_CELLS`) that contains another detected table, within 2 pt
+  (`FRAME_TABLE_TOLERANCE_PT`), is now treated as a frame: it is not rendered as
+  a table, and its prose is kept. This applies to OCR pages
+  (`_ocr_page_with_tables`) and to text-layer pages (`_extract_tables`), through
+  the helper `_without_frame_tables`. Pages affected in the samples: Fortuner
+  pages 1, 5 and 6, and page 8 of the mu-X brochure.
+- Real tables with 5 or more cells that contain a small nested table are still
+  kept. EU2043 page 2's itinerary table is unchanged.
+
+### Added (tests)
+
+- `tests/test_table_ocr.py`: 44 tests, using synthetic images and a mocked
+  Tesseract.
+- `tests/test_pdf_frame_tables.py`: 5 tests, using a synthetic PDF.
+- Full suite: 1030 passed, 3 skipped, plus 44 GUI review-flag tests.
+
+### Known limits
+
+- In the single table read, short Thai labels and bullet rows are still
+  sometimes misread.
+- Fortuner page 5's text layer contains mojibake (Ē, ĕ) that the corrupt-Thai
+  detector does not flag. This predates 1.5.3.
+- The mu-X page 8 text layer has labels clipped by the PDF itself.
+
 ## [1.5.2] (2026-10-17) - IMAGE PAGES INSIDE TEXT PDFS
 
 ### Fixed

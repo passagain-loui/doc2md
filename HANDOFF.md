@@ -1,31 +1,45 @@
-# Handoff - doc2md v1.5.2
+# Handoff - doc2md v1.5.3
 
 Written 2026-10-04, updated 2026-10-17. Read this first, then README.md (what
 the tool does) and CLAUDE.md (the release pipeline rules).
-
-> **In progress when the machine was shut down (2026-10-17):** v1.5.3, table OCR speed-up.
-> Pages OCR'd because their text layer is bad fill each pdfplumber table cell with its own
-> Tesseract call (`_grid_from_cell_ocr`); the Fortuner catalog's spec-table page takes most of
-> its ~80-115 s. Planned design: whiten cell borders, OCR the table crop once
-> (`image_to_data`), assign each word to the cell holding its centre, per-cell fallback only for
-> cells with ink but no words. Acceptance: >= 5x faster on that page, no accuracy loss
-> (disagreeing cells checked against crops by eye), and `python tools/regress.py run` showing
-> no REGRESSED file. Any uncommitted edits to `doc2md/engine/pdf_engine.py`,
-> `doc2md/core/ocr_text.py` or `tests/test_table_ocr.py` are that unfinished work - review them
-> before trusting them. All 8 samples in `D:\AI\OpenCode\doc2md-samples\` were approved from a
-> fresh v1.5.2 run (the regression reference).
 
 ## 1. State right now
 
 | Item | Value |
 | --- | --- |
-| Version | 1.5.2 (`pyproject.toml` and `doc2md/__init__.py` agree) |
-| Last release commit | `4f0cefe` - "release: v1.5.2 OCR image-only pages inside text PDFs" (CI green on 3.11-3.13) |
+| Version | 1.5.3 |
+| Last release commit | (pending) |
 | Branch | `main` |
 | Remote | `origin` = https://github.com/passagain-loui/doc2md.git - check `git status -sb` for unpushed commits; GitHub CI (Python 3.11-3.13) green since commit `8d9adde` |
-| Gate | `tools/verify.ps1` passed (EXIT_CODE 0) for 1.5.2 on 2026-10-17; 3 expected skips (symlink, RapidOCR not installed, PATH-only Tesseract check) |
-| Installer | built 2026-10-17 from the gated 1.5.2 tree: `dist/doc2md_Setup_v1.5.2.exe` (69 MB), `dist/doc2md.exe` (95 MB), `dist/doc2md/` - git-ignored, rebuild with `python build.py` on another machine |
+| Gate | `tools/verify.ps1` passed (EXIT_CODE 0) for 1.5.3 on 2026-10-17; 3 expected skips (symlink, RapidOCR not installed, PATH-only Tesseract check) |
+| Installer | built 2026-10-17 from the gated 1.5.3 tree: `dist/doc2md_Setup_v1.5.3.exe` (69 MB), `dist/doc2md.exe` (95 MB), `dist/doc2md/` - git-ignored, rebuild with `python build.py` on another machine |
 | Tesseract | **installed and working on this machine** (checked 2026-10-17): v5.4.0 at `C:/Program Files/Tesseract-OCR/tesseract.exe`, languages `eng` + `tha`. It is not on PATH, but `find_tesseract()` locates it in the standard install folder, so the app uses it. A real Thai test image and scanned PDF converted correctly apart from a lost tone mark (นี้ read as นี). The gate's one 'Tesseract not installed' skip (`tests/test_thai_documents.py`) checks `shutil.which("tesseract")`, i.e. PATH only, so it skips here; add the folder to PATH if you want that real-OCR test to run |
+
+### What changed in 1.5.3
+
+Table OCR on pages read by OCR, and layout frames (`doc2md/engine/pdf_engine.py`):
+
+- A table on an OCR'd page is read with one Tesseract pass (`--psm 6`) instead
+  of one call per cell (`_grid_from_table_ocr`). Cell borders are whitened
+  first; dark header and section-bar cells are inverted and contrast-stretched.
+  Each word goes to the cell holding its box centre.
+- A cell is re-read alone only if it has ink but no words, or its words' mean
+  confidence is below 50 (`TABLE_CELL_MIN_CONFIDENCE`). Symbol-only cells
+  (`_is_symbol_only`: bullets, dashes, dots) are never re-read alone. If the
+  single pass fails or finds nothing, the table falls back to the per-cell
+  reader (`_grid_from_cell_ocr`, kept).
+- A detected table with at most 4 cells (`FRAME_TABLE_MAX_CELLS`) that contains
+  another detected table, within 2 pt (`FRAME_TABLE_TOLERANCE_PT = 2.0`), is a
+  layout frame: it is not rendered as a table and its prose is kept
+  (`_without_frame_tables`). This applies to OCR pages (`_ocr_page_with_tables`)
+  and text-layer pages (`_extract_tables`). Real tables of 5 or more cells that
+  contain a small table are kept; EU2043 page 2 is unchanged.
+- Tests: `tests/test_table_ocr.py` (44, synthetic images, mocked Tesseract) and
+  `tests/test_pdf_frame_tables.py` (5, synthetic PDF). Full suite: 1030 passed,
+  3 skipped, plus 44 GUI review-flag tests.
+- Regression: all 8 approved samples in `D:\AI\OpenCode\doc2md-samples\` were
+  re-run with `tools/regress.py`; none REGRESSED. Fortuner and mu-X changed as
+  intended. Other changes, if any, will be recorded by the maintainer.
 
 ### What changed in 1.5.2
 
@@ -257,6 +271,13 @@ an entry headed `[x.y.z]` to **both** `CHANGELOG.md` and `HISTORY.md` (the gate'
   changed; the approved scanned reference is identical. The brochure took 2 s
   before (pages skipped) and 92 s now. Before the fix its report said 29/29
   pages with content, because each image page's footer counted.
+- **Table OCR (1.5.3), `Fortuner_Leader_Catalog_2025.pdf` page 1:** table
+  reading 93 s -> 18 s; whole file 118.6 s -> 51.3 s (part of the rest is page
+  prose that was never read before, see frame tables below). Accuracy against a
+  hand-transcribed 74-row table 0.831 -> 0.934, mainly because values spanning
+  several columns are now read whole.
+- **Frame tables (1.5.3):** affected pages are Fortuner 1, 5 and 6 and mu-X
+  brochure page 8. Their prose was hidden inside one giant cell; it is now kept.
 
 ## 8. Known limits and open ideas
 
@@ -278,9 +299,11 @@ Not solved:
   at 96 dpi, so small Thai text OCRs poorly (e.g. "รายสะเอียด" for
   "รายละเอียด"). Rendering at a higher DPI cannot recover detail the file does
   not contain.
-- Table speed on OCR'd pages: tables are read cell by cell (one Tesseract call
-  per cell). A 6-page catalogue with a mis-encoded spec-table page takes about
-  115 s. The planned fix is under Ideas below.
+- In the single table read (1.5.3), short Thai labels and bullet rows are still
+  sometimes misread.
+- Fortuner page 5's text layer contains mojibake (Ē, ĕ) that the corrupt-Thai
+  detector does not flag, so it is kept as is. This predates 1.5.3.
+- The mu-X page 8 text layer has labels clipped by the PDF itself.
 
 Small maintenance items seen in the last gate run (2026-10-16, v1.4.11):
 
@@ -301,9 +324,6 @@ Ideas not started:
 - Chinese (and other) language data, with the user's permission to download.
 - Code-signing the installer.
 - Per-cell vertical alignment for merged cells in tables.
-- OCR each page once and place its words into table cells by position, instead
-  of one Tesseract call per cell (the planned fix for the slow spec-table pages
-  in section 8).
 
 ## 9. Waiting on real-world testing by the user
 
@@ -335,10 +355,13 @@ The suite cannot cover these; nobody has done them on the built exe yet:
     listed in section 8). Every `python tools/regress.py run` now compares
     against it - run it before each release build. Add more real scans the
     same way so one document's fix cannot quietly break another.
-11. **(new 2026-10-17) Seven new real samples** in `D:\AI\OpenCode\doc2md-samples\`,
-    not yet approved; only `QP 7.pdf` is. Check each run's output against its
-    original, and approve a file with `python tools/regress.py approve "<file>"`
-    once the user confirms the output.
+11. **(done 2026-10-17) Seven more real samples approved** in
+    `D:\AI\OpenCode\doc2md-samples\` by the user's decision, from a fresh run of
+    the 1.5.2 code; all 8 samples are now regression references. The 1.5.3 run
+    `.runs\20261017-215241` changes Fortuner and mu-X on purpose (one-pass table
+    OCR, frame tables; checked by eye, no REGRESSED file). Re-approving those two
+    from that run waits for the user's go-ahead:
+    `python tools/regress.py approve "Fortuner_Leader_Catalog_2025.pdf" "mu_x_brochure_2026_5d17d1513d.pdf"`.
 
 Report findings as: file type, what the output should have said, what it said.
 Fixes so far came from exactly that kind of sample.
