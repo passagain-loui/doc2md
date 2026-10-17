@@ -1,4 +1,4 @@
-# Handoff - doc2md v1.5.0
+# Handoff - doc2md v1.5.1
 
 Written 2026-10-04, updated 2026-10-17. Read this first, then README.md (what
 the tool does) and CLAUDE.md (the release pipeline rules).
@@ -7,13 +7,27 @@ the tool does) and CLAUDE.md (the release pipeline rules).
 
 | Item | Value |
 | --- | --- |
-| Version | 1.5.0 (`pyproject.toml` and `doc2md/__init__.py` agree) |
-| Last release commit | `c32d307` - "release: v1.5.0 clean output, OCR review highlights" (CI green on 3.11-3.13) |
+| Version | 1.5.1 (`pyproject.toml` and `doc2md/__init__.py` agree) |
+| Last release commit | (pending - set after the 1.5.1 commit) |
 | Branch | `main` |
 | Remote | `origin` = https://github.com/passagain-loui/doc2md.git - check `git status -sb` for unpushed commits; GitHub CI (Python 3.11-3.13) green since commit `8d9adde` |
-| Gate | `tools/verify.ps1` passed (EXIT_CODE 0) for 1.5.0 on 2026-10-17, twice (before the build and again after the last doc edits); 3 expected skips (symlink, RapidOCR not installed, Tesseract binary not installed) |
-| Installer | built 2026-10-17 from the gated 1.5.0 tree: `dist/doc2md_Setup_v1.5.0.exe` (69 MB), `dist/doc2md.exe` (95 MB), `dist/doc2md/` - git-ignored, rebuild with `python build.py` on another machine |
+| Gate | `tools/verify.ps1` passed (EXIT_CODE 0) for 1.5.1 on 2026-10-17; 3 expected skips (symlink, RapidOCR not installed, PATH-only Tesseract check) |
+| Installer | built 2026-10-17 from the gated 1.5.1 tree: `dist/doc2md_Setup_v1.5.1.exe` (69 MB), `dist/doc2md.exe` (95 MB), `dist/doc2md/` - git-ignored, rebuild with `python build.py` on another machine |
 | Tesseract | **installed and working on this machine** (checked 2026-10-17): v5.4.0 at `C:/Program Files/Tesseract-OCR/tesseract.exe`, languages `eng` + `tha`. It is not on PATH, but `find_tesseract()` locates it in the standard install folder, so the app uses it. A real Thai test image and scanned PDF converted correctly apart from a lost tone mark (นี้ read as นี). The gate's one 'Tesseract not installed' skip (`tests/test_thai_documents.py`) checks `shutil.which("tesseract")`, i.e. PATH only, so it skips here; add the folder to PATH if you want that real-OCR test to run |
+
+### What changed in 1.5.1
+
+Fix for detached Thai upper marks and sara am on scans (`doc2md/core/ocr_text.py`):
+
+- A low-confidence row directly above a line is re-read together with that line
+  (Tesseract `--psm 7`) and merged at character-cluster level: letters from the
+  first read, marks from the re-read only where the letters agree, and the junk
+  mark row dropped. Words where the letters disagree keep the first read.
+- `normalize_thai` runs on all OCR output: nikhahit + sara aa becomes sara am,
+  a doubled identical mark collapses, and tone + same tone + sara aa becomes
+  tone + sara am.
+- Re-reads are capped at 40 per band, which costs time (section 7).
+- Measured on one real scanned procedure (section 7). Not yet tried by the user.
 
 ### What changed in 1.5.0
 
@@ -201,6 +215,12 @@ an entry headed `[x.y.z]` to **both** `CHANGELOG.md` and `HISTORY.md` (the gate'
   user's own library; detected by `thai_text_is_corrupt` and re-read by OCR.
 - **Legacy Office on 220 real files:** all 90 `.xls` and all 40 `.ppt` converted;
   79 of 90 `.doc` (the other 11 contain only pictures and are reported as such).
+- **Detached upper marks (1.5.1), `QP 7.pdf` in the samples folder** (a real
+  seven-page scanned procedure). Page 1 checked against 24 phrases read from the
+  scan by eye: 14/24 found in 1.5.0, 22/24 in 1.5.1. Review-flagged lines 102 ->
+  63. Seven pages 36 s -> 52.5 s (extra single-line re-reads, capped at 40 per
+  band). Every changed line across all 7 pages was compared; no correctly read
+  base word was replaced. The phrase list is the samples folder's `.expect.txt`.
 
 ## 8. Known limits and open ideas
 
@@ -212,6 +232,12 @@ Not solved:
 - Residual ข/ย errors on poor scans.
 - Legacy `.doc`: no bold/italic, headers, footnotes. Legacy `.ppt`: no notes,
   table layout, pictures.
+- Upper marks on a letter Tesseract misread: the re-read is used only where the
+  letters agree, so "รายซ้ำ" comes out as "รายซำ" (the re-read saw ช, so no marks
+  could be merged).
+- Latin read as Thai: "QM" comes out as Thai "อห". A Latin-vs-Thai disagreement
+  keeps the first read.
+- Logo noise rows with no line under them remain.
 
 Small maintenance items seen in the last gate run (2026-10-16, v1.4.11):
 
@@ -257,6 +283,11 @@ The suite cannot cover these; nobody has done them on the built exe yet:
 9. **(new in 1.4.11) Real page-count progress** on a large real scanned
    PDF - confirm "Page N/M" tracks correctly and the bar does not get
    stuck between files in a batch.
+10. **(new in 1.5.1) Detached upper marks on `QP 7.pdf`** in
+    `D:\AI\OpenCode\doc2md-samples\` - the file now has its `.expect.txt`. Once
+    the user has checked the converted output against the scan, approve it with
+    `python tools/regress.py approve "QP 7.pdf"`. Until then it has no approved
+    output to compare against.
 
 Report findings as: file type, what the output should have said, what it said.
 Fixes so far came from exactly that kind of sample.

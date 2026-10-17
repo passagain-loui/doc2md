@@ -260,6 +260,12 @@ PDFs exported from Excel with certain fonts). Known font-map errors (sara aa /
 sara am) are repaired; a page whose text is garbled in other ways is detected
 and re-read by OCR, or marked with a Warning if OCR is unavailable.
 
+Upper vowels and tone marks that Tesseract splits off into a separate row above
+their line are re-read together with that line and merged back only where the
+two readings agree, with the letters always taken from the first read. Sara am
+that OCR wrote as nikhahit followed by sara aa is normalised to the single sara
+am character, so search and AI tools see the same text as the page.
+
 Lines that OCR kept but is unsure of (mean confidence 40-70%; anything lower is
 dropped as noise) are highlighted in the preview with an amber background, and
 hovering shows the confidence. The preview toolbar counts them ("⚠ N lines to

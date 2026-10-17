@@ -1,5 +1,36 @@
 # History
 
+## [1.5.1] - 2026-10-17 - The flags pointed at the wrong lines
+
+The first real scanned procedure run after 1.5.0 showed that the review
+highlights were working and still useless. Their flagged lines were mostly
+noise: a row of Thai upper marks that Tesseract's layout analysis had split off
+as a line of its own, with low confidence, so the flag landed there. The real
+line beneath it came out with high confidence and no upper marks at all, so
+the words that actually needed checking were never flagged. The same scan
+wrote sara am as nikhahit plus sara aa, which looks identical on the page and
+is a different string to a search or an AI tool.
+
+The fix treats a low-confidence row sitting directly on top of a line as
+detached marks. The two are re-read together as one line, and the readings are
+merged letter by letter: letters always come from the first read, and marks
+from the re-read are used only where the letters agree. The first attempt
+replaced whole lines with the re-read instead, and that turned correct words
+into junk. It was caught only by comparing every changed line in the output,
+not the total, and the design was changed to merge at letter level before
+release. The lesson is the one the regression harness exists for - a change
+can look right in a summary and still break words that were correct before,
+so measure every line that changed, not just the number.
+
+On page 1 of the procedure, checked against 24 phrases read from the scan by
+eye, 1.5.0 found 14 and 1.5.1 finds 22. Review flags fell from 102 lines to 63,
+so they land on fewer noise lines. The cost is time: seven pages went from 36 s
+to 52.5 s, because of the extra single-line re-reads. Sara am is now normalised
+to one character in all OCR output. Two errors remain: a word whose letter the
+re-read disagreed with keeps the first read's letter, and a Latin letter read
+as a Thai one is kept as the first read had it. Logo noise rows with no line
+beneath them also remain.
+
 ## [1.5.0] - 2026-10-17 - Flags beside the text, not in it
 
 1.4.11 made uncertain OCR lines easy to find by writing their confidence

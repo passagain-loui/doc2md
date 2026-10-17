@@ -1,5 +1,31 @@
 # Changelog
 
+## [1.5.1] (2026-10-17) - THAI UPPER MARKS ON SCANS
+
+### Fixed
+
+- **Upper vowels and tone marks split off from their line on scans.** On a real
+  seven-page scanned procedure, Tesseract's layout analysis put the upper marks
+  of Thai lines into a separate "line" of their own. That junk row came out with
+  low confidence, so the 1.5.0 review highlights pointed at noise, while the real
+  line beneath it came out with high confidence and no upper marks at all, so
+  the actual errors went unflagged. A low-confidence row sitting directly on top
+  of a line is now treated as detached marks: the two are re-read together as one
+  line (Tesseract `--psm 7`) and merged at character-cluster level in
+  `doc2md/core/ocr_text.py`. Letters always come from the first read. Marks come
+  from the re-read only where the letters agree; where they disagree, the first
+  read's letters are kept, so a correctly read word is never replaced. Letters
+  the first read dropped are added back only if they are Thai, digits or
+  punctuation. The junk mark row is dropped.
+- **Sara am was written as two characters.** OCR produced nikhahit followed by
+  sara aa, which looks identical on screen but is a different string, so search
+  and AI tools missed it. A new `normalize_thai` step runs on all OCR output: it
+  rewrites nikhahit + sara aa as sara am (tone-mark order handled), collapses a
+  doubled identical mark, and rewrites tone + the same tone + sara aa as tone +
+  sara am, because Tesseract reads the ring as a second mai tho.
+- **The re-reads cost time.** The same seven pages went from 36 s to 52.5 s. The
+  extra single-line re-reads are capped at 40 per band.
+
 ## [1.5.0] (2026-10-17) - CLEAN OUTPUT, OCR REVIEW HIGHLIGHTS
 
 ### Changed
