@@ -13,7 +13,7 @@ the tool does) and CLAUDE.md (the release pipeline rules).
 | Remote | `origin` = https://github.com/passagain-loui/doc2md.git - check `git status -sb` for unpushed commits; GitHub CI (Python 3.11-3.13) green since commit `8d9adde` |
 | Gate | `tools/verify.ps1` passed (EXIT_CODE 0) for 1.5.0 on 2026-10-17, twice (before the build and again after the last doc edits); 3 expected skips (symlink, RapidOCR not installed, Tesseract binary not installed) |
 | Installer | built 2026-10-17 from the gated 1.5.0 tree: `dist/doc2md_Setup_v1.5.0.exe` (69 MB), `dist/doc2md.exe` (95 MB), `dist/doc2md/` - git-ignored, rebuild with `python build.py` on another machine |
-| Tesseract | tessdata present (`tha`/`eng` in `%LOCALAPPDATA%\doc2md\tessdata`) but the `tesseract` binary itself is **not on PATH on this machine** - run the app's OCR Diagnostics > Install OCR to finish setup before testing OCR by hand |
+| Tesseract | **installed and working on this machine** (checked 2026-10-17): v5.4.0 at `C:/Program Files/Tesseract-OCR/tesseract.exe`, languages `eng` + `tha`. It is not on PATH, but `find_tesseract()` locates it in the standard install folder, so the app uses it. A real Thai test image and scanned PDF converted correctly apart from a lost tone mark (นี้ read as นี). The gate's one 'Tesseract not installed' skip (`tests/test_thai_documents.py`) checks `shutil.which("tesseract")`, i.e. PATH only, so it skips here; add the folder to PATH if you want that real-OCR test to run |
 
 ### What changed in 1.5.0
 
