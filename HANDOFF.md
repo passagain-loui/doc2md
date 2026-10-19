@@ -4,16 +4,16 @@ Written 2026-10-04, updated 2026-10-19. Read this first, then README.md (what
 the tool does) and CLAUDE.md (the release pipeline rules).
 
 > **CI note (2026-10-19):** the 1.5.4 release commit `5b55aeb` failed GitHub CI
-> on all three Pythons (run 39179328930) in one test,
-> `test_real_tesseract_reads_the_thai_image`: "no readable text". CI is Windows
-> with Tesseract from choco on PATH. The new `real_tesseract` fixture changed the
-> environment the test ran in there (it lifted the install-folder search and
-> removed `TESSDATA_PREFIX`). A first fix (`4f87207`, keep the per-user tessdata
-> isolated) did not help. The second fix: with Tesseract on PATH the fixture
-> changes nothing, so CI runs the test exactly as it always did; only an
-> installed-but-not-on-PATH Tesseract gets the install folders searched, and
-> `TESSDATA_PREFIX` keeps its value. Verified both ways locally, gate passed
-> (EXIT_CODE 0), installer rebuilt. Check that CI is green (`gh run list --limit 1`).
+> in one test, `test_real_tesseract_reads_the_thai_image` ("no readable text").
+> Real cause: that test had never run on CI. Before 1.5.4 its `shutil.which`
+> skip always fired there (choco does not install Tesseract into the folder the
+> workflow adds to PATH). The new `real_tesseract` fixture finds Tesseract the
+> way the app does, so the test ran for the first time, on a choco Tesseract
+> with English data only. Two guesses (`4f87207`, `a2b8b32`) were wrong. The
+> fix: the fixture lifts the whole app-style lookup (install folders and
+> doc2md's per-user tessdata, where this machine keeps Thai) and skips when
+> Tesseract has no `tha`. Locally the test runs and passes; with no Thai data
+> it skips. Gate passed (EXIT_CODE 0), installer rebuilt.
 
 ## 1. State right now
 

@@ -1,5 +1,4 @@
 import os
-import shutil
 import sys
 from pathlib import Path
 
@@ -227,6 +226,7 @@ def thai_image(tmp_path, thai_font):
 from doc2md.core import ocr_setup as _ocr_setup  # noqa: E402
 
 _REAL_KNOWN_LOCATIONS = list(_ocr_setup.KNOWN_LOCATIONS)
+_REAL_USER_TESSDATA_DIR = _ocr_setup.user_tessdata_dir
 _REAL_TESSERACT = _ocr_setup.find_tesseract()
 
 
@@ -234,11 +234,11 @@ _REAL_TESSERACT = _ocr_setup.find_tesseract()
 def real_tesseract(monkeypatch):
     """Path of the Tesseract the app would use, for the few tests that run real OCR.
 
-    Skips where the app itself would find no Tesseract, so the skip condition is
-    the app's own discovery and not a bare ``shutil.which``. A Tesseract on PATH
-    (CI installs one there) runs under the isolation below unchanged, exactly as
-    these tests always ran; only an installed-but-not-on-PATH Tesseract (a dev
-    machine) needs the usual install folders searched again.
+    The isolation below is lifted so Tesseract and its language data are found
+    exactly the way the app finds them (PATH, the usual install folders, and
+    doc2md's own per-user tessdata folder). Skips where that finds no Tesseract,
+    or one without Thai data (CI's choco package ships English only), since the
+    Thai fixture cannot be read there.
     """
     if _REAL_TESSERACT is None:
         pytest.skip("Tesseract not installed (looked the way the app does)")
@@ -250,9 +250,12 @@ def real_tesseract(monkeypatch):
         monkeypatch.delenv("TESSDATA_PREFIX")
     else:
         monkeypatch.setenv("TESSDATA_PREFIX", previous)
-    if shutil.which("tesseract") is None:
-        monkeypatch.setattr(_ocr_setup, "KNOWN_LOCATIONS", _REAL_KNOWN_LOCATIONS)
-        monkeypatch.delenv("DOC2MD_NO_TESSERACT_SEARCH", raising=False)
+    monkeypatch.setattr(_ocr_setup, "KNOWN_LOCATIONS", _REAL_KNOWN_LOCATIONS)
+    monkeypatch.setattr(_ocr_setup, "user_tessdata_dir", _REAL_USER_TESSDATA_DIR)
+    monkeypatch.delenv("DOC2MD_NO_TESSERACT_SEARCH", raising=False)
+    languages = _ocr_setup.available_languages() or []
+    if "tha" not in languages:
+        pytest.skip(f"Thai OCR language data not installed (Tesseract has: {', '.join(languages) or 'none'})")
     return _REAL_TESSERACT
 
 
