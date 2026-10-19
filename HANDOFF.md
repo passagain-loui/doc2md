@@ -3,23 +3,22 @@
 Written 2026-10-04, updated 2026-10-19. Read this first, then README.md (what
 the tool does) and CLAUDE.md (the release pipeline rules).
 
-> **Open item first (2026-10-19): GitHub CI for the 1.5.4 release commit
-> `5b55aeb` failed on Python 3.11** (run 39179328930; 3.12 and 3.13 were still
-> running when the machine was shut down). The local gate passed (EXIT_CODE 0,
-> 2 expected skips) and the 8-sample regression check had no REGRESSED file, so
-> the failure is likely environment-specific (Ubuntu, no Tesseract, Python
-> 3.11). Next step: `gh run view 39179328930 --log-failed`, find the failing
-> test, fix, re-run the full pipeline (purge, gate, build), push, and watch CI
-> until all three jobs are green. Suspects: the new `real_tesseract` fixture in
-> `tests/conftest.py`, and the new tests in `tests/test_pdf_mojibake*.py`,
-> `tests/test_ocr_latin_reread.py` and `tests/test_table_ocr.py`.
+> **CI note (2026-10-19):** the 1.5.4 release commit `5b55aeb` failed GitHub CI
+> on all three Pythons (run 39179328930) in one test,
+> `test_real_tesseract_reads_the_thai_image`: "no readable text". CI is Windows
+> with Tesseract from choco (Thai data in the install folder). The new
+> `real_tesseract` fixture had also lifted the per-user tessdata isolation, and
+> that real per-user folder (without Thai) won. Fixed in the follow-up commit:
+> the fixture lifts only the binary lookup. Gate re-run passed (EXIT_CODE 0) and
+> the installer was rebuilt. Check that the follow-up commit's CI is green
+> (`gh run list --limit 1`).
 
 ## 1. State right now
 
 | Item | Value |
 | --- | --- |
 | Version | 1.5.4 |
-| Last release commit | `5b55aeb` (v1.5.4; CI failed on 3.11 - see the open item above) |
+| Last release commit | `5b55aeb` (v1.5.4) plus the CI test fix after it - see the CI note above |
 | Branch | `main` |
 | Remote | `origin` = https://github.com/passagain-loui/doc2md.git - check `git status -sb` for unpushed commits; GitHub CI (Python 3.11-3.13) green since commit `8d9adde` |
 | Gate | `tools/verify.ps1` passed (EXIT_CODE 0) for 1.5.4 on 2026-10-19; 2 expected skips (symlink, RapidOCR not installed) - the real-Tesseract test now runs |

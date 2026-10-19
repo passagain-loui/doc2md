@@ -225,7 +225,6 @@ def thai_image(tmp_path, thai_font):
 from doc2md.core import ocr_setup as _ocr_setup  # noqa: E402
 
 _REAL_KNOWN_LOCATIONS = list(_ocr_setup.KNOWN_LOCATIONS)
-_REAL_USER_TESSDATA_DIR = _ocr_setup.user_tessdata_dir
 _REAL_TESSERACT = _ocr_setup.find_tesseract()
 
 
@@ -239,8 +238,10 @@ def real_tesseract(monkeypatch):
     """
     if _REAL_TESSERACT is None:
         pytest.skip("Tesseract not installed (looked the way the app does)")
+    # Only the binary lookup is lifted. The per-user tessdata folder stays the
+    # isolated empty one, so the language data comes from the install itself; the
+    # real per-user folder may exist without Thai (as on CI) and would win.
     monkeypatch.setattr(_ocr_setup, "KNOWN_LOCATIONS", _REAL_KNOWN_LOCATIONS)
-    monkeypatch.setattr(_ocr_setup, "user_tessdata_dir", _REAL_USER_TESSDATA_DIR)
     monkeypatch.delenv("DOC2MD_NO_TESSERACT_SEARCH", raising=False)
     # prepare_tesseract() sets TESSDATA_PREFIX straight on os.environ; setting and
     # then removing it through monkeypatch makes teardown put the old state back.
