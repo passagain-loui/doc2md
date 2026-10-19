@@ -381,12 +381,12 @@ Small maintenance items seen in the last gate run (2026-10-16, v1.4.11):
 Ideas not started:
 
 - A vision-model route for posters and other design-heavy images.
+- Per-cell vertical alignment for merged cells in tables.
 
 Decided against by the user (2026-10-17) - do not propose again:
 
 - Chinese (and other extra) OCR language data.
 - Code-signing the installer.
-- Per-cell vertical alignment for merged cells in tables.
 
 ## 9. Waiting on real-world testing by the user
 
