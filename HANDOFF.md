@@ -20,7 +20,7 @@ the tool does) and CLAUDE.md (the release pipeline rules).
 | Item | Value |
 | --- | --- |
 | Version | 1.5.5 |
-| Last release commit | (pending) |
+| Last release commit | `4bafb73` (v1.5.5; CI green on 3.11-3.13, run 39264101605) |
 | Branch | `main` |
 | Remote | `origin` = https://github.com/passagain-loui/doc2md.git - check `git status -sb` for unpushed commits; GitHub CI (Python 3.11-3.13) green since commit `8d9adde` |
 | Gate | `tools/verify.ps1` passed (EXIT_CODE 0) for 1.5.5 on 2026-10-19; 2 expected skips (symlink, RapidOCR not installed) - the real-Tesseract test now runs |
