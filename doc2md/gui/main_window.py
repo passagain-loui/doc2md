@@ -63,7 +63,7 @@ from doc2md import __version__
 from doc2md.core.converter import ConversionResult, Converter
 from doc2md.core.presets import CUSTOM, PRESET_NAMES, matching_preset, options_for
 from doc2md.core.quality import build_report, write_report_atomic
-from doc2md.core.review import with_inline_flags
+from doc2md.core.review import REPAIR_LOSS_CONFIDENCE, with_inline_flags
 from doc2md.core.router import RECURSIVE_SCAN_EXCLUDED_SUFFIXES, FileKind, detect
 from doc2md.gui import theme
 from doc2md.gui.ocr_dialog import OcrDiagnosticsDialog
@@ -569,7 +569,8 @@ class MainWindow(QMainWindow):
         self.mark_uncertain_check.setToolTip(
             "Off: copied and exported Markdown stays clean (best for AI tools).\n"
             "On: \"⚠NN%\" is appended to OCR lines the engine was unsure about, "
-            "so a person can proofread the file.\n"
+            "so a person can proofread the file; a bare \"⚠\" marks a line that "
+            "lost Thai marks in a repair.\n"
             "The preview always highlights those lines either way."
         )
         self.mark_uncertain_check.setChecked(
@@ -1621,6 +1622,8 @@ class MainWindow(QMainWindow):
         confidence = self._flagged_blocks.get(block)
         if confidence is None:
             return None
+        if confidence == REPAIR_LOSS_CONFIDENCE:
+            return "Thai marks were lost in the PDF here — check this line against the original"
         return (
             f"OCR confidence {confidence}% — check this line against the original"
         )

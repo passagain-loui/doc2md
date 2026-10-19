@@ -1,5 +1,89 @@
 # Changelog
 
+## [1.5.4] (2026-10-19) - REPAIRED THAI MARKS, TABLE SYMBOLS, OCR FIXES
+
+### Changed
+
+- **Thai marks mis-encoded in a PDF text layer are repaired, not re-read.**
+  Some PDFs store Thai tone and vowel marks as other characters: Latin-Extended
+  letters (Ē, ē, Ė, æ and similar) or Private-Use glyphs (U+F70A and up). In
+  one sample the text read "อยĒาง" where the page shows "อย่าง". A page is now
+  flagged when it has 3 or more such characters attached to Thai letters, and
+  at least 1 per 500 Thai letters (`has_latin_mojibake`, `has_lost_marks`,
+  `MOJIBAKE_MIN_HITS`).
+- **The repair learns the mapping from the document itself.** The page is OCR'd
+  once as a reference. doc2md then counts, by votes, which character stands for
+  which mark. A mapping is used only with at least 2 votes and 75% agreement
+  (`learn_mojibake_map`, `MOJIBAKE_MAP_MIN_VOTES = 2`,
+  `MOJIBAKE_MAP_MIN_AGREEMENT = 0.75`). The marks are put back into the PDF's own
+  text layer, tables included (`repair_mojibake`), so the letters, spacing and
+  tables stay as the PDF has them.
+- **Marks that cannot be learned are not guessed.** If up to 20% of the swapped
+  characters cannot be learned (`MOJIBAKE_MAX_UNMAPPED_SHARE = 0.2`), they are
+  left out and each affected line is highlighted for review. If more than 20%
+  cannot be learned, the page falls back to full OCR.
+- **Each repaired page carries a note:** "> Thai marks on this page were
+  mis-encoded in the PDF and were repaired; N character(s) could not be
+  recovered (highlighted lines)."
+- **Lines that lost Thai marks are flagged for review.** New
+  `REPAIR_LOSS_CONFIDENCE = 0` in `doc2md/core/review.py`. These lines are
+  highlighted like uncertain OCR lines, with the tooltip "Thai marks were lost in
+  the PDF here — check this line against the original". With "Flag uncertain OCR
+  lines in output" (or `--mark-uncertain`) on, they get a bare " ⚠" instead of
+  " ⚠NN%", because there is no confidence to show.
+- **Cells holding only a bullet or a dash in OCR'd tables are decided from the
+  image.** A cell whose entire ink is one small dot or one short dash is read as
+  "•" or "–". Before, the OCR read such cells as noise, such as "กศกกถา", "pe" or
+  "๑". Sizes are in PDF points, so the rule holds at any DPI, and such cells are
+  never re-read. New: `_symbol_in_cell`, constant `TABLE_SYMBOL_CELLS`. On
+  Fortuner page 1's second table, 178 bullet/dash cells now read correctly.
+- **Short table labels are re-read on their own.** A cell whose single-pass read
+  is 3 characters or fewer, or 6 or fewer Latin letters with no digits, is
+  re-read alone. This catches short Thai labels that the one-pass read garbled.
+  New: `_needs_short_reread`, `TABLE_SHORT_TEXT_MAX_CHARS = 3`,
+  `TABLE_SHORT_LATIN_MAX_CHARS = 6`. Accuracy on the hand-transcribed Fortuner
+  table went from 0.934 to 0.941.
+- **Cost.** The reference OCR makes Fortuner slower: about 86 s, against 39 s in
+  1.5.3.
+- **Maintenance.** `Image.getdata()` (deprecated, removal in Pillow 14) is
+  replaced by `get_flattened_data()`, with a fallback, via `_pixel_values` in
+  `doc2md/core/ocr_text.py`.
+- **The real-Tesseract test finds Tesseract the way the app does.** The test in
+  `tests/test_thai_documents.py` uses the new `real_tesseract` fixture in
+  `tests/conftest.py`, so it runs on machines where Tesseract is installed but
+  not on PATH.
+- **Regression check.** All 8 approved samples were re-run with
+  `tools/regress.py`. None regressed. QP 7 is "fixed": it now finds all 24 of its
+  24 expected phrases, up from 22. EU2043 changed by one word on a low-resolution
+  page, a small improvement. Fortuner changed as intended.
+
+### Fixed
+
+- **Look-alike letters in the upper-mark rejoin.** When the base read and the
+  `--psm 7` re-read disagree only on a look-alike pair (ซ/ช, ข/ฃ, ด/ต, บ/ป, พ/ฟ,
+  ถ/ภ), the base letter is kept and the marks are still merged. Exact letter
+  matches are aligned first. "รายซำ" now comes out as "รายซ้ำ".
+- **Latin words read as Thai.** A short run of low-confidence Thai pieces (at
+  most 4 pieces, mean confidence under 80) next to a Latin word of 3 or more
+  letters is re-read with English only (`--psm 8`). The re-read is accepted only
+  if it is one uppercase word of 2-5 letters at confidence 85 or more, and at
+  most 20 such re-reads are made per band. "อห Manager" now comes out as
+  "QM Manager". No false positives on the other samples. New: `_reread_latin_runs`.
+
+### Added (tests)
+
+- New: `tests/test_pdf_mojibake.py`, `tests/test_pdf_mojibake_repair.py` (33
+  tests) and `tests/test_ocr_latin_reread.py` (26 tests).
+- Extended: `tests/test_table_ocr.py` (64 tests), `tests/test_ocr_thai_marks.py`
+  (65 tests), `tests/test_review.py` and `tests/test_gui_review_flags.py`.
+
+### Known limits
+
+- In the table read, short Thai labels are still sometimes misread: "สี" and
+  "สีภายใน" still come out as "a".
+- A repaired page can lose up to 20% of its swapped Thai marks. Those characters
+  are left out, and their lines are highlighted for review.
+
 ## [1.5.3] (2026-10-17) - FASTER TABLE OCR, LAYOUT FRAMES
 
 ### Changed

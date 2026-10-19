@@ -1,4 +1,4 @@
-# doc2md v1.5.3
+# doc2md v1.5.4
 
 Drag a document in, get clean Markdown out. PDF, Word, Excel, PowerPoint, HTML,
 e-mail, images and source files, with Thai text and Thai filenames handled
@@ -260,6 +260,15 @@ PDFs exported from Excel with certain fonts). Known font-map errors (sara aa /
 sara am) are repaired; a page whose text is garbled in other ways is detected
 and re-read by OCR, or marked with a Warning if OCR is unavailable.
 
+Some PDFs store Thai tone and vowel marks as other characters (Latin letters
+such as Ē, or private-use glyphs), so the text reads as "อยĒาง" for "อย่าง".
+These marks are repaired from the PDF's own text layer rather than re-read: one
+page is OCR'd as a reference, the mapping is learned from it, and the letters,
+spacing and tables stay as the PDF has them. A mark that cannot be recovered is
+left out and its line is highlighted for review, as long as no more than 20% of
+a page's marks are lost. A page with more than that is read by OCR instead. Each
+repaired page says how many characters could not be recovered.
+
 Inside a text PDF, routing is also decided per page: a page that has no text
 layer of its own (a full-page image, such as scanned terms and conditions in an
 otherwise digital brochure) is read by OCR and marked as such, while pages with
@@ -271,7 +280,8 @@ in, so a value that spans several columns stays together. A cell is read again
 on its own only when it has ink but no words, or when its words are unsure.
 Some PDFs draw a frame around a whole page; a frame that only wraps real tables
 is not shown as a table, so the page's text is kept instead of hidden inside one
-large cell. Short labels and bullet rows in a table are still sometimes misread.
+large cell. A cell that holds only a bullet or a dash is read as that symbol. Short
+Thai labels are still sometimes misread: "สี" comes out as "a".
 
 Upper vowels and tone marks that Tesseract splits off into a separate row above
 their line are re-read together with that line and merged back only where the
@@ -281,7 +291,9 @@ am character, so search and AI tools see the same text as the page.
 
 Lines that OCR kept but is unsure of (mean confidence 40-70%; anything lower is
 dropped as noise) are highlighted in the preview with an amber background, and
-hovering shows the confidence. The preview toolbar counts them ("⚠ N lines to
+hovering shows the confidence. Lines whose Thai marks were lost in a repaired PDF
+are highlighted the same way, with a hover note instead of a confidence. The
+preview toolbar counts them ("⚠ N lines to
 review") and **‹** and **Next ›** step backwards and forwards between them,
 wrapping at either end. Exported and copied Markdown
 stays clean by default. To write the marks into the text as well, which adds
@@ -291,7 +303,9 @@ the GUI (remembered between runs), pass `--mark-uncertain` to `convert` (or
 `doc2md.toml`; the config key applies when neither flag is given. With flags on,
 a flagged line that is a Markdown table row carries its flag inside the last
 cell, before the closing pipe, so the table stays valid; any other line ends
-with ` ⚠NN%`. **Send to Sandbox** and `bridge` are
+with ` ⚠NN%`, or with a bare ` ⚠` on a line whose Thai marks were lost in a
+repaired PDF, since that line has no confidence to show. **Send to Sandbox** and
+`bridge` are
 always clean, whatever the setting, because they exist for AI ingestion.
 
 Token counts use `tiktoken` when it is installed and otherwise a heuristic

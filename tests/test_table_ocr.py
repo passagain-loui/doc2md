@@ -86,6 +86,8 @@ def region(monkeypatch):
 def _defaults(monkeypatch):
     # tests that exercise the confidence re-read set it themselves
     monkeypatch.setattr(pdf_engine, "TABLE_CELL_MIN_CONFIDENCE", None)
+    monkeypatch.setattr(pdf_engine, "TABLE_SHORT_TEXT_MAX_CHARS", None)
+    monkeypatch.setattr(pdf_engine, "TABLE_SHORT_LATIN_MAX_CHARS", None)
 
 
 def _page(width=400, height=300):
@@ -593,3 +595,212 @@ def test_stats_count_rereads_by_reason_and_time_the_big_read(tesseract, region, 
     assert stats["reread_ink"] == 1
     assert stats["cells"] == 3
     assert stats["big_read_s"] >= 0.0
+
+
+# ------------------------------------------------------- bullet / dash cells
+
+
+def _mark(page, *boxes):
+    """Black rectangles on *page*, one per ``(x0, y0, x1, y1)``."""
+    draw = ImageDraw.Draw(page)
+    for box in boxes:
+        draw.rectangle(box, fill="black")
+
+
+DOT = (48, 48, 51, 51)  # 4 x 4 px at the centre of the left cell (0-100 x 0-100)
+DASH = (46, 50, 53, 50)  # 8 x 1 px
+
+
+def test_a_cell_whose_only_ink_is_a_dot_is_a_bullet(tesseract, region):
+    page = _page()
+    _mark(page, DOT)
+    tesseract(_data(("กศกกถา", 40, 40, 20, 20, 90), ("right", 120, 40, 40, 20, 95)))
+
+    grid = _read(_two_cells(), page)
+
+    assert grid == [[pdf_engine.BULLET, "right"]]  # the noise the big read made of it is replaced
+    assert region == []
+
+
+def test_a_cell_whose_only_ink_is_a_short_thin_stroke_is_a_dash(tesseract, region):
+    page = _page()
+    _mark(page, DASH)
+    tesseract(_data(("--", 40, 40, 20, 20, 90), ("right", 120, 40, 40, 20, 95)))
+
+    assert _read(_two_cells(), page) == [[pdf_engine.EN_DASH, "right"]]
+    assert region == []
+
+
+def test_the_symbols_are_a_bullet_and_an_en_dash():
+    assert pdf_engine.BULLET == chr(0x2022)
+    assert pdf_engine.EN_DASH == chr(0x2013)
+
+
+def test_a_symbol_cell_is_never_re_read_however_unsure_the_read_was(tesseract, region, monkeypatch):
+    monkeypatch.setattr(pdf_engine, "TABLE_CELL_MIN_CONFIDENCE", 90)
+    monkeypatch.setattr(pdf_engine, "TABLE_SHORT_TEXT_MAX_CHARS", 3)
+    page = _page()
+    _mark(page, DOT)
+    tesseract(_data(("5", 40, 40, 10, 20, 5)))
+
+    assert _read(_two_cells(), page) == [[pdf_engine.BULLET, ""]]
+    assert region == []
+
+
+def test_a_symbol_without_any_word_from_the_big_read_is_still_found(tesseract, region):
+    page = _page()
+    _mark(page, DASH)
+    tesseract(_data(("right", 120, 40, 40, 20, 95)))
+
+    assert _read(_two_cells(), page) == [[pdf_engine.EN_DASH, "right"]]
+    assert region == []  # decided from the image: no per-cell read for "ink but no word"
+
+
+def test_a_decimal_number_is_not_a_bullet(tesseract, region):
+    page = _page()
+    _mark(page, (40, 40, 43, 48), (45, 47, 46, 48), (48, 40, 51, 48))  # "5" "." "8"
+    tesseract(_data(("5.8", 38, 38, 16, 12, 95)))
+
+    assert _read(_two_cells(), page) == [["5.8", ""]]
+    assert region == []
+
+
+def test_a_digit_one_is_not_a_dash_or_a_bullet(tesseract, region):
+    page = _page()
+    _mark(page, (50, 40, 51, 48))  # a thin vertical stroke
+    tesseract(_data(("1", 46, 38, 8, 12, 95)))
+
+    assert _read(_two_cells(), page) == [["1", ""]]
+
+
+def test_two_marks_in_one_cell_are_not_a_bullet(tesseract, region):
+    page = _page()
+    _mark(page, (30, 48, 33, 51), (68, 48, 71, 51))
+    tesseract(_data(("..", 28, 40, 45, 15, 90)))
+
+    assert _read(_two_cells(), page)[0][0] == ".."
+
+
+def test_a_large_blob_is_not_a_bullet(tesseract, region):
+    page = _page()
+    _mark(page, (40, 40, 60, 60))
+    tesseract(_data(("right", 120, 40, 40, 20, 95)))
+
+    assert _read(_two_cells(), page) == [["CELL", "right"]]  # wordless with ink: the usual per-cell read
+
+
+def test_a_mark_low_in_the_corner_of_the_cell_is_not_a_symbol():
+    gray = Image.new("L", (100, 100), 255)
+    ImageDraw.Draw(gray).rectangle((10, 85, 13, 88), fill=0)  # outside the middle band
+    assert pdf_engine._symbol_in_cell(gray, (0, 0, 100, 100), 1.0) is None
+
+    ImageDraw.Draw(gray).rectangle((10, 85, 13, 88), fill=255)
+    ImageDraw.Draw(gray).rectangle((48, 48, 51, 51), fill=0)  # the same mark in the middle
+    assert pdf_engine._symbol_in_cell(gray, (0, 0, 100, 100), 1.0) == pdf_engine.BULLET
+
+
+def test_an_empty_cell_stays_empty(tesseract, region):
+    tesseract(_data(("right", 120, 40, 40, 20, 95)))
+
+    assert _read(_two_cells(), _page()) == [["", "right"]]
+    assert region == []
+
+
+def test_a_few_pixels_of_a_neighbours_ink_at_the_edge_do_not_hide_the_dot(tesseract, region):
+    page = _page()
+    _mark(page, DOT, (48, 4, 48, 4))  # one pixel of a neighbour's ink at the top edge of the inner area
+    tesseract(_data(("noise", 40, 40, 20, 20, 90)))
+
+    assert _read(_two_cells(), page) == [[pdf_engine.BULLET, ""]]
+
+
+def test_a_big_text_touching_the_edge_is_not_a_symbol(tesseract, region):
+    page = _page()
+    _mark(page, DOT, (8, 4, 90, 30))  # a wide block touching the top edge, plus the dot
+    tesseract(_data(("text", 40, 10, 40, 15, 90)))
+
+    assert _read(_two_cells(), page) == [["text", ""]]
+
+
+def test_symbol_sizes_hold_at_other_resolutions():
+    scale = 300 / 72.0
+    gray = Image.new("L", (200, 60), 255)
+    ImageDraw.Draw(gray).rectangle((96, 28, 102, 34), fill=0)  # 7 px = 1.7 pt
+    assert pdf_engine._symbol_in_cell(gray, (0, 0, 200, 60), scale) == pdf_engine.BULLET
+    assert pdf_engine._symbol_in_cell(gray, (0, 0, 200, 60), 1.0) is None  # 7 pt across: not a dot at 72 dpi
+
+    dash = Image.new("L", (200, 60), 255)
+    ImageDraw.Draw(dash).rectangle((95, 30, 103, 31), fill=0)  # 9 x 2 px = 2.2 x 0.5 pt
+    assert pdf_engine._symbol_in_cell(dash, (0, 0, 200, 60), scale) == pdf_engine.EN_DASH
+
+
+def test_symbol_cells_can_be_switched_off(tesseract, region, monkeypatch):
+    monkeypatch.setattr(pdf_engine, "TABLE_SYMBOL_CELLS", False)
+    page = _page()
+    _mark(page, DOT)
+    tesseract(_data((".", 40, 40, 10, 10, 90)))
+
+    assert _read(_two_cells(), page) == [[".", ""]]
+
+
+# ------------------------------------------------------------- short labels
+
+
+def test_the_short_label_rule_looks_at_what_the_read_returned(monkeypatch):
+    monkeypatch.setattr(pdf_engine, "TABLE_SHORT_TEXT_MAX_CHARS", 3)
+    monkeypatch.setattr(pdf_engine, "TABLE_SHORT_LATIN_MAX_CHARS", 6)
+    needs = pdf_engine._needs_short_reread
+
+    assert needs("a")  # Thai "สี" read as one Latin letter
+    assert needs("atin")  # "หน้า" read as Latin letters
+    assert needs("ans")
+    assert needs("มม.")  # three characters
+    assert needs("Light")  # a real Latin word this short is re-read too: cheap, and the re-read agrees
+    assert not needs("ลิตร")  # four Thai characters: not "short" and not Latin
+    assert not needs("Welcome")  # seven letters
+    assert not needs("42")  # digits are never a misread label
+    assert not needs("2.4")
+    assert not needs("a1")
+    assert not needs("")
+    assert not needs("   ")
+
+
+def test_the_short_label_rule_can_be_switched_off(monkeypatch):
+    monkeypatch.setattr(pdf_engine, "TABLE_SHORT_TEXT_MAX_CHARS", None)
+    monkeypatch.setattr(pdf_engine, "TABLE_SHORT_LATIN_MAX_CHARS", None)
+
+    assert not pdf_engine._needs_short_reread("a")
+    assert not pdf_engine._needs_short_reread("atin")
+
+
+def test_a_short_misread_label_is_re_read_on_its_own(tesseract, region, monkeypatch):
+    monkeypatch.setattr(pdf_engine, "TABLE_SHORT_TEXT_MAX_CHARS", 3)
+    monkeypatch.setattr(pdf_engine, "TABLE_SHORT_LATIN_MAX_CHARS", 6)
+    tesseract(_data(("atin", 10, 40, 40, 20, 96), ("2,393", 120, 40, 40, 20, 96)))  # sure, but wrong
+
+    grid = _read(_two_cells())
+
+    assert grid == [["CELL", "2,393"]]  # the number is left alone
+    assert region == [(100, 100)]
+
+
+def test_a_longer_label_is_not_re_read(tesseract, region, monkeypatch):
+    monkeypatch.setattr(pdf_engine, "TABLE_SHORT_TEXT_MAX_CHARS", 3)
+    monkeypatch.setattr(pdf_engine, "TABLE_SHORT_LATIN_MAX_CHARS", 6)
+    tesseract(_data(("ความยาวช่วงล้อ", 10, 40, 80, 20, 96)))
+
+    assert _read(_two_cells()) == [["ความยาวช่วงล้อ", ""]]
+    assert region == []
+
+
+def test_the_short_rule_and_symbols_are_counted_in_the_stats(tesseract, region, monkeypatch):
+    monkeypatch.setattr(pdf_engine, "TABLE_SHORT_TEXT_MAX_CHARS", 3)
+    page = _page()
+    _mark(page, (148, 48, 151, 51))
+    tesseract(_data(("a", 10, 40, 10, 20, 96)))
+    stats: dict = {}
+
+    pdf_engine._grid_from_table_ocr(_two_cells(), page, 1.0, "tha", stats)
+
+    assert stats["reread_short"] == 1
+    assert stats["symbols"] == 1

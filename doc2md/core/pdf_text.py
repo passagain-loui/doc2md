@@ -22,6 +22,7 @@ Thai words and inside numbers ("1 0,400.00").
 from __future__ import annotations
 
 import re
+from collections import Counter
 from dataclasses import dataclass
 
 SARA_AM = "ำ"
@@ -172,8 +173,46 @@ _CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 _THAI_SYMBOL_THAI = re.compile(r"[\u0e01-\u0e4e][!?\"#$%&()*+<=>@\[\]^_`{|}~0-9][\u0e01-\u0e4e]")
 _THAI_LETTER = re.compile(r"[\u0e01-\u0e3a\u0e40-\u0e4e]")
 
+# Latin-1 Supplement / Latin Extended-A/B *letters* (U+00C0-U+024F) with the two
+# non-letters in that block, multiplication and division signs, taken out.
+_LATIN_EXT = "\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u024f"
+# One or two such letters with a Thai character (letter or mark) touching both
+# sides: a legit "Café" or "Škoda" is never glued into the middle of a Thai word.
+_THAI_LATIN_THAI = re.compile(rf"[\u0e01-\u0e5b][{_LATIN_EXT}]{{1,2}}(?=[\u0e01-\u0e5b])")
+
+# A font with a wrong cmap can map Thai tone marks and upper/lower vowels to Latin
+# Extended code points. Smallest number of such sandwiched letters on a page that
+# counts as mis-encoded, and the most Thai letters allowed per hit (one in 500), so
+# that a long, clean page with a few oddities is not condemned.
+MOJIBAKE_MIN_HITS = 3
+MOJIBAKE_MAX_THAI_PER_HIT = 500
+
+
+def latin_ext_in_thai_count(text: str) -> int:
+    """How many times Latin Extended letters sit directly between Thai characters."""
+    return len(_THAI_LATIN_THAI.findall(text))
+
+
+def has_latin_mojibake(text: str) -> bool:
+    """Whether Latin Extended letters inside Thai words reach the page threshold."""
+    hits = latin_ext_in_thai_count(text)
+    if hits < MOJIBAKE_MIN_HITS:
+        return False
+    thai = len(_THAI_LETTER.findall(text))
+    return thai <= hits * MOJIBAKE_MAX_THAI_PER_HIT
+
 
 def thai_text_is_corrupt(text: str) -> bool:
+    """Whether a page's text layer is mis-encoded Thai (see the two checks below).
+
+    :func:`has_latin_mojibake` marks swapped for Latin letters - a consistent
+    substitution that :func:`learn_mojibake_map` can undo; :func:`has_lost_marks`
+    is the older, unrepairable kind (symbols, digits or control characters).
+    """
+    return has_latin_mojibake(text) or has_lost_marks(text)
+
+
+def has_lost_marks(text: str) -> bool:
     """Whether a page's text layer is mis-encoded Thai that no rule can repair.
 
     Some producers (a Ghostscript rewrite was seen) lose the character map: tone
@@ -189,6 +228,7 @@ def thai_text_is_corrupt(text: str) -> bool:
     is the more severe corruption, not a reason to skip the check. Only the
     symbol-sandwiched-in-Thai heuristic needs a real Thai-letter baseline to
     be statistically meaningful.
+
     """
     if len(_CONTROL.findall(text)) >= 3:
         return True
@@ -196,3 +236,224 @@ def thai_text_is_corrupt(text: str) -> bool:
     if thai < 50:
         return False
     return len(_THAI_SYMBOL_THAI.findall(text)) >= max(6, thai // 300)
+
+
+# --------------------------------------------------------------------------
+# Marks swapped for other characters, undone with a map learned from the document
+# --------------------------------------------------------------------------
+#
+# When the font's cmap sends marks to Latin Extended letters it does so
+# consistently ("ē" is always one tone mark in that document), but which letter
+# stands for which mark differs from font to font, so no fixed table is kept.
+# The map is learned instead: OCR reads the same page correctly, and wherever
+# the text layer and OCR agree on the surrounding letters, the marks OCR has
+# in the gap are what the stray character stood for. A few pages' worth of
+# agreement is enough to trust a character.
+#
+# Marks are not letters here: the "skeleton" of a text is its Thai consonants,
+# vowels and digits with every mark (and every swapped-in character) removed.
+# That is what the two readings are compared on.
+
+MOJIBAKE_MAP_MIN_VOTES = 2
+"""Aligned occurrences that must agree before a character is mapped."""
+MOJIBAKE_MAP_MIN_AGREEMENT = 0.75
+"""Share of a character's votes the winning mark(s) must hold."""
+_CONTEXT_BEFORE = 3  # skeleton letters up to and including the one carrying the gap
+_CONTEXT_AFTER = 3
+_MIN_CONTEXT = 4  # letters a window needs before it is searched for in the OCR text
+_LEARN_ROUNDS = 3  # a character learned in one round resolves gaps of two in the next
+
+_THAI_MARK_CHARS = frozenset(
+    chr(code) for code in (0x0E31, *range(0x0E34, 0x0E3B), 0x0E47, 0x0E48, 0x0E49, 0x0E4A, 0x0E4B, 0x0E4C, 0x0E4D, 0x0E4E)
+)
+# The Latin letters above plus the Private Use Area, where Thai fonts keep the
+# raised, lowered and shifted forms of tone marks and vowels (U+F700-U+F71A).
+_MOJIBAKE_CHARS = _LATIN_EXT + "-"
+_MOJIBAKE_RUN = re.compile(
+    rf"(?<=[ก-๛])[{_MOJIBAKE_CHARS}]+|[{_MOJIBAKE_CHARS}]+(?=[ก-๛])"
+)
+
+
+_MOJIBAKE_CHAR = re.compile(f"[{_MOJIBAKE_CHARS}]")
+
+
+def _is_mojibake_char(char: str) -> bool:
+    return _MOJIBAKE_CHAR.match(char) is not None
+
+
+def _is_skeleton_char(char: str) -> bool:
+    if "ก" <= char <= "๛":
+        return char not in _THAI_MARK_CHARS
+    return "0" <= char <= "9"
+
+
+@dataclass
+class _Clusters:
+    """A text read as base letters, each with the marks (and stray characters) after it."""
+
+    skeleton: str
+    gaps: list[str]
+    runs: list[int]  # which unbroken stretch (no space, newline, Latin letter...) each letter is in
+
+
+def _clusters(text: str) -> _Clusters:
+    skeleton: list[str] = []
+    gaps: list[str] = []
+    runs: list[int] = []
+    run = 0
+    broken = False
+    for char in text:
+        if _is_skeleton_char(char):
+            if broken:
+                run += 1
+                broken = False
+            skeleton.append(char)
+            gaps.append("")
+            runs.append(run)
+        elif char in _THAI_MARK_CHARS or _is_mojibake_char(char):
+            if skeleton and not broken:
+                gaps[-1] += char
+        else:
+            broken = True
+    return _Clusters("".join(skeleton), gaps, runs)
+
+
+def _window(layer: _Clusters, index: int) -> tuple[str, int] | None:
+    """The skeleton letters around *index*, and where *index* sits in them.
+
+    Taken from its own unbroken run of text when that is long enough; a word
+    ending in the stray character ("...รอ" then a space) has too little after
+    it, so the window then reaches over the break into the neighbouring words.
+    """
+    start = index
+    while start > 0 and layer.runs[start - 1] == layer.runs[index] and index - start < _CONTEXT_BEFORE - 1:
+        start -= 1
+    end = index
+    while end + 1 < len(layer.runs) and layer.runs[end + 1] == layer.runs[index] and end - index < _CONTEXT_AFTER:
+        end += 1
+    if end - start + 1 < _MIN_CONTEXT:
+        start = max(0, index - (_CONTEXT_BEFORE - 1))
+        end = min(len(layer.skeleton) - 1, index + _CONTEXT_AFTER)
+    if end - start + 1 < _MIN_CONTEXT:
+        return None
+    return layer.skeleton[start:end + 1], index - start
+
+
+_UPPER_VOWELS = frozenset("ัิีึื็ํ")
+_TONE_MARKS = frozenset("่้๊๋")
+_LOWER_VOWELS = frozenset("ฺุู")
+_THANTHAKHAT = "์"
+
+
+def _is_valid_cluster(marks: str) -> bool:
+    """Whether *marks* can sit on one Thai letter: at most one of each kind."""
+    return (
+        sum(char in _UPPER_VOWELS for char in marks) <= 1
+        and sum(char in _TONE_MARKS for char in marks) <= 1
+        and sum(char in _LOWER_VOWELS for char in marks) <= 1
+        and marks.count(_THANTHAKHAT) <= 1
+    )
+
+
+def _collect_votes(layer: _Clusters, ocr: _Clusters, known: dict[str, str]) -> dict[str, Counter]:
+    votes: dict[str, Counter] = {}
+    for index, gap in enumerate(layer.gaps):
+        if not gap or not any(_is_mojibake_char(char) for char in gap):
+            continue
+        expanded = "".join(known.get(char, char) if _is_mojibake_char(char) else char for char in gap)
+        strays = [at for at, char in enumerate(expanded) if _is_mojibake_char(char)]
+        # One stray may stand for one mark or two; two strays side by side can
+        # only be told apart when OCR has exactly one mark for each.
+        if not strays or len(strays) > 2 or strays[-1] - strays[0] + 1 != len(strays):
+            continue
+        first, last = strays[0], strays[-1]
+        before, after = expanded[:first], expanded[last + 1:]
+        window = _window(layer, index)
+        if window is None:
+            continue
+        pattern, offset = window
+        values: set[str] = set()
+        found = ocr.skeleton.find(pattern)
+        while found != -1:
+            theirs = ocr.gaps[found + offset]
+            middle = theirs[len(before):len(theirs) - len(after)]
+            if (
+                theirs.startswith(before)
+                and theirs.endswith(after)
+                and (len(middle) in (1, 2) if len(strays) == 1 else len(middle) == 2)
+                and not any(_is_mojibake_char(char) for char in theirs)
+                and _is_valid_cluster(theirs)
+            ):
+                values.add(middle)
+            found = ocr.skeleton.find(pattern, found + 1)
+        if len(values) == 1:
+            (value,) = values
+            if len(strays) == 1:
+                votes.setdefault(expanded[first], Counter())[value] += 1
+            else:
+                for at, mark in zip(strays, value):
+                    votes.setdefault(expanded[at], Counter())[mark] += 1
+    return votes
+
+
+def _accepted(votes: dict[str, Counter]) -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    for char, counter in votes.items():
+        value, count = counter.most_common(1)[0]
+        if count >= MOJIBAKE_MAP_MIN_VOTES and count / sum(counter.values()) >= MOJIBAKE_MAP_MIN_AGREEMENT:
+            mapping[char] = value
+    return mapping
+
+
+def mojibake_votes(text_layer: str, ocr_text: str) -> dict[str, Counter]:
+    """For each swapped-in character, how often OCR had each mark (or pair) in its place."""
+    layer, ocr = _clusters(text_layer), _clusters(ocr_text)
+    known: dict[str, str] = {}
+    votes: dict[str, Counter] = {}
+    for _ in range(_LEARN_ROUNDS):
+        votes = _collect_votes(layer, ocr, known)
+        learned = _accepted(votes)
+        if learned == known:
+            break
+        known = learned
+    return votes
+
+
+def learn_mojibake_map(text_layer: str, ocr_text: str) -> dict[str, str]:
+    """Which Thai mark(s) each swapped-in character stands for, learned from one document.
+
+    *text_layer* and *ocr_text* are two readings of the same pages (pass every
+    affected page of the document joined together: more pages, more votes).
+    A character is mapped only when at least ``MOJIBAKE_MAP_MIN_VOTES``
+    aligned occurrences agree on it and those make up at least
+    ``MOJIBAKE_MAP_MIN_AGREEMENT`` of all its votes. One character may stand for
+    two marks (a vowel mark plus a tone mark), so values are one or two marks.
+    """
+    return _accepted(mojibake_votes(text_layer, ocr_text))
+
+
+def repair_mojibake(
+    text: str, mapping: dict[str, str], *, drop_unmapped: bool = False
+) -> tuple[str, int]:
+    """*text* with swapped-in characters replaced by their marks, and how many had none.
+
+    Only characters touching Thai (directly after a Thai character or directly
+    before one) are considered, so a real "Café" or "Škoda" is never altered.
+    The count is of those characters that had no mapping; they stay in the
+    text, or are left out of it with ``drop_unmapped``.
+    """
+    left = 0
+
+    def swap(match: re.Match) -> str:
+        nonlocal left
+        out = []
+        for char in match.group():
+            if char in mapping:
+                out.append(mapping[char])
+            else:
+                left += 1
+                if not drop_unmapped:
+                    out.append(char)
+        return "".join(out)
+
+    return _MOJIBAKE_RUN.sub(swap, text), left

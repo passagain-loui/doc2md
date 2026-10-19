@@ -1,19 +1,66 @@
-# Handoff - doc2md v1.5.3
+# Handoff - doc2md v1.5.4
 
-Written 2026-10-04, updated 2026-10-17. Read this first, then README.md (what
+Written 2026-10-04, updated 2026-10-19. Read this first, then README.md (what
 the tool does) and CLAUDE.md (the release pipeline rules).
 
 ## 1. State right now
 
 | Item | Value |
 | --- | --- |
-| Version | 1.5.3 |
-| Last release commit | `f6788fd` (v1.5.3, CI green on 3.11-3.13) |
+| Version | 1.5.4 |
+| Last release commit | `(pending)` |
 | Branch | `main` |
 | Remote | `origin` = https://github.com/passagain-loui/doc2md.git - check `git status -sb` for unpushed commits; GitHub CI (Python 3.11-3.13) green since commit `8d9adde` |
-| Gate | `tools/verify.ps1` passed (EXIT_CODE 0) for 1.5.3 on 2026-10-17; 3 expected skips (symlink, RapidOCR not installed, PATH-only Tesseract check) |
-| Installer | built 2026-10-17 from the gated 1.5.3 tree: `dist/doc2md_Setup_v1.5.3.exe` (69 MB), `dist/doc2md.exe` (95 MB), `dist/doc2md/` - git-ignored, rebuild with `python build.py` on another machine |
+| Gate | `tools/verify.ps1` passed (EXIT_CODE 0) for 1.5.4 on 2026-10-19; 2 expected skips (symlink, RapidOCR not installed) - the real-Tesseract test now runs |
+| Installer | built 2026-10-19 from the gated 1.5.4 tree: `dist/doc2md_Setup_v1.5.4.exe` (69 MB), `dist/doc2md.exe` (95 MB), `dist/doc2md/` - git-ignored, rebuild with `python build.py` on another machine |
 | Tesseract | **installed and working on this machine** (checked 2026-10-17): v5.4.0 at `C:/Program Files/Tesseract-OCR/tesseract.exe`, languages `eng` + `tha`. It is not on PATH, but `find_tesseract()` locates it in the standard install folder, so the app uses it. A real Thai test image and scanned PDF converted correctly apart from a lost tone mark (นี้ read as นี). The gate's one 'Tesseract not installed' skip (`tests/test_thai_documents.py`) checks `shutil.which("tesseract")`, i.e. PATH only, so it skips here; add the folder to PATH if you want that real-OCR test to run |
+
+### What changed in 1.5.4
+
+Mis-encoded Thai marks, table symbols and two OCR fixes (`doc2md/core/pdf_text.py`,
+`doc2md/engine/pdf_engine.py`, `doc2md/core/ocr_text.py`, `doc2md/core/review.py`):
+
+- Thai marks mis-encoded in a text layer are repaired, not re-read. Detection
+  (`has_latin_mojibake`, `has_lost_marks` in `doc2md/core/pdf_text.py`) looks for
+  Latin-1 and Latin Extended letters U+00C0-U+024F (except × and ÷) attached to
+  Thai letters, and PUA U+F700-F8FF. A page is flagged at 3 or more hits and at
+  least 1 per 500 Thai letters (`MOJIBAKE_MIN_HITS`). The page is OCR'd once as a
+  reference; `learn_mojibake_map` votes a mapping (`MOJIBAKE_MAP_MIN_VOTES = 2`,
+  `MOJIBAKE_MAP_MIN_AGREEMENT = 0.75`); `repair_mojibake` writes the marks back
+  into the PDF's own text layer, tables included.
+- Marks that cannot be learned are left out and their lines flagged, while they
+  are at most `MOJIBAKE_MAX_UNMAPPED_SHARE = 0.2` of the swapped characters.
+  Above that, the page falls back to full OCR. A repaired page carries the note
+  "> Thai marks on this page were mis-encoded in the PDF and were repaired; N
+  character(s) could not be recovered (highlighted lines)."
+- `REPAIR_LOSS_CONFIDENCE = 0` (`doc2md/core/review.py`): repair-loss lines are
+  highlighted like uncertain OCR lines, with the tooltip "Thai marks were lost in
+  the PDF here - check this line against the original". With the flag option on,
+  they get a bare " ⚠" instead of " ⚠NN%".
+- Table symbol cells (`pdf_engine.py`): `_symbol_in_cell` and `TABLE_SYMBOL_CELLS`
+  decide a cell whose whole ink is one small dot or one short dash as "•" or "–".
+  Sizes are in PDF points, and such cells are never re-read.
+- Short table labels (`pdf_engine.py`): `_needs_short_reread`, with
+  `TABLE_SHORT_TEXT_MAX_CHARS = 3` and `TABLE_SHORT_LATIN_MAX_CHARS = 6` (no
+  digits). The cell is re-read alone.
+- Upper-mark rejoin (`ocr_text.py`): when the disagreement is only a look-alike
+  pair (ซ/ช, ข/ฃ, ด/ต, บ/ป, พ/ฟ, ถ/ภ), the base letter is kept and the marks are
+  still merged. Exact letter matches are aligned first.
+- Latin words read as Thai: `_reread_latin_runs` (`ocr_text.py`) re-reads a short
+  low-confidence Thai run next to a Latin word of 3 or more letters with English
+  only (`--psm 8`). The re-read is accepted only as one uppercase word of 2-5
+  letters at confidence 85 or more, at most 20 per band.
+- Maintenance: `_pixel_values` in `ocr_text.py` replaces `Image.getdata()` with
+  `get_flattened_data()` and a fallback. The `real_tesseract` fixture in
+  `tests/conftest.py` finds Tesseract as the app does, and the real-Tesseract test
+  in `tests/test_thai_documents.py` uses it.
+- Tests: new `tests/test_pdf_mojibake.py`, `tests/test_pdf_mojibake_repair.py` (33)
+  and `tests/test_ocr_latin_reread.py` (26); extended `tests/test_table_ocr.py`
+  (64), `tests/test_ocr_thai_marks.py` (65), `tests/test_review.py` and
+  `tests/test_gui_review_flags.py`.
+- Regression: all 8 approved samples re-run with `tools/regress.py`; none
+  REGRESSED. QP 7 is "fixed" (all 24 expected phrases now, 22 before). EU2043
+  changed by one word on a low-resolution page. Fortuner changed as intended.
 
 ### What changed in 1.5.3
 
@@ -278,50 +325,54 @@ an entry headed `[x.y.z]` to **both** `CHANGELOG.md` and `HISTORY.md` (the gate'
   several columns are now read whole.
 - **Frame tables (1.5.3):** affected pages are Fortuner 1, 5 and 6 and mu-X
   brochure page 8. Their prose was hidden inside one giant cell; it is now kept.
+- **Table symbol cells (1.5.4), Fortuner page 1's second table:** 178 bullet and
+  dash cells now read correctly.
+- **Short table labels (1.5.4):** accuracy on the hand-transcribed Fortuner table
+  0.934 -> 0.941. "สี" and "สีภายใน" still read as "a".
+- **Mis-encoded marks (1.5.4), Fortuner pages 3-6:** now correct Thai. Characters
+  not recovered, highlighted: 4, 4, 2 and 4 (pages 3 to 6 in order). Page 3 is a
+  photo layout where full OCR was mostly noise. Fortuner takes about 86 s, against
+  39 s in 1.5.3, because of the reference OCR.
+- **Regression (1.5.4):** 8 approved samples, none REGRESSED. QP 7 finds 24 of 24
+  expected phrases (was 22). EU2043 changed by one word on a low-resolution page.
+  Fortuner changed as intended.
 
 ## 8. Known limits and open ideas
 
 Not solved:
 
 - Stylised display text and headers on dark gradient buttons in posters.
-- Chinese text (no language data installed).
+- Chinese text is not read (no language data; the user decided not to add it).
 - Check-mark matrices (tick/cross tables) come out as noise.
 - Residual ข/ย errors on poor scans.
 - Legacy `.doc`: no bold/italic, headers, footnotes. Legacy `.ppt`: no notes,
   table layout, pictures.
-- Upper marks on a letter Tesseract misread: the re-read is used only where the
-  letters agree, so "รายซ้ำ" comes out as "รายซำ" (the re-read saw ช, so no marks
-  could be merged).
-- Latin read as Thai: "QM" comes out as Thai "อห". A Latin-vs-Thai disagreement
-  keeps the first read.
 - Logo noise rows with no line under them remain.
 - Low-resolution embedded images: the brochure's terms pages embed their images
   at 96 dpi, so small Thai text OCRs poorly (e.g. "รายสะเอียด" for
   "รายละเอียด"). Rendering at a higher DPI cannot recover detail the file does
   not contain.
-- In the single table read (1.5.3), short Thai labels and bullet rows are still
-  sometimes misread.
-- Fortuner page 5's text layer contains mojibake (Ē, ĕ) that the corrupt-Thai
-  detector does not flag, so it is kept as is. This predates 1.5.3.
+- In the table read, short Thai labels are still sometimes misread: "สี" and
+  "สีภายใน" come out as "a". Bullet and dash cells are read as symbols (1.5.4).
+- A repaired page can lose up to 20% of its swapped Thai marks (1.5.4). Those
+  lines are highlighted for review.
 - The mu-X page 8 text layer has labels clipped by the PDF itself.
 
 Small maintenance items seen in the last gate run (2026-10-16, v1.4.11):
 
-- `Image.getdata()` (used in `doc2md/core/ocr_text.py`, two places) is still
-  deprecated in Pillow 14 (due 2027-10-15, confirmed still raising the
-  `DeprecationWarning` in the pytest output); move to `get_flattened_data()`
-  before then. Not urgent.
 - `pytest-timeout` is installed (per `requirements-dev.txt`) - no more
   "Unknown pytest.mark.timeout" warnings.
-- Expected skips on this machine: just the one Thai test that needs a real
-  Tesseract binary (tessdata is present but `tesseract.exe` itself is not on
-  PATH here - see section 1). The symlink and RapidOCR tests ran rather than
-  skipped this time, so whatever made them skip before no longer applies.
+- Expected skips: the real-Tesseract test in `tests/test_thai_documents.py` now
+  runs when Tesseract is installed in its standard folder, not only when it is on
+  PATH (via the `real_tesseract` fixture in `tests/conftest.py`).
 
 Ideas not started:
 
 - A vision-model route for posters and other design-heavy images.
-- Chinese (and other) language data, with the user's permission to download.
+
+Decided against by the user (2026-10-17) - do not propose again:
+
+- Chinese (and other extra) OCR language data.
 - Code-signing the installer.
 - Per-cell vertical alignment for merged cells in tables.
 
@@ -362,6 +413,12 @@ The suite cannot cover these; nobody has done them on the built exe yet:
     OCR, frame tables; checked by eye, no REGRESSED file). The user approved
     both, and they were re-approved from that run on 2026-10-17, so all 8
     references now hold 1.5.3 output.
+12. **(waiting for the user) 1.5.4 regression approvals.** Run
+    `.runs\20261019-065516` (1.5.4 code): QP 7 fixed (24/24 phrases), Fortuner
+    changed on purpose (repaired Thai marks on pages 3-6, bullet cells),
+    EU2043 one word better, the rest identical, no REGRESSED file. Approve with
+    `python tools/regress.py approve "QP 7.pdf" "Fortuner_Leader_Catalog_2025.pdf" "ยุโรป-EU2043_Oct 26 - Feb 27.pdf"`
+    once the user says so.
 
 Report findings as: file type, what the output should have said, what it said.
 Fixes so far came from exactly that kind of sample.

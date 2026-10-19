@@ -12,7 +12,6 @@ sanitizer are all exercised on the way.
 from __future__ import annotations
 
 import re
-import shutil
 
 import pytest
 
@@ -314,9 +313,9 @@ def test_missing_thai_model_falls_back_to_english(thai_image, monkeypatch):
     assert "not installed" in out
 
 
-@pytest.mark.skipif(shutil.which("tesseract") is None, reason="Tesseract not installed")
-def test_real_tesseract_reads_the_thai_image(thai_image):
-    """Only runs where Tesseract is actually present (CI, packaging machine)."""
+def test_real_tesseract_reads_the_thai_image(thai_image, real_tesseract):
+    """Only runs where the app itself would find Tesseract (on PATH or in its usual
+    install folder), e.g. a developer or packaging machine; skipped on CI."""
     markdown = convert(thai_image, ocr_lang="tha+eng")
 
     assert "## Extracted text" in markdown

@@ -281,9 +281,51 @@ def test_merge_keeps_base_word_the_reread_turned_into_symbols():
 
 
 def test_merge_keeps_base_consonant_when_the_reread_swapped_it():
-    base = f"รายซ{NIKHAHIT}า"
-    assert ocr_text._merge_marks(base, f"รายช{MAI_THO}า") == base
-    assert ocr_text._merge_marks(f"เรอง {base}", f"เรื่อง รายช{MAI_THO}า") == f"เรื่อง {base}"
+    # ก/ถ do not look alike: the re-read's letter is not trusted and its marks are not taken
+    base = f"รายก{NIKHAHIT}า"
+    assert ocr_text._merge_marks(base, f"รายถ{MAI_THO}า") == base
+    assert ocr_text._merge_marks(f"เรอง {base}", f"เรื่อง รายถ{MAI_THO}า") == f"เรื่อง {base}"
+
+
+def test_merge_takes_the_marks_over_a_lookalike_letter_but_keeps_the_base_letter():
+    # QP 7: the base read ซ + ring + า (ซำ); the re-read saw ช + tone + า. ซ/ช differ by
+    # a small stroke, so the marks are merged onto the base's ซ: ซ้ำ, not ซำ or ช้า
+    merged = ocr_text._merge_marks(f"รายซ{NIKHAHIT}า", f"รายช{MAI_THO}า")
+
+    assert merged == f"รายซ{MAI_THO}{NIKHAHIT}า"
+    assert ocr_text.normalize_thai(merged) == f"รายซ{MAI_THO}{SARA_AM}"
+    assert "ช" not in merged
+
+
+def test_merge_lookalike_letters_align_inside_a_longer_line():
+    merged = ocr_text._merge_marks(
+        f"เรอง การคัดเลือก รายซ{NIKHAHIT}า", f"เรื่อง การคัดเลือก รายช{MAI_THO}า"
+    )
+
+    assert ocr_text.normalize_thai(merged) == f"เรื่อง การคัดเลือก รายซ{MAI_THO}{SARA_AM}"
+
+
+@pytest.mark.parametrize("first,second", ["ซช", "ขฃ", "ดต", "บป", "พฟ", "ถภ"])
+def test_merge_lookalike_pairs_work_in_both_directions(first, second):
+    for base_letter, reread_letter in ((first, second), (second, first)):
+        merged = ocr_text._merge_marks(f"ก{base_letter}", f"ก{reread_letter}{MAI_EK}")
+        assert merged == f"ก{base_letter}{MAI_EK}"
+
+
+def test_merge_prefers_the_exact_letter_over_its_lookalike_twin_beside_it():
+    # base "เตดนทาง" has a stray ต before the ด; the re-read's ดิ belongs to the ด, not the ต
+    assert ocr_text._merge_marks("เตดนทาง", "เดินทาง") == "เตดินทาง"
+
+
+def test_merge_does_not_align_unrelated_letters_just_because_a_mark_follows():
+    assert ocr_text._merge_marks("กาน", f"กาม{MAI_EK}") == "กาน"
+
+
+def test_merged_marks_still_requires_a_skeleton_close_enough_with_lookalikes():
+    # the look-alike swap alone passes the 0.8 skeleton guard ...
+    assert ocr_text._merged_marks(f"เรื่องการ รายช{MAI_THO}า", f"เรองการ รายซ{NIKHAHIT}า") is not None
+    # ... a re-read of something else does not
+    assert ocr_text._merged_marks(f"เรื่องการ ปรับแก{MAI_EK}ไข", f"เรองการ รายซ{NIKHAHIT}า") is None
 
 
 def test_merge_equal_run_takes_the_rereads_spacing_and_replaced_run_keeps_the_bases():

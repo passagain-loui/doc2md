@@ -1,5 +1,50 @@
 # History
 
+## [1.5.4] - 2026-10-19 - The marks were in the file all along
+
+Fortuner's catalogue had a text layer that was half right. On pages 3 to 6 the
+letters were correct, but the Thai tone and vowel marks had been stored as other
+characters: Latin letters with accents (Ē, for one) and glyphs from the Private
+Use Area. The text read "อยĒาง" where the page shows "อย่าง". Nothing in the
+output said so, and the corrupt-Thai detector did not catch them.
+
+The obvious fix is the one 1.3.4 used for a broken text layer: discard the layer
+and read the page as an image. That works on a clean scan, but it was the wrong
+tool here. On page 3, a photo layout, full OCR produced mostly noise. On the
+other pages OCR did read the text, but it came back with new spacing, new
+mistakes and no table grid. The PDF's own text was not wrong in its letters, its
+spacing or its tables. Only the marks were wrong, and they were wrong in a small,
+consistent way: within one document, the same wrong character stood for the same
+mark. That is a substitution problem, not a recognition problem, and it is
+solved better as one.
+
+So the page is read once by OCR as a reference, and the mapping is learned from
+the document itself. For each swapped character, doc2md counts which mark the
+reference read put in the same place, and a mapping is used only with at least
+two votes and 75% agreement. The marks are then written back into the PDF's own
+text layer, tables included. Where the evidence is thin, the mark is left out
+rather than guessed, and its line is highlighted for review. A page that loses
+more than a fifth of its swapped characters is not repaired at all and goes to
+full OCR. This follows the rule from 1.3.3: a repair that rewrites text has to
+be as narrow as the evidence. On pages 3 to 6, 4, 4, 2 and 4 characters could
+not be recovered, and those lines are now highlighted rather than silently wrong.
+
+The cost is time. The reference OCR makes Fortuner about 86 s, against 39 s in
+1.5.3, which is the price of getting text that was wrong right.
+
+The same run turned up smaller problems, each measured on its own. A cell holding
+only a bullet or a dash was read as noise, and is now decided from the image,
+which holds at any resolution. Short table labels that the one-pass read garbled
+are read again alone, which took the hand-transcribed Fortuner table from 0.934
+to 0.941. Two OCR misses on a scanned procedure were fixed: a look-alike letter
+in the upper-mark merge, and a Latin word read as Thai. QP 7 now finds all 24 of
+its expected phrases, up from 22. All eight approved samples were re-run, and
+none regressed.
+
+Two things remain open. A short Thai label such as "สี" still comes out as "a".
+And a repaired page can lose up to a fifth of its swapped marks; the app shows
+those lines as highlighted rather than hiding them.
+
 ## [1.5.3] - 2026-10-17 - Tables read whole, and the frame that hid the page
 
 Tables on OCR'd pages were the slowest part of a scanned catalogue, and the

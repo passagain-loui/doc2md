@@ -211,12 +211,12 @@ def test_ocr_backend_status_reflects_real_environment():
     """Bug B2: the GUI must know, before any conversion, whether an OCR
     backend is actually usable - not discover it only after a scan comes
     back empty."""
-    import shutil
-
+    from doc2md.core.ocr_setup import find_tesseract
     from doc2md.gui.main_window import MainWindow as _MW
 
     available, message = _MW._ocr_backend_status()
-    real_tesseract = shutil.which("tesseract") is not None
+    # The app's own discovery (PATH, then the usual install folders), not a bare PATH lookup.
+    real_tesseract = find_tesseract() is not None
     try:
         import rapidocr_onnxruntime  # noqa: F401
 

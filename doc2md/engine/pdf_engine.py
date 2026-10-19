@@ -22,9 +22,11 @@ from __future__ import annotations
 
 import shutil
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from doc2md.core import review
 from doc2md.core.errors import ConversionError, EngineUnavailableError, wrap_warning
 from doc2md.core.quality import EngineOutput, QualityMetrics
 from doc2md.core.ocr_setup import find_tesseract, prepare_tesseract
@@ -38,7 +40,11 @@ from doc2md.core.ocr_text import (
 )
 from doc2md.core.pdf_text import (
     find_sara_bug_fonts,
+    has_latin_mojibake,
+    has_lost_marks,
+    learn_mojibake_map,
     page_lines,
+    repair_mojibake,
     text_in,
     thai_text_is_corrupt,
 )
@@ -67,6 +73,57 @@ MAX_LISTED_PAGE_RANGES = 10
 IMAGE_PAGE_OCR_NOTE = "> This page has no text layer (it is an image); it was read by OCR."
 IMAGE_PAGE_EMPTY_NOTE = "> This page is an image; OCR found no text on it."
 IMAGE_PAGE_OCR_FAILED_NOTE = "> This page is an image; OCR failed on it."
+MOJIBAKE_REPAIRED_NOTE = "> Thai marks on this page were mis-encoded in the PDF and were repaired."
+_OCR_REPLACED_NOTE = (
+    "> The text layer of this page is mis-encoded Thai; it was read by OCR instead.\n\n"
+)
+
+
+def _repaired_note(left_out: int = 0) -> str:
+    """The note on a page whose own text layer was kept with its marks put back."""
+    if not left_out:
+        return MOJIBAKE_REPAIRED_NOTE
+    return (
+        f"{MOJIBAKE_REPAIRED_NOTE[:-1]}; {left_out} character(s) could not be "
+        "recovered (highlighted lines)."
+    )
+
+
+# A page whose marks were swapped for other characters (not lost) is repaired in
+# place when the document's own map explains enough of them, and is otherwise read
+# by OCR. This is the share of such characters allowed to stay unexplained for the
+# repaired text to be kept: they are left out of it, the line each came from is
+# flagged for review (``review.REPAIR_LOSS_CONFIDENCE``) and the page note counts
+# them. 0 would demand that all of them be explained.
+MOJIBAKE_MAX_UNMAPPED_SHARE = 0.2
+
+
+def _read_in_full(read_page: Callable[[int], str] | None, index: int) -> str:
+    """The full OCR read of page *index*, or "" when there is none to be had."""
+    if read_page is None:
+        return ""
+    try:
+        return read_page(index).strip()
+    except Exception:
+        return ""
+
+
+def _repair_flagged(text: str, mapping: dict[str, str]) -> tuple[str, int]:
+    """*text* with swapped marks put back, line by line, and how many it had to leave out.
+
+    A line that lost characters is flagged for review. The flag is added after
+    the Thai normalisation, so it stays attached to the end of its line.
+    """
+    lines = []
+    lost_total = 0
+    for line in text.split("\n"):
+        fixed, lost = repair_mojibake(line, mapping, drop_unmapped=True)
+        fixed = normalize_thai(fixed)
+        if lost:
+            fixed = review.encode(fixed, review.REPAIR_LOSS_CONFIDENCE)
+            lost_total += lost
+        lines.append(fixed)
+    return "\n".join(lines), lost_total
 
 
 @dataclass
@@ -81,6 +138,14 @@ class _OcrOutcome:
     unread_images: set[int] = field(default_factory=set)
     """Image pages OCR gave no text for: whatever text layer they have (a
     footer) is not content."""
+    repaired: dict[int, int] = field(default_factory=dict)
+    """Pages whose own text layer is kept with the swapped marks put back, each
+    with how many swapped characters could not be and were left out."""
+    mojibake_map: dict[str, str] = field(default_factory=dict)
+    """What each swapped character was learned to stand for (see ``repaired``)."""
+    read_page: Callable[[int], str] | None = None
+    """Reads one page by OCR in full (tables cell by cell): for a repaired page
+    whose tables turn out not to be repairable after all."""
 
 
 def _page_ranges(indexes, limit: int = MAX_LISTED_PAGE_RANGES) -> str:
@@ -249,11 +314,44 @@ def _grid_from_cell_ocr(table, page_image, scale: float, language: str) -> list[
 # is low as pdfplumber splits a merged value cell into column boxes.
 TABLE_OCR_CONFIG = "--psm 6"
 TABLE_CELL_MIN_CONFIDENCE: float | None = 50.0  # a cell below this mean word confidence is re-read alone
+# Measured on the same table (v1.5.3 -> v1.5.4, accuracy without / with bullets and
+# dashes kept): 0.934 / 0.931 -> 0.941 / 0.940, cells re-read alone 9 -> 22; on the
+# second table 178 bullet/dash cells now read as "•" / "–" instead of noise. Full
+# Fortuner page time +4-7% over v1.5.3 in back-to-back runs. Short-label rules: the
+# Latin one alone gave 0.939 / 0.938 (12 re-reads), both together are the best.
+TABLE_SYMBOL_CELLS = True  # decide bullet / dash cells from the image
+TABLE_SHORT_TEXT_MAX_CHARS: int | None = 3  # a cell read as this few characters is re-read alone
+TABLE_SHORT_LATIN_MAX_CHARS: int | None = 6  # ... or this few, when they are only ASCII letters (Thai misread as Latin)
 TABLE_BORDER_PX = 3  # width painted white along every cell edge before reading
 TABLE_CELL_INSET_PX = 4  # a cell's inner area for the ink test excludes this margin
 TABLE_CELL_INK_SHARE = 0.01  # dark share of a wordless cell above which it is re-read alone
 TABLE_DARK_CELL_LEVEL = 170  # mean gray (of 255) below which a cell is light-on-dark (a grey bar is ~110-140, a light row ~215)
 _INK_LEVEL = 128
+
+# A bullet or dash cell holds one small mark and nothing else. Tesseract reads
+# such a cell as noise, so it is decided from the image: if ALL the ink in the
+# cell's inner area is a single compact blob it is a bullet, if it is a single
+# short thin stroke it is a dash. Sizes are in PDF points (pixels / scale) so
+# they hold at any render DPI. Anything bigger, thinner, wider than one mark or
+# in two pieces ("5.8", "1", "-" inside a number, a Thai word) is not a symbol.
+TABLE_SYMBOL_MIN_AREA_PT2 = 0.5  # less ink than this is a speck, not a mark
+TABLE_DOT_MIN_PT = 0.7  # a dot is between this and the next many points across ...
+TABLE_DOT_MAX_PT = 5.0
+TABLE_DOT_MAX_ASPECT = 1.6  # ... roughly as wide as tall ...
+TABLE_DOT_MIN_FILL = 0.55  # ... and solid (a disc fills 0.79 of its box)
+TABLE_DASH_MIN_PT = 1.2  # a dash is this long up to the next, ...
+TABLE_DASH_MAX_PT = 9.0
+TABLE_DASH_MAX_THICKNESS_PT = 1.6  # ... thin,
+TABLE_DASH_MIN_ASPECT = 2.5  # ... and at least this much wider than thick
+TABLE_DASH_MIN_FILL = 0.6
+TABLE_SYMBOL_MAX_CELL_SHARE = 0.5  # a mark is at most this share of the cell's height
+TABLE_SYMBOL_CENTRE_BAND = (0.1, 0.9)  # and sits in this middle part of the cell, both ways
+# Ink touching the edge of the inner area belongs to something outside the cell (a
+# neighbour's glyph, a ruling-line remnant) and is ignored, as long as it is only
+# a few pixels; a big text touching the edge is not a symbol cell at all.
+TABLE_SYMBOL_MAX_EDGE_INK_PT2 = 1.5
+BULLET = "•"
+EN_DASH = "–"
 
 
 def _whiten_cell_borders(image, boxes) -> None:
@@ -305,6 +403,75 @@ def _cell_has_ink(gray, box) -> bool:
     return total > 0 and sum(histogram[:_INK_LEVEL]) / total > TABLE_CELL_INK_SHARE
 
 
+def _clear_edge_ink(ink) -> int:
+    """Erase, in place, every ink blob of the binary image *ink* that touches its
+    edge, and return how many ink pixels that removed."""
+    from PIL import ImageDraw
+
+    width, height = ink.size
+    before = ink.histogram()[255]
+    if before == 0:
+        return 0
+    pixels = ink.load()
+    seeds = (
+        [(x, 0) for x in range(width)] + [(x, height - 1) for x in range(width)]
+        + [(0, y) for y in range(height)] + [(width - 1, y) for y in range(height)]
+    )
+    for seed in seeds:
+        if pixels[seed] == 255:
+            ImageDraw.floodfill(ink, seed, 0)
+    return before - ink.histogram()[255]
+
+
+def _symbol_in_cell(gray, box, scale: float) -> str | None:
+    """``"•"`` or ``"–"`` when the whole ink of the cell is one bullet or one dash.
+
+    Looks at the dark pixels of *box*'s inner area in the grayscale *gray*: their
+    bounding box and how solidly they fill it. Two marks, a digit, a decimal
+    point beside digits or any text have a bigger or emptier box and give
+    ``None``, as does an empty cell."""
+    x0, y0, x1, y1 = box
+    inner = (
+        x0 + TABLE_CELL_INSET_PX, y0 + TABLE_CELL_INSET_PX,
+        x1 - TABLE_CELL_INSET_PX, y1 - TABLE_CELL_INSET_PX,
+    )
+    if inner[2] <= inner[0] or inner[3] <= inner[1]:
+        return None
+    region = gray.crop(inner)
+    ink = region.point(lambda value: 255 if value < _INK_LEVEL else 0)
+    if _clear_edge_ink(ink) / (scale * scale) > TABLE_SYMBOL_MAX_EDGE_INK_PT2:
+        return None
+    found = ink.getbbox()
+    if found is None:
+        return None
+    width, height = (found[2] - found[0]) / scale, (found[3] - found[1]) / scale  # points
+    area = ink.histogram()[255]
+    if area / (scale * scale) < TABLE_SYMBOL_MIN_AREA_PT2 or width <= 0 or height <= 0:
+        return None
+    region_w, region_h = region.size
+    if (found[3] - found[1]) > TABLE_SYMBOL_MAX_CELL_SHARE * region_h:
+        return None
+    low, high = TABLE_SYMBOL_CENTRE_BAND
+    centre_x = (found[0] + found[2]) / 2 / region_w
+    centre_y = (found[1] + found[3]) / 2 / region_h
+    if not (low <= centre_x <= high and low <= centre_y <= high):
+        return None
+    fill = area / ((found[2] - found[0]) * (found[3] - found[1]))
+    longer, shorter = max(width, height), min(width, height)
+    if (
+        TABLE_DOT_MIN_PT <= shorter and longer <= TABLE_DOT_MAX_PT
+        and longer / shorter <= TABLE_DOT_MAX_ASPECT and fill >= TABLE_DOT_MIN_FILL
+    ):
+        return BULLET
+    if (
+        TABLE_DASH_MIN_PT <= width <= TABLE_DASH_MAX_PT
+        and height <= TABLE_DASH_MAX_THICKNESS_PT
+        and width / height >= TABLE_DASH_MIN_ASPECT and fill >= TABLE_DASH_MIN_FILL
+    ):
+        return EN_DASH
+    return None
+
+
 def _is_symbol_only(words) -> bool:
     """Whether a cell's words hold no letter and no digit: a bullet, a dash, a dot.
 
@@ -322,6 +489,24 @@ def _cell_is_doubtful(words) -> bool:
         return False
     confidences = [word[6] for word in words if word[6] >= 0]
     return bool(confidences) and sum(confidences) / len(confidences) < TABLE_CELL_MIN_CONFIDENCE
+
+
+def _needs_short_reread(text: str) -> bool:
+    """Whether the single read of a cell returned so little that it is worth a
+    second look on its own: see ``TABLE_SHORT_TEXT_MAX_CHARS`` and
+    ``TABLE_SHORT_LATIN_MAX_CHARS``. Decided from what the read returned, not
+    from where the cell is."""
+    compact = "".join(text.split())
+    if not compact or any(char.isdigit() for char in compact):
+        return False
+    if TABLE_SHORT_TEXT_MAX_CHARS is not None and len(compact) <= TABLE_SHORT_TEXT_MAX_CHARS:
+        return True
+    return (
+        TABLE_SHORT_LATIN_MAX_CHARS is not None
+        and len(compact) <= TABLE_SHORT_LATIN_MAX_CHARS
+        and compact.isascii()
+        and compact.isalpha()
+    )
 
 
 def _cell_text(words) -> str:
@@ -360,7 +545,7 @@ def _grid_from_table_ocr(
     import time
 
     if stats is not None:
-        stats.update(big_read_s=0.0, reread_ink=0, reread_low_confidence=0, cells=0)
+        stats.update(big_read_s=0.0, reread_ink=0, reread_low_confidence=0, reread_short=0, symbols=0, cells=0)
     try:
         import pytesseract
 
@@ -425,11 +610,23 @@ def _grid_from_table_ocr(
         for r, row in enumerate(layout):
             cells_text = []
             for c, box in enumerate(row):
+                symbol = _symbol_in_cell(gray, box, scale) if box is not None and TABLE_SYMBOL_CELLS else None
                 if box is None:
                     cells_text.append("")
+                elif symbol:
+                    # Decided from the image; never re-read, whatever the big read made of it.
+                    cells_text.append(symbol)
+                    if stats is not None:
+                        stats["symbols"] += 1
                 elif (r, c) in words_by_cell:
                     text = _cell_text(words_by_cell[(r, c)])
-                    if _cell_is_doubtful(words_by_cell[(r, c)]):
+                    if _needs_short_reread(text):
+                        page_box = _scaled_box(table.rows[r].cells[c], scale, width, height)
+                        alone = recognize_region(page_image.crop(page_box), language) if page_box else ""
+                        text = alone or text
+                        if stats is not None:
+                            stats["reread_short"] += 1
+                    elif _cell_is_doubtful(words_by_cell[(r, c)]):
                         page_box = _scaled_box(table.rows[r].cells[c], scale, width, height)
                         alone = recognize_region(page_image.crop(page_box), language) if page_box else ""
                         text = alone or text
@@ -577,6 +774,11 @@ class PdfEngine(BaseEngine):
                 tables_by_page, outside_text_by_page = self._extract_tables(
                     source, options, doc, buggy
                 )
+                if outcome.repaired:
+                    stuck = self._repair_swapped_tables(
+                        outcome, pages, tables_by_page, outside_text_by_page
+                    )
+                    warning = " ".join(part for part in (warning, stuck) if part) or None
                 for index in outcome.replaced:
                     tables_by_page.pop(index + 1, None)
                 for index in outcome.replaced | outcome.touched:
@@ -708,6 +910,16 @@ class PdfEngine(BaseEngine):
         image_empty: set[int] = set()
         image_failed: list[int] = []
         touched: set[int] = set()
+        # Pages whose marks were swapped for other characters, and nothing worse:
+        # OCR is only the reference for repairing their own text layer (below).
+        swapped = {
+            index for index in corrupt
+            if has_latin_mojibake(pages[index]) and not has_lost_marks(pages[index])
+        }
+        swapped_ocr: dict[int, str] = {}
+
+        def read_page(index: int) -> str:
+            return self._ocr_one_page(source, doc, index, options)
 
         plumber_doc = None
         plumber_pages = None
@@ -731,23 +943,29 @@ class PdfEngine(BaseEngine):
                         pix = doc[index].get_pixmap(dpi=dpi)
                         pix.save(str(png_path))
                         del pix
-                        text = self._ocr_page_with_tables(
-                            png_path, plumber_pages, index, scale, language
-                        )
+                        if index in swapped:
+                            # Only a reference for repairing the page's own text:
+                            # one plain read, not the table-by-table one.
+                            text = recognize(png_path, language).strip()
+                        else:
+                            text = self._ocr_page_with_tables(
+                                png_path, plumber_pages, index, scale, language
+                            )
                     except Exception:
-                        if is_corrupt:
+                        if index in swapped:
+                            swapped_ocr[index] = ""
+                        elif is_corrupt:
                             failed += 1
                         else:
                             image_failed.append(index)
                             pages[index] = _join_blocks(pages[index], IMAGE_PAGE_OCR_FAILED_NOTE)
                             touched.add(index)
                         continue
-                    if is_corrupt:
+                    if index in swapped:
+                        swapped_ocr[index] = text  # decided once every such page is read
+                    elif is_corrupt:
                         if text:
-                            pages[index] = (
-                                "> The text layer of this page is mis-encoded Thai; it was read by "
-                                f"OCR instead.\n\n{text}"
-                            )
+                            pages[index] = _OCR_REPLACED_NOTE + text
                             replaced.add(index)
                         else:
                             failed += 1
@@ -765,6 +983,14 @@ class PdfEngine(BaseEngine):
         finally:
             if plumber_doc is not None:
                 plumber_doc.close()
+        repaired: dict[int, int] = {}
+        mojibake_map: dict[str, str] = {}
+        if swapped:
+            repaired, mojibake_map, ocr_replaced, ocr_failed = self._repair_swapped_pages(
+                pages, swapped, swapped_ocr, read_page
+            )
+            replaced |= ocr_replaced
+            failed += ocr_failed
         if metrics is not None and targets:
             metrics.ocr_backend = "tesseract"
             metrics.ocr_language = language
@@ -797,7 +1023,123 @@ class PdfEngine(BaseEngine):
             replaced=replaced,
             touched=touched,
             unread_images=(set(image_only) - image_success),
+            repaired=repaired,
+            mojibake_map=mojibake_map,
+            read_page=read_page,
         )
+
+    @staticmethod
+    def _repair_swapped_pages(pages, swapped, swapped_ocr, read_page):
+        """Settle the pages whose marks were swapped for other characters.
+
+        *swapped_ocr* holds a cheap plain OCR read of each, only a reference: the
+        map of which character stands for which mark is learned over all of them
+        together (more pages, more votes). A page whose swapped characters the
+        map explains keeps its own text layer with the marks put back. Any other
+        page is read by OCR in full with ``read_page(index)`` (tables cell by
+        cell), as a page with lost marks is; if that read fails, the plain
+        reference stands in. Returns ``(repaired, map, ocr_replaced, ocr_failed)``;
+        ``pages`` is updated in place.
+        """
+        ordered = sorted(swapped)
+        mapping = learn_mojibake_map(
+            "\n".join(pages[index] for index in ordered),
+            "\n".join(swapped_ocr[index] for index in ordered if swapped_ocr.get(index)),
+        )
+        repaired: dict[int, int] = {}
+        ocr_replaced: set[int] = set()
+        ocr_failed = 0
+        for index in ordered:
+            layer = pages[index]
+            _, total = repair_mojibake(layer, {})
+            unmapped = repair_mojibake(layer, mapping)[1]
+            if unmapped <= MOJIBAKE_MAX_UNMAPPED_SHARE * total:
+                fixed, lost = _repair_flagged(layer, mapping)
+                pages[index] = _join_blocks(_repaired_note(lost), fixed)
+                repaired[index] = lost
+            elif text := _read_in_full(read_page, index) or swapped_ocr.get(index):
+                pages[index] = _OCR_REPLACED_NOTE + text
+                ocr_replaced.add(index)
+            else:
+                ocr_failed += 1
+        return repaired, mapping, ocr_replaced, ocr_failed
+
+    @staticmethod
+    def _repair_swapped_tables(outcome, pages, tables_by_page, outside_text_by_page) -> str | None:
+        """Put the marks back in the tables and the outside-table text of repaired pages.
+
+        Both come from the text layer too (and the outside text replaces the
+        page's own text where a table was found), so they carry the same swapped
+        characters. A page whose tables hold one the map does not explain takes
+        its OCR text instead when there is one; the returned warning says so when
+        there is none.
+        """
+        mapping = outcome.mojibake_map
+        stuck = 0
+        for index in sorted(outcome.repaired):
+            number = index + 1
+            tables = tables_by_page.get(number, [])
+            outside = outside_text_by_page.get(number)
+            if not tables and outside is None:
+                continue
+            fixed_tables = [_repair_flagged(table, mapping) for table in tables]
+            fixed_outside = _repair_flagged(outside, mapping) if outside is not None else None
+            lost = sum(count for _, count in fixed_tables) + (fixed_outside[1] if fixed_outside else 0)
+            total = sum(repair_mojibake(table, {})[1] for table in tables) + (
+                repair_mojibake(outside, {})[1] if outside is not None else 0
+            )
+            if lost > MOJIBAKE_MAX_UNMAPPED_SHARE * total:
+                if text := _read_in_full(outcome.read_page, index):
+                    pages[index] = _OCR_REPLACED_NOTE + text
+                    outcome.replaced.add(index)
+                    del outcome.repaired[index]
+                    continue
+                stuck += 1
+            # What the reader sees: the outside text replaces the page's own text,
+            # otherwise the tables come in addition to it.
+            before = outcome.repaired[index]
+            visible = lost if outside is not None else before + lost
+            outcome.repaired[index] = visible
+            if tables:
+                tables_by_page[number] = [text for text, _ in fixed_tables]
+            if fixed_outside is not None:
+                outside_text_by_page[number] = _join_blocks(_repaired_note(visible), fixed_outside[0])
+            elif visible != before:
+                pages[index] = pages[index].replace(_repaired_note(before), _repaired_note(visible), 1)
+        if stuck:
+            return (
+                f"The text layer of {stuck} page(s) is mis-encoded Thai and its tables could not be "
+                "fully repaired; those pages may contain wrong characters."
+            )
+        return None
+
+    def _ocr_one_page(self, source, doc, index: int, options: dict) -> str:
+        """Render page *index* and read it by OCR with its tables (see
+        :meth:`_ocr_page_with_tables`). For the odd page read on its own, after
+        the pass over the others; raises when the page cannot be rendered or read."""
+        language = self._ocr_language(options)
+        prepare_tesseract(language)
+        dpi = self._ocr_dpi(options)
+        plumber_doc = None
+        plumber_pages = None
+        if options.get("pdf_tables", True) and _pdfplumber_available():
+            try:
+                import pdfplumber
+
+                plumber_doc = pdfplumber.open(str(source))
+                plumber_pages = plumber_doc.pages
+            except Exception:
+                plumber_doc = None
+        try:
+            with tempfile.TemporaryDirectory(prefix="doc2md_pdfocr_") as tmpdir:
+                png_path = Path(tmpdir) / f"page_{index + 1}.png"
+                pix = doc[index].get_pixmap(dpi=dpi)
+                pix.save(str(png_path))
+                del pix
+                return self._ocr_page_with_tables(png_path, plumber_pages, index, dpi / 72.0, language)
+        finally:
+            if plumber_doc is not None:
+                plumber_doc.close()
 
     @staticmethod
     def _ocr_page_with_tables(png_path, plumber_pages, index: int, scale: float, language: str) -> str:

@@ -268,3 +268,38 @@ def test_flag_indices_refer_to_the_text_after_the_cleaner_not_before():
 
     assert clean.split("\n")[flagged[0].line] == "shaky"
     assert flagged[0].line == 2
+
+
+# ------------------------------------------------------- lines that lost characters
+
+
+def test_the_repair_loss_code_cannot_be_an_ocr_confidence():
+    from doc2md.core.review import REPAIR_LOSS_CONFIDENCE
+
+    assert REPAIR_LOSS_CONFIDENCE == 0
+    # OCR review lines are always flagged between 40 and 70
+    assert REPAIR_LOSS_CONFIDENCE < 40
+
+
+def test_a_repair_loss_line_round_trips_through_extract():
+    from doc2md.core.review import REPAIR_LOSS_CONFIDENCE
+
+    clean, flagged = extract("ok\n" + encode("ข้อความที่ตัวอักษรหาย", REPAIR_LOSS_CONFIDENCE))
+
+    assert clean == "ok\nข้อความที่ตัวอักษรหาย"
+    assert [(r.line, r.confidence) for r in flagged] == [(1, 0)]
+
+
+def test_with_inline_flags_writes_a_bare_mark_for_a_repair_loss_line():
+    flagged = with_inline_flags("fine\nlost marks\nshaky", [ReviewLine(1, 0, "lost marks"), ReviewLine(2, 55, "shaky")])
+
+    assert flagged == f"fine\nlost marks {VISIBLE_MARK}\nshaky {VISIBLE_MARK}55%"
+    assert "0%" not in flagged
+
+
+def test_with_inline_flags_keeps_the_table_row_placement_for_a_repair_loss_line():
+    text = "| a | b |\n|---|---|\n| x | y |"
+
+    assert with_inline_flags(text, [ReviewLine(2, 0, "| x | y |")]) == (
+        f"| a | b |\n|---|---|\n| x | y {VISIBLE_MARK} |"
+    )

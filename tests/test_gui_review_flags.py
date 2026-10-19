@@ -563,3 +563,31 @@ def test_review_nav_widgets_do_not_stretch(window):
 
     for widget in (window.review_chip, window.review_prev_button, window.review_next_button):
         assert widget.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Fixed
+
+
+def test_tooltip_for_a_line_that_lost_thai_marks_does_not_claim_an_ocr_confidence(window, tmp_path):
+    markdown = "# Doc\n\nline one\nline two"
+    entries = [ReviewLine(2, 0, "line one"), ReviewLine(3, 63, "line two")]
+    select(window, feed(window, tmp_path, "a.txt", markdown, entries))
+
+    assert window._review_tooltip_text(2) == (
+        "Thai marks were lost in the PDF here — check this line against the original"
+    )
+    assert "0%" not in window._review_tooltip_text(2)
+    assert window._review_tooltip_text(3) == "OCR confidence 63% — check this line against the original"
+
+
+def test_a_repair_loss_line_is_highlighted_and_counted_like_any_review_line(window, tmp_path):
+    markdown = "# Doc\n\nline one\nline two"
+    select(window, feed(window, tmp_path, "a.txt", markdown, [ReviewLine(2, 0, "line one")]))
+
+    assert blocks_highlighted(window) == [2]
+    assert window.review_chip.text() == "⚠ 1 line to review"
+
+
+def test_the_output_flag_for_a_repair_loss_line_is_a_bare_mark(window, tmp_path):
+    markdown = "# Doc\n\nline one"
+    index = feed(window, tmp_path, "a.txt", markdown, [ReviewLine(2, 0, "line one")])
+    window.mark_uncertain_check.setChecked(True)
+
+    assert window._output_markdown(index) == "# Doc\n\nline one ⚠"

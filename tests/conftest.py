@@ -219,6 +219,36 @@ def thai_image(tmp_path, thai_font):
     return path
 
 
+# What the app itself would find on this machine, taken before the autouse fixture
+# below hides it from every test: ``find_tesseract()`` looks on PATH and then in the
+# usual install folders, so a Tesseract that is installed but not on PATH counts.
+from doc2md.core import ocr_setup as _ocr_setup  # noqa: E402
+
+_REAL_KNOWN_LOCATIONS = list(_ocr_setup.KNOWN_LOCATIONS)
+_REAL_USER_TESSDATA_DIR = _ocr_setup.user_tessdata_dir
+_REAL_TESSERACT = _ocr_setup.find_tesseract()
+
+
+@pytest.fixture
+def real_tesseract(monkeypatch):
+    """Path of the Tesseract the app would use, with the isolation below lifted.
+
+    For the few tests that run real OCR. Skips where the app itself would find no
+    Tesseract (CI has none), so the skip condition is the app's own discovery and
+    not a bare ``shutil.which``.
+    """
+    if _REAL_TESSERACT is None:
+        pytest.skip("Tesseract not installed (looked the way the app does)")
+    monkeypatch.setattr(_ocr_setup, "KNOWN_LOCATIONS", _REAL_KNOWN_LOCATIONS)
+    monkeypatch.setattr(_ocr_setup, "user_tessdata_dir", _REAL_USER_TESSDATA_DIR)
+    monkeypatch.delenv("DOC2MD_NO_TESSERACT_SEARCH", raising=False)
+    # prepare_tesseract() sets TESSDATA_PREFIX straight on os.environ; setting and
+    # then removing it through monkeypatch makes teardown put the old state back.
+    monkeypatch.setenv("TESSDATA_PREFIX", "")
+    monkeypatch.delenv("TESSDATA_PREFIX")
+    return _REAL_TESSERACT
+
+
 @pytest.fixture(autouse=True)
 def _isolated_tesseract_lookup(monkeypatch, tmp_path_factory):
     """Tests must not depend on, or change, a Tesseract installed on the dev machine."""

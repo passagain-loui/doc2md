@@ -18,6 +18,10 @@ from dataclasses import dataclass
 REVIEW_OPEN = ""
 REVIEW_CLOSE = ""
 VISIBLE_MARK = "⚠"
+REPAIR_LOSS_CONFIDENCE = 0
+"""Code for a line that lost characters when a mis-encoded PDF text layer was
+repaired. It is not an OCR confidence (those are always between 40 and 70), so
+0 cannot be mistaken for one: it is shown as a bare flag, never as ``0%``."""
 
 _ENCODED = re.compile(r"[ \t]*(\d{1,3})")
 _STRAY = re.compile(r"[]")
@@ -66,7 +70,8 @@ def with_inline_flags(markdown: str, review_lines: list[ReviewLine]) -> str:
     """*markdown* with a visible `` ⚠NN%`` after every review line.
 
     For a user who wants the flags inside an output file (to proofread it or
-    hand it to someone who will). Out-of-range entries are ignored.
+    hand it to someone who will). Out-of-range entries are ignored. A line that
+    lost characters in a repair (``REPAIR_LOSS_CONFIDENCE``) gets a bare `` ⚠``.
 
     On a pipe-table row the flag goes inside the last cell, before the closing
     ``|``: appended after it, the flag would be an extra cell-less fragment and
@@ -77,7 +82,8 @@ def with_inline_flags(markdown: str, review_lines: list[ReviewLine]) -> str:
     lines = markdown.split("\n")
     for entry in review_lines:
         if 0 <= entry.line < len(lines):
-            lines[entry.line] = _flagged(lines[entry.line], f"{VISIBLE_MARK}{entry.confidence}%")
+            flag = VISIBLE_MARK if entry.confidence == REPAIR_LOSS_CONFIDENCE else f"{VISIBLE_MARK}{entry.confidence}%"
+            lines[entry.line] = _flagged(lines[entry.line], flag)
     return "\n".join(lines)
 
 

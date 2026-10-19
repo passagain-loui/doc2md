@@ -42,6 +42,17 @@ MIN_BAND_FRACTION = 0.10
 _ANALYSIS_WIDTH = 1600
 
 
+def _pixel_values(image) -> list:
+    """Every pixel value of *image*, row by row.
+
+    ``Image.getdata()`` is deprecated (removed in Pillow 14); its replacement
+    ``get_flattened_data()`` only exists in newer Pillow, and requirements.txt
+    allows older, so fall back to the old call there.
+    """
+    flatten = getattr(image, "get_flattened_data", None)
+    return list(flatten() if flatten is not None else image.getdata())
+
+
 def find_vertical_gutters(image) -> list[tuple[int, int]]:
     """Blank vertical bands between content, as ``(start, end)`` pixel columns.
 
@@ -62,7 +73,7 @@ def find_vertical_gutters(image) -> list[tuple[int, int]]:
     sh = small.size[1]
     body = small.crop((0, int(sh * TOP_MARGIN), sw, max(int(sh * TOP_MARGIN) + 1, int(sh * (1 - BOTTOM_MARGIN)))))
     ink = body.filter(ImageFilter.FIND_EDGES).point(lambda v: 255 if v > EDGE_STRENGTH else 0)
-    profile = list(ink.resize((sw, 1), Image.BOX).getdata())
+    profile = _pixel_values(ink.resize((sw, 1), Image.BOX))
 
     quiet = [value <= GUTTER_INK_LEVEL for value in profile]
     if not any(not q for q in quiet):
@@ -152,7 +163,7 @@ def prepare_for_ocr(image):
     the fill fix) raised them to 11.
     """
     gray = image.convert("L")
-    sample = list(gray.resize((64, 64)).getdata())
+    sample = _pixel_values(gray.resize((64, 64)))
     if sum(sample) / len(sample) < LIGHT_PAGE_BRIGHTNESS:
         return image
     from PIL import ImageFilter, ImageOps
@@ -463,12 +474,28 @@ def _pick_cluster(base: str, reread: str) -> str:
     return base
 
 
+# Consonants that differ only in a small stroke or loop, which Tesseract swaps
+# between two reads of the same word (ซ/ช, ข/ฃ, ...). When aligning a re-read with
+# the base read they count as the same letter, so the marks over the word are
+# still merged; the base read's letter is the one that stays.
+_LOOKALIKE_PAIRS = ("ซช", "ขฃ", "ดต", "บป", "พฟ", "ถภ")
+_LOOKALIKE = {char: pair[0] for pair in _LOOKALIKE_PAIRS for char in pair}
+
+
+def _shape(char: str) -> str:
+    """*char*, or the first letter of its look-alike pair."""
+    return _LOOKALIKE.get(char, char)
+
+
 def _merge_marks(base: str, reread: str) -> str:
     """*base* with marks from *reread*, where the two agree on the letters.
 
     A single-line re-read recovers marks, but it also sometimes turns a Thai
     word into Latin or swaps a consonant. So the letters always come from the
     base read, and only the marks of a letter the re-read also has are taken.
+    Where the reads disagree on exactly as many letters as they differ by and
+    every one of those is a look-alike pair (see ``_LOOKALIKE_PAIRS``), the
+    letters still count as the same: the marks are taken, the base letter kept.
     A run of letters only the re-read has is added if it is Thai or has no
     letters (see :func:`_worth_inserting`).
     """
@@ -481,14 +508,24 @@ def _merge_marks(base: str, reread: str) -> str:
         autojunk=False,
     )
     pieces: list[tuple[str, str]] = []  # (gap before, cluster)
+
+    def take_marks(b1: int, b2: int, r1: int) -> None:
+        for offset in range(b2 - b1):
+            mine, theirs = base_clusters[b1 + offset], reread_clusters[r1 + offset]
+            gap = mine[2] if offset == 0 else theirs[2]
+            if "|" in mine[2] and "|" not in gap:
+                gap = mine[2]  # a table bar the re-read (one line) lost
+            # the base letter always stays, even where the re-read swapped it
+            pieces.append((gap, _pick_cluster(mine[1], mine[0] + theirs[1][1:])))
+
     for tag, b1, b2, r1, r2 in matcher.get_opcodes():
         if tag == "equal":
-            for offset in range(b2 - b1):
-                mine, theirs = base_clusters[b1 + offset], reread_clusters[r1 + offset]
-                gap = mine[2] if offset == 0 else theirs[2]
-                if "|" in mine[2] and "|" not in gap:
-                    gap = mine[2]  # a table bar the re-read (one line) lost
-                pieces.append((gap, _pick_cluster(mine[1], theirs[1])))
+            take_marks(b1, b2, r1)
+        elif tag == "replace" and b2 - b1 == r2 - r1 and all(
+            _shape(base_clusters[b1 + offset][0]) == _shape(reread_clusters[r1 + offset][0])
+            for offset in range(b2 - b1)
+        ):
+            take_marks(b1, b2, r1)  # the same letters, but for look-alikes
         elif tag in ("replace", "delete"):
             pieces.extend((cluster[2], cluster[1]) for cluster in base_clusters[b1:b2])
         elif tag == "insert" and _worth_inserting(reread_clusters[r1:r2]):
@@ -583,6 +620,165 @@ def _replace_line(text: str, key: str, replacement: str) -> tuple[str, bool]:
     return text, False
 
 
+# --------------------------------------------------------------------------
+# Latin abbreviations read as Thai
+# --------------------------------------------------------------------------
+#
+# With Thai and English loaded together, a short uppercase abbreviation beside
+# an English word ("QM Manager") is sometimes read as two Thai letters ("อห
+# Manager") at middling confidence, because the Thai model gets the first say.
+# The same pixels read with English alone come back as the abbreviation. So a
+# short, shaky run of Thai letters right next to a Latin word is read again with
+# eng only, and swapped only if that read is a confident run of capitals; the
+# many ways Thai letters misread as English (lowercase, symbols, low confidence)
+# all fail that test.
+
+LATIN_REREAD_MAX_CONFIDENCE = 80.0  # a Thai run any surer than this is left alone
+LATIN_REREAD_MIN_CONFIDENCE = 85.0  # the eng-only read must be at least this sure
+LATIN_REREAD_MAX_PIECES = 4  # Tesseract reports Thai in pieces (letters, marks)
+LATIN_REREAD_MAX_GAP = 0.8  # of the run's height, between the run and the Latin word
+LATIN_REREAD_PAD = 8  # px around the run when re-reading
+MAX_LATIN_REREADS = 20  # per band: each is one more Tesseract call
+_LATIN_ABBREVIATION = re.compile(r"[A-Z]{2,5}")
+
+
+def _is_thai_piece(text: str) -> bool:
+    return bool(text) and all(0x0E01 <= ord(char) <= 0x0E5B for char in text)
+
+
+def _is_latin_word(text: str) -> bool:
+    return len(text) >= 3 and text.isascii() and text.isalpha()
+
+
+def _reread_latin_runs(
+    band, data: dict, tesseract
+) -> list[tuple[str, str, str, bool]]:
+    """Short shaky runs of Thai that are really a Latin abbreviation.
+
+    Returns ``(run text, neighbour word, abbreviation, neighbour_follows)`` for
+    every run whose eng-only re-read is accepted (see the section comment).
+    """
+    if not all(name in data for name in ("left", "top", "width", "height", "conf", "text")):
+        return []
+    lines: dict[tuple, list[tuple[int, int, int, int, float, str]]] = {}
+    for index, text in enumerate(data["text"]):
+        word = (text or "").strip()
+        if not word:
+            continue
+        try:
+            confidence = float(data["conf"][index])
+            left, top = int(data["left"][index]), int(data["top"][index])
+            width, height = int(data["width"][index]), int(data["height"][index])
+            key = (data["block_num"][index], data["par_num"][index], data["line_num"][index])
+        except (KeyError, ValueError, TypeError, IndexError):
+            continue
+        lines.setdefault(key, []).append((left, top, left + width, top + height, confidence, word))
+
+    found: list[tuple[str, str, str, bool]] = []
+    attempts = 0
+    for pieces in lines.values():
+        pieces.sort(key=lambda piece: piece[0])
+        start = 0
+        while start < len(pieces):
+            if not _is_thai_piece(pieces[start][5]):
+                start += 1
+                continue
+            stop = start + 1
+            while (
+                stop < len(pieces)
+                and _is_thai_piece(pieces[stop][5])
+                and pieces[stop][0] - pieces[stop - 1][2]
+                <= LATIN_REREAD_MAX_GAP * (pieces[stop][3] - pieces[stop][1])
+            ):  # one run is one word: Thai pieces a word-gap apart are not
+                stop += 1
+            run = pieces[start:stop]
+            before = pieces[start - 1] if start > 0 else None
+            after = pieces[stop] if stop < len(pieces) else None
+            start = stop
+            confidences = [piece[4] for piece in run if piece[4] >= 0]
+            if (
+                len(run) > LATIN_REREAD_MAX_PIECES
+                or not confidences
+                or sum(confidences) / len(confidences) >= LATIN_REREAD_MAX_CONFIDENCE
+            ):
+                continue
+            left = min(piece[0] for piece in run)
+            top = min(piece[1] for piece in run)
+            right = max(piece[2] for piece in run)
+            bottom = max(piece[3] for piece in run)
+            reach = LATIN_REREAD_MAX_GAP * (bottom - top)
+            if after is not None and _is_latin_word(after[5]) and after[0] - right <= reach:
+                neighbour, follows = after[5], True
+            elif before is not None and _is_latin_word(before[5]) and left - before[2] <= reach:
+                neighbour, follows = before[5], False
+            else:
+                continue
+            attempts += 1
+            if attempts > MAX_LATIN_REREADS:
+                return found
+            width, height = band.size
+            crop = band.crop((
+                max(0, left - LATIN_REREAD_PAD), max(0, top - LATIN_REREAD_PAD),
+                min(width, right + LATIN_REREAD_PAD), min(height, bottom + LATIN_REREAD_PAD),
+            ))
+            reread = tesseract.image_to_data(
+                crop, lang="eng", config="--psm 8", output_type=tesseract.Output.DICT
+            )
+            words = [
+                (str(text).strip(), float(conf))
+                for text, conf in zip(reread.get("text", []), reread.get("conf", []))
+                if str(text).strip()
+            ]
+            if len(words) != 1:
+                continue
+            latin, confidence = words[0]
+            if confidence >= LATIN_REREAD_MIN_CONFIDENCE and _LATIN_ABBREVIATION.fullmatch(latin):
+                found.append(("".join(piece[5] for piece in run), neighbour, latin, follows))
+    return found
+
+
+def _swap_run(line: str, run: str, neighbour: str, latin: str, follows: bool) -> str | None:
+    """*line* with the Thai *run* next to *neighbour* replaced by *latin*, or
+    ``None`` when the line does not have that run there. Whitespace inside the
+    run is ignored when matching; the abbreviation is set off from what it sits
+    against by a space."""
+    spaced = r"\s*".join(re.escape(char) for char in run)
+    if follows:
+        match = re.search(f"({spaced})(?=\\s*{re.escape(neighbour)})", line)
+    else:
+        match = re.search(f"(?<={re.escape(neighbour)})(\\s*)({spaced})", line)
+    if match is None:
+        return None
+    if follows:
+        start, end = match.span(1)
+    else:
+        start, end = match.span(2)
+    lead = " " if start > 0 and not line[start - 1].isspace() else ""
+    return line[:start] + lead + latin + line[end:]
+
+
+def _apply_latin_runs(
+    text: str, runs: list[tuple[str, str, str, bool]], junk: set[str], means: dict[str, float]
+) -> str:
+    """*text* with every accepted run swapped on the first line that has it;
+    a line that is about to be dropped as junk is left alone. The new line
+    inherits the old line's confidence."""
+    lines = text.split("\n")
+    for run, neighbour, latin, follows in runs:
+        for index, line in enumerate(lines):
+            key = _normalized(line)
+            if not key or key in junk:
+                continue
+            swapped = _swap_run(line, run, neighbour, latin, follows)
+            if swapped is None:
+                continue
+            if key in means:
+                means[_normalized(swapped)] = means[key]
+            lines[index] = swapped
+            break
+    return "\n".join(lines)
+
+
 def recognize_region(image, language: str) -> str:
     """OCR of a single, already-isolated crop (a table cell) - no panel/gutter
     splitting or line-confidence filtering, since a cell crop is already a
@@ -638,6 +834,14 @@ def recognize(image_path: str | Path, language: str) -> str:
                 if found:  # the mark row goes only once its base row is fixed
                     means[_normalized(new_text)] = confidence
                     junk.add(mark_key)
+            if "eng" in language.split("+"):
+                try:
+                    runs = _reread_latin_runs(band, data, pytesseract)
+                except Exception as exc:
+                    if _is_missing_language(exc):
+                        raise
+                    runs = []
+                text = _apply_latin_runs(text, runs, junk, means)
             text = _without_junk(text, junk)
             text = _mark_uncertain(text, means)
         except Exception as exc:
