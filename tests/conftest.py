@@ -1,3 +1,5 @@
+import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -230,23 +232,27 @@ _REAL_TESSERACT = _ocr_setup.find_tesseract()
 
 @pytest.fixture
 def real_tesseract(monkeypatch):
-    """Path of the Tesseract the app would use, with the isolation below lifted.
+    """Path of the Tesseract the app would use, for the few tests that run real OCR.
 
-    For the few tests that run real OCR. Skips where the app itself would find no
-    Tesseract (CI has none), so the skip condition is the app's own discovery and
-    not a bare ``shutil.which``.
+    Skips where the app itself would find no Tesseract, so the skip condition is
+    the app's own discovery and not a bare ``shutil.which``. A Tesseract on PATH
+    (CI installs one there) runs under the isolation below unchanged, exactly as
+    these tests always ran; only an installed-but-not-on-PATH Tesseract (a dev
+    machine) needs the usual install folders searched again.
     """
     if _REAL_TESSERACT is None:
         pytest.skip("Tesseract not installed (looked the way the app does)")
-    # Only the binary lookup is lifted. The per-user tessdata folder stays the
-    # isolated empty one, so the language data comes from the install itself; the
-    # real per-user folder may exist without Thai (as on CI) and would win.
-    monkeypatch.setattr(_ocr_setup, "KNOWN_LOCATIONS", _REAL_KNOWN_LOCATIONS)
-    monkeypatch.delenv("DOC2MD_NO_TESSERACT_SEARCH", raising=False)
-    # prepare_tesseract() sets TESSDATA_PREFIX straight on os.environ; setting and
-    # then removing it through monkeypatch makes teardown put the old state back.
-    monkeypatch.setenv("TESSDATA_PREFIX", "")
-    monkeypatch.delenv("TESSDATA_PREFIX")
+    # prepare_tesseract() sets TESSDATA_PREFIX straight on os.environ; registering
+    # its current state with monkeypatch makes teardown put it back as it was.
+    previous = os.environ.get("TESSDATA_PREFIX")
+    if previous is None:
+        monkeypatch.setenv("TESSDATA_PREFIX", "")
+        monkeypatch.delenv("TESSDATA_PREFIX")
+    else:
+        monkeypatch.setenv("TESSDATA_PREFIX", previous)
+    if shutil.which("tesseract") is None:
+        monkeypatch.setattr(_ocr_setup, "KNOWN_LOCATIONS", _REAL_KNOWN_LOCATIONS)
+        monkeypatch.delenv("DOC2MD_NO_TESSERACT_SEARCH", raising=False)
     return _REAL_TESSERACT
 
 

@@ -6,12 +6,14 @@ the tool does) and CLAUDE.md (the release pipeline rules).
 > **CI note (2026-10-19):** the 1.5.4 release commit `5b55aeb` failed GitHub CI
 > on all three Pythons (run 39179328930) in one test,
 > `test_real_tesseract_reads_the_thai_image`: "no readable text". CI is Windows
-> with Tesseract from choco (Thai data in the install folder). The new
-> `real_tesseract` fixture had also lifted the per-user tessdata isolation, and
-> that real per-user folder (without Thai) won. Fixed in the follow-up commit:
-> the fixture lifts only the binary lookup. Gate re-run passed (EXIT_CODE 0) and
-> the installer was rebuilt. Check that the follow-up commit's CI is green
-> (`gh run list --limit 1`).
+> with Tesseract from choco on PATH. The new `real_tesseract` fixture changed the
+> environment the test ran in there (it lifted the install-folder search and
+> removed `TESSDATA_PREFIX`). A first fix (`4f87207`, keep the per-user tessdata
+> isolated) did not help. The second fix: with Tesseract on PATH the fixture
+> changes nothing, so CI runs the test exactly as it always did; only an
+> installed-but-not-on-PATH Tesseract gets the install folders searched, and
+> `TESSDATA_PREFIX` keeps its value. Verified both ways locally, gate passed
+> (EXIT_CODE 0), installer rebuilt. Check that CI is green (`gh run list --limit 1`).
 
 ## 1. State right now
 
