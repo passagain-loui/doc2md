@@ -1,4 +1,4 @@
-# Handoff - doc2md v1.5.4
+# Handoff - doc2md v1.5.5
 
 Written 2026-10-04, updated 2026-10-19. Read this first, then README.md (what
 the tool does) and CLAUDE.md (the release pipeline rules).
@@ -19,13 +19,63 @@ the tool does) and CLAUDE.md (the release pipeline rules).
 
 | Item | Value |
 | --- | --- |
-| Version | 1.5.4 |
-| Last release commit | `5b55aeb` (v1.5.4) + test fix `9f40c05`; CI green on 3.11-3.13 (run 39223049592) |
+| Version | 1.5.5 |
+| Last release commit | (pending) |
 | Branch | `main` |
 | Remote | `origin` = https://github.com/passagain-loui/doc2md.git - check `git status -sb` for unpushed commits; GitHub CI (Python 3.11-3.13) green since commit `8d9adde` |
-| Gate | `tools/verify.ps1` passed (EXIT_CODE 0) for 1.5.4 on 2026-10-19; 2 expected skips (symlink, RapidOCR not installed) - the real-Tesseract test now runs |
-| Installer | built 2026-10-19 from the gated 1.5.4 tree: `dist/doc2md_Setup_v1.5.4.exe` (69 MB), `dist/doc2md.exe` (95 MB), `dist/doc2md/` - git-ignored, rebuild with `python build.py` on another machine |
+| Gate | `tools/verify.ps1` passed (EXIT_CODE 0) for 1.5.5 on 2026-10-19; 2 expected skips (symlink, RapidOCR not installed) - the real-Tesseract test now runs |
+| Installer | built 2026-10-19 from the gated 1.5.5 tree: `dist/doc2md_Setup_v1.5.5.exe` (69 MB), `dist/doc2md.exe` (95 MB), `dist/doc2md/` - git-ignored, rebuild with `python build.py` on another machine |
 | Tesseract | **installed and working on this machine** (checked 2026-10-17): v5.4.0 at `C:/Program Files/Tesseract-OCR/tesseract.exe`, languages `eng` + `tha`. It is not on PATH, but `find_tesseract()` locates it in the standard install folder, so the app uses it. A real Thai test image and scanned PDF converted correctly apart from a lost tone mark (นี้ read as นี). The gate's one 'Tesseract not installed' skip (`tests/test_thai_documents.py`) checks `shutil.which("tesseract")`, i.e. PATH only, so it skips here; add the folder to PATH if you want that real-OCR test to run |
+
+### What changed in 1.5.5
+
+Dingbat symbols, OCR table labels and symbols, logo rows, and the legacy Office
+readers (`doc2md/core/pdf_text.py`, `doc2md/engine/pdf_engine.py`,
+`doc2md/core/ocr_text.py`, `doc2md/engine/doc_engine.py`, `doc2md/engine/ppt_engine.py`):
+
+- Dingbat symbols in text-layer PDFs: `map_dingbat` in `doc2md/core/pdf_text.py`
+  maps Wingdings (0xFC ✓, 0xFB ✗, 0xFE ☑, 0xFD ☒, 0xA8 ☐, 0x6C ●), Wingdings 2
+  (0x52 ☑, 0x54 ☒), Webdings (0xE3 🛏) and ZapfDingbats (0x33 ✓, 0x34 ✔, 0x35 ✕,
+  0x36 ✖, 0x37 ✗, 0x38 ✘). It applies only when the character's own font is a
+  dingbat font. Unverified codes are left out, and only pages that use a dingbat
+  font are read character by character. EU2043 meal table: 31 invisible
+  characters before; now ✓/✗, 🛏 and ☑/☒.
+- Drawn ✓/✗ in OCR'd table cells: `_symbol_in_cell` also recognises a single ink
+  stroke shaped like ✓ or ✗, sized in PDF points. Shapes that must not match: V,
+  /, \, +, L, and x in "4 x 4". A lone "X"/"x" in a cell reads as ✗. Synthetic
+  images only.
+- Short table labels: `_reread_short_cell` re-reads a short cell alone first and
+  keeps the result if it has Thai. If that is empty or Latin-only, the cell is
+  cropped to ink, upscaled to about 45 px high (at most 4x), read with `--psm 7`
+  and Thai only, and accepted with Thai letters and mean confidence 50 or more.
+  Constants `TABLE_SHORT_REREAD_*`. `_invert_dark_bands` inverts a section-bar band
+  inside a tall light cell where pdfplumber merged a heading bar; `_join_label_words`
+  fixes "มม ." spacing. Fortuner p1 table 1: 0.941 -> 0.945 (0.940 -> 0.944 with
+  symbols kept); rows below 0.8: 8 -> 6. "สี" fixed; "อัตโนมัติ" now reads
+  "อฮิตโนมัติ" (see section 8).
+- Logo noise rows: `_is_logo_noise` in `doc2md/core/ocr_text.py` drops a row only
+  when all hold: mean confidence < 75; at least 2 tokens; no word (3+ letters in
+  one script), number or list marker (ก., a), (ข)); at least 60% of tokens stray
+  (symbols, lone letters that are not Thai one-letter words, unknown 2-letter
+  Latin). Protected: ที่ นี้ ดี ปี ผู้ ก็ ณ ๆ and page numbers like "- 2 -". Time
+  change under 1%.
+- Legacy `.doc` bold/italic: read from the CHPX sprms 0x0835, 0x0836 and 0x4A30
+  (`PlcBteChpx`) and the style sheet. Toggles 0x80/0x81 are folded through the
+  paragraph style, character style and direct run. Emitted at word level, never
+  inside a Thai syllable, and not in headings or the table header row. Malformed
+  structures fall back to plain text. An RTF saved as `.doc` gets `RTF_NOTE` (no
+  emphasis).
+- Legacy `.ppt` speaker notes: `SlideAtom.notesIdRef` -> notes list
+  (`SlideListWithText` instance 2) -> persist directory -> Notes container body,
+  through the current edit chain only. Output: `> Speaker notes: …` under the slide.
+- Tests: new `tests/test_legacy_emphasis_notes.py` (57), `tests/test_ocr_logo_noise.py`
+  (93) and `tests/test_pdf_dingbats.py`; extended `tests/test_table_ocr.py`. Real
+  Word/PowerPoint fixtures (made-up text, author metadata scrubbed) are in
+  `tests/fixtures/`, with generators in `tests/fixtures/make_legacy_fixtures/`.
+  Full suite: 1410 passed, 2 skipped.
+- Regression: all 8 approved samples re-run with `tools/regress.py`; none REGRESSED.
+  Changed on purpose: Fortuner, QP 7, camry, EU2043. Unchanged: mu-X, QMEL, quote,
+  guideline. Re-approving those four references waits for the user's go-ahead.
 
 ### What changed in 1.5.4
 
@@ -349,23 +399,36 @@ an entry headed `[x.y.z]` to **both** `CHANGELOG.md` and `HISTORY.md` (the gate'
   expected phrases (was 22). EU2043 changed by one word on a low-resolution page.
   Fortuner changed as intended.
 
+- **Dingbat symbols (1.5.5), EU2043 meal table:** 31 invisible characters before;
+  now ✓/✗, 🛏 and ☑/☒.
+- **Short table labels (1.5.5), Fortuner page 1 table 1:** 0.941 -> 0.945 (0.940 ->
+  0.944 with symbols kept). Rows below 0.8: 8 -> 6. "สี", "สีภายใน", "4สูบ", "พร้อม"
+  and "ปรับ" read correctly; "อัตโนมัติ" now reads "อฮิตโนมัติ".
+- **Logo noise rows (1.5.5), QP 7, camry, EU2043:** 27 junk rows dropped (QP 7 10,
+  EU2043 7, camry 10), 0 real rows dropped (checked by eye). QP 7 still 24/24.
+  Review lines: QP 7 63 -> 55, camry 97 -> 87, EU2043 60 -> 53. Time change under 1%.
+- **Regression (1.5.5):** 8 approved samples, none REGRESSED. Changed on purpose:
+  Fortuner, QP 7, camry, EU2043. Unchanged: mu-X, QMEL, quote, guideline.
+
 ## 8. Known limits and open ideas
 
 Not solved:
 
 - Stylised display text and headers on dark gradient buttons in posters.
 - Chinese text is not read (no language data; the user decided not to add it).
-- Check-mark matrices (tick/cross tables) come out as noise.
+- Drawn ✓/✗ detection in OCR'd tables is tested only on synthetic images; no real
+  sample has drawn ticks yet.
+- A lone "X" or "x" in a table cell reads as ✗.
 - Residual ข/ย errors on poor scans.
-- Legacy `.doc`: no bold/italic, headers, footnotes. Legacy `.ppt`: no notes,
-  table layout, pictures.
-- Logo noise rows with no line under them remain.
+- Legacy `.doc`: no headers/footers, footnotes, text boxes. Legacy `.ppt`: no
+  table grids, bullet levels, pictures.
 - Low-resolution embedded images: the brochure's terms pages embed their images
   at 96 dpi, so small Thai text OCRs poorly (e.g. "รายสะเอียด" for
   "รายละเอียด"). Rendering at a higher DPI cannot recover detail the file does
   not contain.
-- In the table read, short Thai labels are still sometimes misread: "สี" and
-  "สีภายใน" come out as "a". Bullet and dash cells are read as symbols (1.5.4).
+- In the table read, "สี" is fixed (1.5.5), but "อัตโนมัติ" comes out as
+  "อฮิตโนมัติ" and the section bar "ภายในและอุปกรณ์อำนวยความสะดวก" is still unread.
+  Bullet and dash cells are read as symbols (1.5.4).
 - A repaired page can lose up to 20% of its swapped Thai marks (1.5.4). Those
   lines are highlighted for review.
 - The mu-X page 8 text layer has labels clipped by the PDF itself.

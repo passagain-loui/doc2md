@@ -1,0 +1,7 @@
+{
+  "slides": [
+    {"title": "สไลด์แรก", "body": ["ข้อหนึ่ง", "ข้อสอง"], "notes": ["บันทึกผู้พูดสำหรับสไลด์แรก", "บรรทัดที่สองของบันทึก"]},
+    {"title": "Second slide", "body": ["only a point"], "notes": []},
+    {"title": "สไลด์สาม", "body": ["ข้อสุดท้าย"], "notes": ["Notes for slide three, with English too."]}
+  ]
+}

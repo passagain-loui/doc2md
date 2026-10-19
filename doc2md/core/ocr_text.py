@@ -222,6 +222,101 @@ def _without_junk(plain: str, junk: set[str]) -> str:
     return "\n".join(kept).strip()
 
 
+# A logo or emblem has no text for Tesseract to find, so it reads it as a row of
+# stray marks ("AY ¢ AY ๐ ๑", "a y an a ๑ a") whose confidence is middling, well
+# above the drop floor. What sets such a row apart from a real short line is not
+# its confidence alone but that it has nothing a reader could use: no word, no
+# number, no list marker, and nearly every token a stray letter or symbol.
+LOGO_NOISE_MAX_CONFIDENCE = 75.0  # a row Tesseract is surer of is kept
+LOGO_NOISE_MIN_TOKENS = 2  # a lone stray mark is the drop floor's business
+LOGO_NOISE_MIN_STRAY_SHARE = 0.6  # of the tokens that are a stray letter or symbol
+LOGO_NOISE_WORD_LETTERS = 3  # letters of one script that make a token a word
+_LIST_MARKER = re.compile(r"^\(?[A-Za-zก-ฮ][.)]$|^\([A-Za-zก-ฮ]\)$")
+# One-letter Thai words are real (ที่ นี้ ดี ปี ผู้ ก็ ณ): a consonant with an
+# above/below vowel and perhaps a tone mark, or one of a few particles. A bare
+# consonant, or one with only a tone mark, mai han-akat or thanthakhat, is not.
+_PLAUSIBLE_THAI_WORD = re.compile(
+    "^[ก-ฮ][ิ-ู][่-๋]?$|^[ก-ฮ]็$|^[ณๆฯ]$"
+)
+# Lowercase two-letter Latin tokens that are real words or abbreviations; any other
+# ("ae", "te", "wl") is taken for a stray mark.
+_SHORT_LATIN_WORDS = frozenset(
+    "of to in is it at on or an as by be we he me my no so do if up us am go oh ok "
+    "vs pm tv pc id ex ie eg re hr qa qc gm".split()
+)
+
+
+def _base_letters(token: str) -> list[str]:
+    """The letters of *token*; Thai vowel and tone marks, digits and symbols are not."""
+    return [char for char in token if unicodedata.category(char)[0] == "L"]
+
+
+def _is_number_token(token: str) -> bool:
+    """A digit anywhere, or two Thai digits in a row (a lone ๐ ๑ is a stray mark)."""
+    run = 0
+    for char in token:
+        if char.isascii() and char.isdigit():
+            return True
+        run = run + 1 if 0x0E50 <= ord(char) <= 0x0E59 else 0
+        if run >= 2:
+            return True
+    return False
+
+
+def _is_word_token(token: str) -> bool:
+    letters = _base_letters(token)
+    if len(letters) < LOGO_NOISE_WORD_LETTERS:
+        return False
+    return len({0x0E01 <= ord(char) <= 0x0E5B for char in letters}) == 1
+
+
+def _is_stray_token(token: str) -> bool:
+    """A token that is a stray mark rather than a word: no letter or digit, a lone letter
+    that is not a Thai word, or two lowercase Latin letters that are not a
+    short word."""
+    if _is_number_token(token):
+        return False
+    letters = _base_letters(token)
+    if len(letters) <= 1:
+        return not _PLAUSIBLE_THAI_WORD.match(token)
+    return (
+        len(letters) == 2
+        and all(char.isascii() for char in letters)
+        and token.islower()
+        and token not in _SHORT_LATIN_WORDS
+    )
+
+
+def _is_logo_noise(line: str, confidence: float | None) -> bool:
+    """Whether *line* (read at mean *confidence*) is a row of stray marks.
+
+    All of: a confidence below ``LOGO_NOISE_MAX_CONFIDENCE``; at least
+    ``LOGO_NOISE_MIN_TOKENS`` tokens; no word, no number and no list marker
+    (``ก.``, ``a)``, ``(ข)``) among them; and at least ``LOGO_NOISE_MIN_STRAY_SHARE``
+    of the tokens stray (:func:`_is_stray_token`). Anything less certain is kept
+    (and, below ``REVIEW_LINE_CONFIDENCE``, flagged for review as usual). A digit
+    always protects a row: "- 2 -" is a page number, not a logo.
+    """
+    if confidence is None or confidence >= LOGO_NOISE_MAX_CONFIDENCE:
+        return False
+    tokens = line.split()
+    if len(tokens) < LOGO_NOISE_MIN_TOKENS:
+        return False
+    if any(_is_word_token(t) or _is_number_token(t) or _LIST_MARKER.match(t) for t in tokens):
+        return False
+    return sum(1 for t in tokens if _is_stray_token(t)) / len(tokens) >= LOGO_NOISE_MIN_STRAY_SHARE
+
+
+def _logo_noise_keys(text: str, means: dict[str, float]) -> set[str]:
+    """Space-free keys of the lines of *text* that are :func:`_is_logo_noise`."""
+    keys: set[str] = set()
+    for line in text.splitlines():
+        key = _normalized(line)
+        if key and _is_logo_noise(line, means.get(key)):
+            keys.add(key)
+    return keys
+
+
 def _line_mean_confidences(data: dict) -> dict[str, float]:
     """Mean Tesseract confidence for every line, including ones that pass
     the drop floor - keyed the same way :func:`_low_confidence_lines` keys
@@ -842,6 +937,7 @@ def recognize(image_path: str | Path, language: str) -> str:
                         raise
                     runs = []
                 text = _apply_latin_runs(text, runs, junk, means)
+            junk |= _logo_noise_keys(text, means)
             text = _without_junk(text, junk)
             text = _mark_uncertain(text, means)
         except Exception as exc:

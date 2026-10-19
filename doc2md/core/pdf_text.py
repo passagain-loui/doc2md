@@ -110,6 +110,83 @@ def _nikhahit_before(chars: list[Char], position: int) -> bool:
     return index >= 0 and _is_zero_width_space(chars[index])
 
 
+# --------------------------------------------------------------------------
+# Dingbat fonts: ticks and crosses that extract as private-use junk
+# --------------------------------------------------------------------------
+#
+# A tick or a cross in a table (Word's checkboxes, an itinerary's "meal included")
+# is a character of a symbol font: Wingdings, Wingdings 2, ZapfDingbats ... Such a
+# font has no meaningful Unicode map, so PyMuPDF returns either the private-use
+# code point U+F0xx or the bare byte (e.g. U+F0FB) - invisible junk in the
+# Markdown - or, when the PDF carries a ToUnicode table, the right symbol.
+# The table below maps only well-known code points, and only when the character's
+# own font is that dingbat font: the same code in an ordinary font is a letter.
+# Each entry was checked against the glyph in a real PDF (marked "seen") or is the
+# standard published code for it; anything not certain is left out on purpose
+# (for instance Wingdings 2 0x4F, 0x50, 0xA3, whose glyphs could not be verified).
+_DINGBAT_MAP: dict[str, dict[int, str]] = {
+    "wingdings": {
+        0xFC: chr(0x2713),  # check mark
+        0xFB: chr(0x2717),  # ballot x, seen: a plain cross in a meal table
+        0xFE: chr(0x2611),  # ballot box with check
+        0xFD: chr(0x2612),  # ballot box with x
+        0xA8: chr(0x2610),  # empty ballot box
+        0x6C: chr(0x25CF),  # black circle
+    },
+    "wingdings2": {
+        0x52: chr(0x2611),  # seen: a check inside a box
+        0x54: chr(0x2612),  # seen: a cross inside a box
+    },
+    "webdings": {
+        0xE3: chr(0x1F6CF),  # seen: a bed, beside hotel names
+    },
+    "zapfdingbats": {
+        0x33: chr(0x2713),  # check mark
+        0x34: chr(0x2714),  # heavy check mark
+        0x35: chr(0x2715),  # multiplication x
+        0x36: chr(0x2716),  # heavy multiplication x
+        0x37: chr(0x2717),  # ballot x
+        0x38: chr(0x2718),  # heavy ballot x
+    },
+}
+
+
+def dingbat_family(font: str) -> str | None:
+    """The key of :data:`_DINGBAT_MAP` for a font name (``BCDJEE+Wingdings-Regular``
+    -> ``wingdings``), or ``None`` for any other font."""
+    family = re.sub(r"[^a-z0-9]", "", font_family(font))
+    if family.endswith("zapfdingbats"):
+        return "zapfdingbats"
+    return family if family in _DINGBAT_MAP else None
+
+
+def map_dingbat(text: str, font: str) -> str:
+    """*text* (one character) as the Unicode symbol its dingbat *font* draws.
+
+    Only the private-use form (U+F020-U+F0FF) and the bare byte (below U+0100) are
+    mapped; text that is already a real symbol, and any character of any other
+    font, is returned unchanged."""
+    if len(text) != 1:
+        return text
+    family = dingbat_family(font)
+    if family is None:
+        return text
+    code = ord(text)
+    if 0xF020 <= code <= 0xF0FF:
+        code -= 0xF000
+    elif code >= 0x100:
+        return text
+    return _DINGBAT_MAP[family].get(code, text)
+
+
+def page_has_dingbat_font(page) -> bool:
+    """Whether any font used on *page* is a dingbat font (cheap: font list only)."""
+    try:
+        return any(dingbat_family(str(font[3])) for font in page.get_fonts())
+    except Exception:
+        return False
+
+
 def _repair(chars: list[Char], buggy: frozenset[str]) -> list[Char]:
     out: list[Char] = []
     for position, char in enumerate(chars):
@@ -118,6 +195,9 @@ def _repair(chars: list[Char], buggy: frozenset[str]) -> list[Char]:
         if char.text == SARA_AM and font_family(char.font) in buggy:
             if not _nikhahit_before(chars, position):
                 char = Char(SARA_AA, char.x0, char.y0, char.x1, char.y1, char.font)
+        symbol = map_dingbat(char.text, char.font)
+        if symbol != char.text:
+            char = Char(symbol, char.x0, char.y0, char.x1, char.y1, char.font)
         out.append(char)
     return out
 

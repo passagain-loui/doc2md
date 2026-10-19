@@ -13,9 +13,28 @@ those too):
    persist ids, which resolve to the current slide containers.
 
 Placeholder text (titles, bullets) lives in the slide list; text boxes live in
-each slide's drawing. Both are collected. Not recovered: speaker notes, tables
-as grids (cell text comes through in shape order), levels of bullet indentation
-and pictures. A note on every result says so.
+each slide's drawing. Both are collected.
+
+Speaker notes are found the same way, through the *current* edit chain, so an
+older version of a note that was later changed is never emitted:
+
+4. A slide's ``SlideAtom`` carries ``notesIdRef`` (0 = the slide has no notes).
+   In files PowerPoint writes it is a *notes page identifier*, not a persist
+   id: the document's notes list (``SlideListWithText`` instance 2) records that
+   id for each notes page together with the page's persist id, and the persist
+   directory maps that to the ``Notes`` container. (A producer that puts the
+   notes persist id there directly is accepted too, when the container's
+   ``NotesAtom`` names the same slide; with no ``SlideAtom`` at all, the notes
+   page whose ``NotesAtom`` names the slide is used.)
+5. The note text is the notes body placeholder of that container (a
+   ``TextHeaderAtom`` of type 2 followed by ``TextCharsAtom``/``TextBytesAtom``);
+   text boxes added to the notes page and slide-number placeholders are
+   skipped. Text kept in the notes list itself is used if the page has none.
+
+Each note is emitted under its slide as ``> Speaker notes: ...`` on one line,
+exactly as the .pptx engine does. Not recovered: tables as grids (cell text
+comes through in shape order), levels of bullet indentation and pictures. A note
+on every result says so.
 """
 
 from __future__ import annotations
@@ -30,12 +49,15 @@ from doc2md.engine.base import BaseEngine
 
 OLE_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 LEGACY_NOTE = (
-    "> Legacy .ppt: slide text was recovered; speaker notes, table layout, "
+    "> Legacy .ppt: slide text and speaker notes were recovered; table layout, "
     "bullet levels and pictures were not."
 )
 
 _REC_DOCUMENT = 0x03E8
 _REC_SLIDE = 0x03EE
+_REC_SLIDE_ATOM = 0x03EF
+_REC_NOTES = 0x03F0
+_REC_NOTES_ATOM = 0x03F1
 _REC_SLIDE_LIST = 0x0FF0
 _REC_SLIDE_PERSIST = 0x03F3
 _REC_USER_EDIT = 0x0FF5
@@ -60,6 +82,15 @@ class _TextBlock:
 class _SlideText:
     placeholders: list[_TextBlock] = field(default_factory=list)
     boxes: list[str] = field(default_factory=list)
+    slide_id: int = 0
+
+
+@dataclass
+class _NotesEntry:
+    """One page of the document's notes list: which slide it belongs to, and any text kept there."""
+
+    slide_id: int = 0
+    texts: list[str] = field(default_factory=list)
 
 
 def _header(data: bytes, offset: int) -> tuple[int, int, int, int]:
@@ -135,8 +166,10 @@ def _persist_offsets(data: bytes, current_user: bytes) -> tuple[dict[int, int], 
     return offsets, doc_persist_id
 
 
-def _slide_order(data: bytes, offsets: dict[int, int], doc_persist_id: int) -> tuple[list[int], dict[int, _SlideText]]:
-    """Slide persist ids in order, plus placeholder text from the slide list."""
+def _slide_order(
+    data: bytes, offsets: dict[int, int], doc_persist_id: int
+) -> tuple[list[int], dict[int, _SlideText], dict[int, _NotesEntry]]:
+    """Slide persist ids in order, placeholder text from the slide list, and the notes list."""
     doc_at = offsets.get(doc_persist_id)
     if doc_at is None or doc_at + 8 > len(data):
         raise ConversionError("unreadable presentation (document container not found)")
@@ -146,28 +179,118 @@ def _slide_order(data: bytes, offsets: dict[int, int], doc_persist_id: int) -> t
 
     order: list[int] = []
     text_by_slide: dict[int, _SlideText] = {}
+    notes_list: dict[int, _NotesEntry] = {}
     for rec_type, instance, body, stop, _container in _walk(
         data, doc_at + 8, doc_at + 8 + length, recurse=False
     ):
         # Instance 0 lists the slides; 1 is the masters and 2 the notes pages.
-        if rec_type != _REC_SLIDE_LIST or instance != 0:
+        if rec_type != _REC_SLIDE_LIST or instance not in (0, 2):
             continue
         current: _SlideText | None = None
+        note: _NotesEntry | None = None
         kind = 4
         for rec_type, _instance, atom, atom_stop, _c in _walk(data, body, stop, recurse=False):
             if rec_type == _REC_SLIDE_PERSIST:
                 persist_id = struct.unpack_from("<I", data, atom)[0]
-                current = _SlideText()
-                text_by_slide[persist_id] = current
-                order.append(persist_id)
+                slide_id = struct.unpack_from("<I", data, atom + 12)[0] if atom_stop - atom >= 16 else 0
                 kind = 4
-            elif rec_type == _REC_TEXT_HEADER and current is not None:
+                if instance == 0:
+                    current = _SlideText(slide_id=slide_id)
+                    text_by_slide[persist_id] = current
+                    order.append(persist_id)
+                else:
+                    note = _NotesEntry(slide_id=slide_id)
+                    notes_list[persist_id] = note
+            elif rec_type == _REC_TEXT_HEADER and (current is not None or note is not None):
                 kind = struct.unpack_from("<I", data, atom)[0]
-            elif rec_type in (_REC_TEXT_CHARS, _REC_TEXT_BYTES) and current is not None:
+            elif rec_type in (_REC_TEXT_CHARS, _REC_TEXT_BYTES):
                 text = _decode_text(rec_type, data[atom:atom_stop])
-                if text.strip() and kind != _NOTES_TYPE:
+                if not text.strip():
+                    continue
+                if instance == 0 and current is not None and kind != _NOTES_TYPE:
                     current.placeholders.append(_TextBlock(kind, text))
-    return order, text_by_slide
+                elif instance == 2 and note is not None and kind == _NOTES_TYPE:
+                    note.texts.append(text)
+    return order, text_by_slide, notes_list
+
+
+def _notes_page_text(data: bytes, notes_at: int) -> tuple[list[str], int]:
+    """Notes-body text of the ``Notes`` container at *notes_at*, and the slide id it names."""
+    if notes_at + 8 > len(data):
+        return [], 0
+    _v, _i, rec_type, length = _header(data, notes_at)
+    if rec_type != _REC_NOTES:
+        return [], 0
+    texts: list[str] = []
+    slide_id = 0
+    kind = 4
+    for rec_type, _instance, body, stop, _container in _walk(data, notes_at + 8, notes_at + 8 + length):
+        if rec_type == _REC_NOTES_ATOM and stop - body >= 4:
+            slide_id = struct.unpack_from("<I", data, body)[0]
+        elif rec_type == _REC_CLIENT_TEXTBOX:
+            kind = 4
+        elif rec_type == _REC_TEXT_HEADER:
+            kind = struct.unpack_from("<I", data, body)[0]
+        elif rec_type in (_REC_TEXT_CHARS, _REC_TEXT_BYTES) and kind == _NOTES_TYPE:
+            text = _decode_text(rec_type, data[body:stop])
+            if text.strip():
+                texts.append(text)
+    return texts, slide_id
+
+
+def _slide_notes_ref(data: bytes, slide_at: int) -> int | None:
+    """``notesIdRef`` from the slide's ``SlideAtom``, or ``None`` if it has none."""
+    if slide_at + 8 > len(data):
+        return None
+    _v, _i, rec_type, length = _header(data, slide_at)
+    if rec_type != _REC_SLIDE:
+        return None
+    for rec_type, _instance, body, stop, _container in _walk(
+        data, slide_at + 8, slide_at + 8 + length, recurse=False
+    ):
+        if rec_type == _REC_SLIDE_ATOM and stop - body >= 20:
+            return struct.unpack_from("<I", data, body + 16)[0]
+        break  # the SlideAtom is always the first record
+    return None
+
+
+def _speaker_notes(
+    data: bytes,
+    offsets: dict[int, int],
+    notes_list: dict[int, _NotesEntry],
+    slide_at: int | None,
+    slide_id: int,
+) -> str:
+    """The slide's speaker notes as one whitespace-collapsed line ("" if none)."""
+    notes_ref = _slide_notes_ref(data, slide_at) if slide_at is not None else None
+    if notes_ref == 0:
+        return ""  # PowerPoint's own statement that this slide has no notes page
+    persist_id: int | None = None
+    if notes_ref is not None:
+        persist_id = next((pid for pid, entry in notes_list.items() if entry.slide_id == notes_ref), None)
+        if persist_id is None and slide_id and notes_ref in offsets:
+            # notesIdRef holding the notes persist id itself; trust it only if
+            # the container names this very slide.
+            if _notes_page_text(data, offsets[notes_ref])[1] == slide_id:
+                persist_id = notes_ref
+    elif slide_id:
+        # No SlideAtom to ask: find the notes page that names this slide.
+        persist_id = next(
+            (
+                pid
+                for pid in notes_list
+                if pid in offsets and _notes_page_text(data, offsets[pid])[1] == slide_id
+            ),
+            None,
+        )
+    if persist_id is None:
+        return ""
+    texts: list[str] = []
+    if persist_id in offsets:
+        texts, _named = _notes_page_text(data, offsets[persist_id])
+    if not texts and persist_id in notes_list:
+        texts = notes_list[persist_id].texts
+    return " ".join(" ".join(text.split()) for text in texts).strip()
 
 
 def _slide_boxes(data: bytes, slide_at: int) -> list[_TextBlock]:
@@ -194,7 +317,7 @@ def _paragraphs(text: str) -> list[str]:
 
 def slides_from_stream(data: bytes, current_user: bytes) -> list[list[str]]:
     offsets, doc_persist_id = _persist_offsets(data, current_user)
-    order, text_by_slide = _slide_order(data, offsets, doc_persist_id)
+    order, text_by_slide, notes_list = _slide_order(data, offsets, doc_persist_id)
     slides: list[list[str]] = []
     for index, persist_id in enumerate(order, start=1):
         content = text_by_slide[persist_id]
@@ -202,6 +325,10 @@ def slides_from_stream(data: bytes, current_user: bytes) -> list[list[str]]:
         slide_at = offsets.get(persist_id)
         if slide_at is not None and slide_at + 8 <= len(data):
             blocks.extend(_slide_boxes(data, slide_at))
+        try:
+            notes = _speaker_notes(data, offsets, notes_list, slide_at, content.slide_id)
+        except Exception:  # notes are a bonus: a damaged notes page never fails the slide
+            notes = ""
         title = ""
         body: list[str] = []
         for block in blocks:
@@ -215,7 +342,12 @@ def slides_from_stream(data: bytes, current_user: bytes) -> list[list[str]]:
             title = body.pop(0)[0]
         body = [f"- {line}" for lines in body for line in lines]
         heading = f"## Slide {index}: {title}" if title else f"## Slide {index}"
-        slides.append([heading, "", *body, ""] if body else [heading, ""])
+        lines = [heading, ""]
+        if body:
+            lines.extend([*body, ""])
+        if notes:
+            lines.extend([f"> Speaker notes: {notes}", ""])
+        slides.append(lines)
     return slides
 
 

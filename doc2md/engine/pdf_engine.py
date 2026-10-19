@@ -20,6 +20,7 @@ page by page instead of being dropped.
 
 from __future__ import annotations
 
+import re
 import shutil
 import tempfile
 from collections.abc import Callable
@@ -43,6 +44,7 @@ from doc2md.core.pdf_text import (
     has_latin_mojibake,
     has_lost_marks,
     learn_mojibake_map,
+    page_has_dingbat_font,
     page_lines,
     repair_mojibake,
     text_in,
@@ -326,6 +328,7 @@ TABLE_BORDER_PX = 3  # width painted white along every cell edge before reading
 TABLE_CELL_INSET_PX = 4  # a cell's inner area for the ink test excludes this margin
 TABLE_CELL_INK_SHARE = 0.01  # dark share of a wordless cell above which it is re-read alone
 TABLE_DARK_CELL_LEVEL = 170  # mean gray (of 255) below which a cell is light-on-dark (a grey bar is ~110-140, a light row ~215)
+TABLE_DARK_BAND_MIN_PX = 8  # a dark band inside a light cell is at least this tall (about 2 pt at 300 dpi)
 _INK_LEVEL = 128
 
 # A bullet or dash cell holds one small mark and nothing else. Tesseract reads
@@ -352,6 +355,33 @@ TABLE_SYMBOL_CENTRE_BAND = (0.1, 0.9)  # and sits in this middle part of the cel
 TABLE_SYMBOL_MAX_EDGE_INK_PT2 = 1.5
 BULLET = "•"
 EN_DASH = "–"
+CHECK = chr(0x2713)
+CROSS = chr(0x2717)
+
+# A tick or a cross in a table cell is decided from the ink too, and more strictly
+# than a dot or a dash: the whole ink of the cell must be ONE connected shape of a
+# plausible size (in points, like the constants above) that passes the shape test
+# of :func:`_looks_like_check` / :func:`_looks_like_cross`. Letters that resemble
+# them ("V", "/", the "x" of "4 x 4", an "X" inside a word) fail those tests:
+# they are two pieces, or wide, or have ink in the wrong corners.
+TABLE_MARK_MIN_PT = 2.5  # a tick or cross is this big ...
+TABLE_MARK_MAX_PT = 14.0  # ... up to this, each way
+TABLE_MARK_MAX_CELL_SHARE = 0.95  # of the cell's height
+TABLE_MARK_MIN_FILL = 0.08  # thin strokes: a stroke shape fills this much of its box ...
+TABLE_MARK_MAX_FILL = 0.65  # ... but not a solid block
+TABLE_CHECK_MIN_ASPECT = 0.8  # width / height of a tick
+TABLE_CHECK_MAX_ASPECT = 2.2
+TABLE_CHECK_FOOT_X = (0.1, 0.55)  # the lowest ink is this far across: left of centre
+TABLE_CHECK_TIP_MIN_X = 0.6  # the highest ink is at least this far across: the right arm
+TABLE_CHECK_CORNER_MAX_SHARE = 0.12  # ink share allowed in the empty top-left / bottom-right corners
+TABLE_CHECK_ARM_MIN_SHARE = 0.08  # ink share needed on the short left arm
+TABLE_CHECK_LEFT_TIP_Y = (0.25, 0.75)  # the leftmost ink (end of the short arm) is this far down: a "/" ends at the bottom
+TABLE_CROSS_MIN_ASPECT = 0.65  # width / height of a cross: roughly square
+TABLE_CROSS_MAX_ASPECT = 1.55
+TABLE_CROSS_CORNER_MIN_SHARE = 0.15  # ink share needed in each of the four corners
+TABLE_CROSS_CENTRE_MIN_SHARE = 0.25  # ... and in the middle, where the strokes cross
+TABLE_CROSS_SIDE_MAX_SHARE = 0.1  # ... and allowed in the middle of each side, which stays empty
+TABLE_CROSS_BALANCE = (0.6, 1.67)  # ink in the left half / right half (and top / bottom)
 
 
 def _whiten_cell_borders(image, boxes) -> None:
@@ -388,6 +418,44 @@ def _invert_dark_cells(image, boxes) -> int:
             # on its own makes the fill white and the text black.
             image.paste(ImageOps.autocontrast(ImageOps.invert(region), cutoff=2), (x0, y0))
             inverted += 1
+        else:
+            inverted += _invert_dark_bands(image, (x0, y0, x1, y1))
+    return inverted
+
+
+def _invert_dark_bands(image, box) -> int:
+    """Invert the dark horizontal bands of one mostly light cell, in place.
+
+    pdfplumber sometimes gives one tall cell that holds a dark section bar and
+    the light row under it; the bar's white text is lost unless the bar alone is
+    inverted. A row of pixels is dark when its *median* is below
+    ``TABLE_DARK_CELL_LEVEL`` (white text on a dark bar still has a dark median;
+    dark text on a light row never does), and a run of such rows at least
+    ``TABLE_DARK_BAND_MIN_PX`` tall is a band. Returns the number of bands inverted.
+    """
+    from PIL import ImageOps
+
+    x0, y0, x1, y1 = box
+    gray = image.crop(box).convert("L")
+    width, height = gray.size
+    pixels = list(gray.getdata())
+    dark_rows = [
+        sorted(pixels[row * width:(row + 1) * width])[width // 2] < TABLE_DARK_CELL_LEVEL
+        for row in range(height)
+    ]
+    inverted = 0
+    row = 0
+    while row < height:
+        if not dark_rows[row]:
+            row += 1
+            continue
+        start = row
+        while row < height and dark_rows[row]:
+            row += 1
+        if row - start >= TABLE_DARK_BAND_MIN_PX:
+            band = (x0, y0 + start, x1, y0 + row)
+            image.paste(ImageOps.autocontrast(ImageOps.invert(image.crop(band)), cutoff=2), (band[0], band[1]))
+            inverted += 1
     return inverted
 
 
@@ -423,13 +491,103 @@ def _clear_edge_ink(ink) -> int:
     return before - ink.histogram()[255]
 
 
+def _ink_grid(ink, found) -> list[list[int]]:
+    """The ink pixels (0 / 1) inside the bounding box *found* of the binary image *ink*, by row."""
+    shape = ink.crop(found)
+    width = shape.width
+    flat = [1 if value else 0 for value in shape.getdata()]
+    return [flat[row * width:(row + 1) * width] for row in range(shape.height)]
+
+
+def _one_piece(grid: list[list[int]]) -> bool:
+    """Whether all the ink of *grid* is one 8-connected blob."""
+    height, width = len(grid), len(grid[0])
+    start = next(((y, x) for y in range(height) for x in range(width) if grid[y][x]), None)
+    if start is None:
+        return False
+    seen = {start}
+    stack = [start]
+    while stack:
+        y, x = stack.pop()
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                ny, nx = y + dy, x + dx
+                if 0 <= ny < height and 0 <= nx < width and grid[ny][nx] and (ny, nx) not in seen:
+                    seen.add((ny, nx))
+                    stack.append((ny, nx))
+    return len(seen) == sum(map(sum, grid))
+
+
+def _region_share(grid: list[list[int]], x_range, y_range) -> float:
+    """Share of the pixels in the fractional box (x0, x1) x (y0, y1) of *grid* that are ink."""
+    height, width = len(grid), len(grid[0])
+    left, right = int(x_range[0] * width), max(int(x_range[0] * width) + 1, round(x_range[1] * width))
+    top, bottom = int(y_range[0] * height), max(int(y_range[0] * height) + 1, round(y_range[1] * height))
+    cells = [grid[y][x] for y in range(top, min(bottom, height)) for x in range(left, min(right, width))]
+    return sum(cells) / len(cells) if cells else 0.0
+
+
+def _centroid_x(grid: list[list[int]], rows) -> float | None:
+    """Mean x (as a fraction of the width) of the ink pixels in *rows*, or ``None``."""
+    width = len(grid[0])
+    xs = [x for y in rows for x in range(width) if grid[y][x]]
+    return sum(xs) / len(xs) / width if xs else None
+
+
+def _looks_like_check(grid: list[list[int]]) -> bool:
+    """A tick: one stroke, a short left arm going down to a foot left of centre
+    and a long right arm rising to the top right; the top-left and bottom-right
+    corners stay empty (a "V" has ink top left, a "/" has no left arm)."""
+    height, width = len(grid), len(grid[0])
+    if not TABLE_CHECK_MIN_ASPECT <= width / height <= TABLE_CHECK_MAX_ASPECT:
+        return False
+    band = max(1, round(height * 0.2))
+    foot = _centroid_x(grid, range(height - band, height))
+    tip = _centroid_x(grid, range(0, band))
+    if foot is None or tip is None:
+        return False
+    if not (TABLE_CHECK_FOOT_X[0] <= foot <= TABLE_CHECK_FOOT_X[1] and tip >= TABLE_CHECK_TIP_MIN_X):
+        return False
+    if _region_share(grid, (0, 0.3), (0, 0.3)) > TABLE_CHECK_CORNER_MAX_SHARE:
+        return False
+    if _region_share(grid, (0.7, 1), (0.7, 1)) > TABLE_CHECK_CORNER_MAX_SHARE:
+        return False
+    if _region_share(grid, (0, 0.3), (0.3, 0.8)) < TABLE_CHECK_ARM_MIN_SHARE:
+        return False
+    columns = max(1, round(width * 0.15))
+    ys = [y for y in range(height) for x in range(columns) if grid[y][x]]
+    tip_y = sum(ys) / len(ys) / height if ys else None
+    return tip_y is not None and TABLE_CHECK_LEFT_TIP_Y[0] <= tip_y <= TABLE_CHECK_LEFT_TIP_Y[1]
+
+
+def _looks_like_cross(grid: list[list[int]]) -> bool:
+    """A cross: two strokes crossing in the middle of a roughly square box, ink in
+    all four corners and the centre, and nothing in the middle of any side."""
+    height, width = len(grid), len(grid[0])
+    if not TABLE_CROSS_MIN_ASPECT <= width / height <= TABLE_CROSS_MAX_ASPECT:
+        return False
+    for x_range, y_range in (((0, 0.3), (0, 0.3)), ((0.7, 1), (0, 0.3)), ((0, 0.3), (0.7, 1)), ((0.7, 1), (0.7, 1))):
+        if _region_share(grid, x_range, y_range) < TABLE_CROSS_CORNER_MIN_SHARE:
+            return False
+    if _region_share(grid, (0.35, 0.65), (0.35, 0.65)) < TABLE_CROSS_CENTRE_MIN_SHARE:
+        return False
+    for x_range, y_range in (((0.4, 0.6), (0, 0.2)), ((0.4, 0.6), (0.8, 1)), ((0, 0.2), (0.4, 0.6)), ((0.8, 1), (0.4, 0.6))):
+        if _region_share(grid, x_range, y_range) > TABLE_CROSS_SIDE_MAX_SHARE:
+            return False
+    left, right = _region_share(grid, (0, 0.5), (0, 1)), _region_share(grid, (0.5, 1), (0, 1))
+    upper, lower = _region_share(grid, (0, 1), (0, 0.5)), _region_share(grid, (0, 1), (0.5, 1))
+    low, high = TABLE_CROSS_BALANCE
+    return bool(right and lower and low <= left / right <= high and low <= upper / lower <= high)
+
+
 def _symbol_in_cell(gray, box, scale: float) -> str | None:
-    """``"•"`` or ``"–"`` when the whole ink of the cell is one bullet or one dash.
+    """``"\u2022"``, ``"\u2013"``, ``"\u2713"`` or ``"\u2717"`` when the whole ink of the
+    cell is one bullet, one dash, one tick or one cross.
 
     Looks at the dark pixels of *box*'s inner area in the grayscale *gray*: their
-    bounding box and how solidly they fill it. Two marks, a digit, a decimal
-    point beside digits or any text have a bigger or emptier box and give
-    ``None``, as does an empty cell."""
+    bounding box and how solidly they fill it (and, for a tick or a cross, the
+    shape of the strokes). Two marks, a digit, a decimal point beside digits or
+    any text have a bigger or emptier box and give ``None``, as does an empty cell."""
     x0, y0, x1, y1 = box
     inner = (
         x0 + TABLE_CELL_INSET_PX, y0 + TABLE_CELL_INSET_PX,
@@ -449,8 +607,6 @@ def _symbol_in_cell(gray, box, scale: float) -> str | None:
     if area / (scale * scale) < TABLE_SYMBOL_MIN_AREA_PT2 or width <= 0 or height <= 0:
         return None
     region_w, region_h = region.size
-    if (found[3] - found[1]) > TABLE_SYMBOL_MAX_CELL_SHARE * region_h:
-        return None
     low, high = TABLE_SYMBOL_CENTRE_BAND
     centre_x = (found[0] + found[2]) / 2 / region_w
     centre_y = (found[1] + found[3]) / 2 / region_h
@@ -458,17 +614,29 @@ def _symbol_in_cell(gray, box, scale: float) -> str | None:
         return None
     fill = area / ((found[2] - found[0]) * (found[3] - found[1]))
     longer, shorter = max(width, height), min(width, height)
+    if (found[3] - found[1]) <= TABLE_SYMBOL_MAX_CELL_SHARE * region_h:
+        if (
+            TABLE_DOT_MIN_PT <= shorter and longer <= TABLE_DOT_MAX_PT
+            and longer / shorter <= TABLE_DOT_MAX_ASPECT and fill >= TABLE_DOT_MIN_FILL
+        ):
+            return BULLET
+        if (
+            TABLE_DASH_MIN_PT <= width <= TABLE_DASH_MAX_PT
+            and height <= TABLE_DASH_MAX_THICKNESS_PT
+            and width / height >= TABLE_DASH_MIN_ASPECT and fill >= TABLE_DASH_MIN_FILL
+        ):
+            return EN_DASH
     if (
-        TABLE_DOT_MIN_PT <= shorter and longer <= TABLE_DOT_MAX_PT
-        and longer / shorter <= TABLE_DOT_MAX_ASPECT and fill >= TABLE_DOT_MIN_FILL
+        TABLE_MARK_MIN_PT <= shorter and longer <= TABLE_MARK_MAX_PT
+        and (found[3] - found[1]) <= TABLE_MARK_MAX_CELL_SHARE * region_h
+        and TABLE_MARK_MIN_FILL <= fill <= TABLE_MARK_MAX_FILL
     ):
-        return BULLET
-    if (
-        TABLE_DASH_MIN_PT <= width <= TABLE_DASH_MAX_PT
-        and height <= TABLE_DASH_MAX_THICKNESS_PT
-        and width / height >= TABLE_DASH_MIN_ASPECT and fill >= TABLE_DASH_MIN_FILL
-    ):
-        return EN_DASH
+        grid = _ink_grid(ink, found)
+        if _one_piece(grid):
+            if _looks_like_check(grid):
+                return CHECK
+            if _looks_like_cross(grid):
+                return CROSS
     return None
 
 
@@ -491,6 +659,86 @@ def _cell_is_doubtful(words) -> bool:
     return bool(confidences) and sum(confidences) / len(confidences) < TABLE_CELL_MIN_CONFIDENCE
 
 
+# Why a short Thai label ("สี", "มม.") came out as "a" / "uw.": with ``eng`` loaded
+# next to ``tha``, Tesseract takes a few small Thai glyphs for Latin letters, and a
+# plain per-cell read of a wide cell holding one tiny word (psm 6) can return
+# nothing at all. Read alone, a short label is cropped to its ink, enlarged to a
+# size Tesseract likes, and read as one line with ``tha`` only. Measured on eight
+# short cells ("สี", four "มม.", "หน้า", "หลัง"): the per-cell read got 7, this 8.
+TABLE_SHORT_REREAD_PAD_PT = 3.0  # white margin around the ink of a short cell
+TABLE_SHORT_REREAD_TARGET_PX = 45  # enlarge the ink to about this height ...
+TABLE_SHORT_REREAD_MAX_FACTOR = 4  # ... by at most this factor
+TABLE_SHORT_REREAD_MIN_CONF = 50.0  # mean word confidence below which the Thai-only read is not trusted
+_THAI_LETTER = re.compile("[ก-ฮ]")
+
+
+def _join_label_words(words) -> str:
+    """The words of a one-line short label, left to right. Thai pieces and
+    punctuation are joined as they come ("มม" + "." is "มม."); only two Latin
+    words get a space between them."""
+    out = ""
+    for word in sorted(words, key=lambda item: item[2]):
+        text = word[1]
+        if out and out[-1].isascii() and out[-1].isalnum() and text[0].isascii() and text[0].isalnum():
+            out += " "
+        out += text
+    return normalize_thai(out)
+
+
+def _reread_short_cell(crop, language: str, scale: float) -> str:
+    """Re-read of a short label's cell.
+
+    The plain per-cell read goes first and is kept if it found Thai ("ลิตร", "มม."
+    read right that way, and a Thai-only read sometimes garbles them). Only when
+    it found nothing or only Latin letters (the failures described at
+    ``TABLE_SHORT_REREAD_*``) is the cell cropped to its ink, enlarged and read as
+    one line with ``tha`` only; that read is used if it has a Thai letter and a mean
+    confidence of at least ``TABLE_SHORT_REREAD_MIN_CONF``, else the plain read
+    stands (a genuine short Latin word such as "LED" reads as itself)."""
+    import pytesseract
+    from PIL import Image, ImageOps
+
+    plain = recognize_region(crop, language)
+    if _THAI_LETTER.search(plain) or "tha" not in language.split("+"):
+        return plain
+    gray = prepare_for_ocr(crop.convert("RGB")).convert("L")
+    found = gray.point(lambda value: 255 if value < _INK_LEVEL else 0).getbbox()
+    if found is None:
+        return plain
+    pad = round(TABLE_SHORT_REREAD_PAD_PT * scale)
+    tight = gray.crop((
+        max(0, found[0] - pad), max(0, found[1] - pad),
+        min(gray.width, found[2] + pad), min(gray.height, found[3] + pad),
+    ))
+    factor = max(1, min(TABLE_SHORT_REREAD_MAX_FACTOR, round(TABLE_SHORT_REREAD_TARGET_PX / max(1, found[3] - found[1]))))
+    if factor > 1:
+        tight = tight.resize((tight.width * factor, tight.height * factor), Image.LANCZOS)
+    data = pytesseract.image_to_data(
+        ImageOps.expand(tight, 10, fill=255), lang="tha", config="--psm 7",
+        output_type=pytesseract.Output.DICT,
+    )
+    words = []
+    confidences = []
+    for index, text in enumerate(data.get("text", [])):
+        word = (text or "").strip()
+        if not word:
+            continue
+        words.append((
+            (data["block_num"][index], data["par_num"][index], data["line_num"][index]),
+            word, int(data["left"][index]), int(data["top"][index]),
+            int(data["width"][index]), int(data["height"][index]), float(data["conf"][index]),
+        ))
+        if float(data["conf"][index]) >= 0:
+            confidences.append(float(data["conf"][index]))
+    text = _join_label_words(words)
+    trusted = (
+        bool(_THAI_LETTER.search(text))
+        and confidences
+        and sum(confidences) / len(confidences) >= TABLE_SHORT_REREAD_MIN_CONF
+    )
+    return text if trusted else plain
+
+
 def _needs_short_reread(text: str) -> bool:
     """Whether the single read of a cell returned so little that it is worth a
     second look on its own: see ``TABLE_SHORT_TEXT_MAX_CHARS`` and
@@ -499,6 +747,8 @@ def _needs_short_reread(text: str) -> bool:
     compact = "".join(text.split())
     if not compact or any(char.isdigit() for char in compact):
         return False
+    if not any(char.isalpha() for char in compact):
+        return False  # a dash, a dot or a mark: not a misread label, and a Thai read would invent letters
     if TABLE_SHORT_TEXT_MAX_CHARS is not None and len(compact) <= TABLE_SHORT_TEXT_MAX_CHARS:
         return True
     return (
@@ -622,7 +872,9 @@ def _grid_from_table_ocr(
                     text = _cell_text(words_by_cell[(r, c)])
                     if _needs_short_reread(text):
                         page_box = _scaled_box(table.rows[r].cells[c], scale, width, height)
-                        alone = recognize_region(page_image.crop(page_box), language) if page_box else ""
+                        alone = (
+                            _reread_short_cell(page_image.crop(page_box), language, scale) if page_box else ""
+                        )
                         text = alone or text
                         if stats is not None:
                             stats["reread_short"] += 1
@@ -1219,7 +1471,9 @@ class PdfEngine(BaseEngine):
         unreadable = 0
         for page in doc:
             try:
-                if buggy:
+                if buggy or page_has_dingbat_font(page):
+                    # Characters, not the page string: a symbol font's ticks and
+                    # crosses are only mapped where the font of each one is known.
                     pages.append(text_in(page_lines(page, buggy)).strip())
                 else:
                     pages.append(page.get_text("text").strip())

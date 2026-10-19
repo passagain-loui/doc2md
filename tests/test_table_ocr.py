@@ -804,3 +804,279 @@ def test_the_short_rule_and_symbols_are_counted_in_the_stats(tesseract, region, 
 
     assert stats["reread_short"] == 1
     assert stats["symbols"] == 1
+
+
+# ------------------------------------------------------------ ticks and crosses
+
+_S = 300 / 72.0  # the resolution the engine renders at: marks are 5-8 pt = 20-35 px
+
+
+def _shape(*draw_calls, size=(240, 60)):
+    """A grayscale cell with the given ``(kind, coords, width)`` strokes drawn in black."""
+    image = Image.new("L", size, 255)
+    draw = ImageDraw.Draw(image)
+    for kind, coords, width in draw_calls:
+        if kind == "line":
+            draw.line(coords, fill=0, width=width)
+        else:
+            draw.rectangle(coords, fill=0)
+    return image
+
+
+def _classify(image):
+    return pdf_engine._symbol_in_cell(image, (0, 0) + image.size, _S)
+
+
+def _tick(width=4, dx=0):
+    return _shape(("line", [(105 + dx, 32), (113 + dx, 42), (132 + dx, 16)], width))
+
+
+def _cross(width=4):
+    return _shape(("line", [(108, 16), (130, 40)], width), ("line", [(108, 40), (130, 16)], width))
+
+
+def test_a_drawn_tick_is_a_check_mark_at_several_stroke_widths():
+    for width in (2, 3, 4, 6):
+        assert _classify(_tick(width)) == pdf_engine.CHECK, width
+
+
+def test_a_drawn_cross_is_a_cross_at_several_stroke_widths():
+    for width in (2, 4, 6):
+        assert _classify(_cross(width)) == pdf_engine.CROSS, width
+
+
+def test_the_check_and_cross_symbols():
+    assert pdf_engine.CHECK == chr(0x2713)
+    assert pdf_engine.CROSS == chr(0x2717)
+
+
+def test_a_tick_off_to_one_side_of_the_cell_is_still_found():
+    assert _classify(_tick(dx=-40)) == pdf_engine.CHECK
+
+
+@pytest.mark.parametrize(
+    "name, image",
+    [
+        ("V", _shape(("line", [(108, 16), (119, 42), (130, 16)], 4))),
+        ("slash", _shape(("line", [(110, 42), (130, 16)], 4))),
+        ("thin slash", _shape(("line", [(110, 42), (130, 16)], 2))),
+        ("steep slash", _shape(("line", [(112, 44), (124, 12)], 4))),
+        ("backslash", _shape(("line", [(110, 16), (130, 42)], 4))),
+        ("plus", _shape(("line", [(119, 16), (119, 42)], 4), ("line", [(106, 29), (132, 29)], 4))),
+        ("mirrored tick", _shape(("line", [(132, 32), (124, 42), (105, 16)], 4))),
+        ("L", _shape(("line", [(110, 16), (110, 42)], 4), ("line", [(110, 42), (130, 42)], 4))),
+        (
+            "x in 4 x 4",
+            _shape(
+                ("rect", (70, 16, 82, 42), 0),
+                ("line", [(95, 22), (110, 38)], 3), ("line", [(95, 38), (110, 22)], 3),
+                ("rect", (128, 16, 140, 42), 0),
+            ),
+        ),
+        (
+            "X inside a word",
+            _shape(
+                ("rect", (60, 20, 70, 40), 0),
+                ("line", [(80, 16), (100, 40)], 3), ("line", [(80, 40), (100, 16)], 3),
+                ("rect", (110, 20, 120, 40), 0),
+            ),
+        ),
+        ("two ticks", _shape(("line", [(60, 32), (68, 42), (87, 16)], 4), ("line", [(150, 32), (158, 42), (177, 16)], 4))),
+    ],
+)
+def test_lookalikes_are_not_ticks_or_crosses(name, image):
+    assert _classify(image) is None, name
+
+
+def test_a_tick_or_cross_too_small_or_too_big_is_not_one():
+    tiny = _shape(("line", [(118, 30), (120, 33), (124, 27)], 1))
+    huge = _shape(("line", [(20, 10), (50, 50), (200, 5)], 8), size=(240, 60))
+    assert _classify(tiny) is None
+    assert _classify(huge) is None
+
+
+def test_a_tick_is_not_a_bullet_or_a_dash():
+    assert _classify(_tick()) not in (pdf_engine.BULLET, pdf_engine.EN_DASH)
+    assert _classify(_shape(("rect", (116, 27, 122, 33), 0))) == pdf_engine.BULLET  # a solid dot is still a dot
+
+
+def test_a_tick_and_a_cross_cell_in_a_table_read_as_symbols(tesseract, region):
+    page = _page()
+    draw = ImageDraw.Draw(page)
+    draw.line([(42, 50), (46, 56), (54, 44)], fill="black", width=2)  # a tick (13 px, so 13 pt at scale 1) in the left cell
+    draw.line([(146, 46), (156, 56)], fill="black", width=2)  # and a cross in the right cell
+    draw.line([(146, 56), (156, 46)], fill="black", width=2)
+    tesseract(_data(("v", 40, 40, 20, 20, 90), ("x", 140, 40, 20, 20, 90)))
+
+    grid = _read(_two_cells(), page)
+
+    assert grid == [[pdf_engine.CHECK, pdf_engine.CROSS]]
+    assert region == []  # decided from the image, never re-read
+
+
+def test_a_letter_x_in_a_word_cell_is_not_turned_into_a_cross(tesseract, region):
+    page = _page()
+    _mark(page, (30, 45, 34, 58), (60, 45, 64, 58))  # two stems of other letters
+    draw = ImageDraw.Draw(page)
+    draw.line([(40, 46), (54, 58)], fill="black", width=2)
+    draw.line([(40, 58), (54, 46)], fill="black", width=2)
+    tesseract(_data(("Maxi", 28, 40, 40, 20, 95)))
+
+    assert _read(_two_cells(), page) == [["Maxi", ""]]
+
+
+# ------------------------------------------------------------ dark bands in a cell
+
+
+def test_a_dark_bar_inside_a_tall_light_cell_is_inverted_on_its_own():
+    image = Image.new("RGB", (100, 120), (215, 215, 215))
+    ImageDraw.Draw(image).rectangle((0, 0, 99, 19), fill=(60, 60, 60))  # a bar across the top
+    ImageDraw.Draw(image).rectangle((20, 6, 60, 13), fill=(255, 255, 255))  # its white text
+    ImageDraw.Draw(image).rectangle((20, 70, 60, 78), fill=(0, 0, 0))  # dark text on the light part
+
+    inverted = pdf_engine._invert_dark_cells(image, [(0, 0, 100, 120)])
+
+    assert inverted == 1
+    assert min(image.getpixel((5, 5))) >= 250  # the bar is white now
+    assert max(image.getpixel((40, 10))) <= 5  # its text is black
+    assert image.getpixel((5, 100)) == (215, 215, 215)  # the light part is untouched
+    assert image.getpixel((40, 74)) == (0, 0, 0)
+
+
+def test_dark_text_rows_in_a_light_cell_are_not_a_band():
+    image = Image.new("L", (100, 40), 215)
+    for x in range(0, 100, 5):  # 40 % ink across a 14-row line of heavy text
+        ImageDraw.Draw(image).rectangle((x, 10, x + 1, 24), fill=0)
+    before = list(image.getdata())
+
+    assert pdf_engine._invert_dark_bands(image, (0, 0, 100, 40)) == 0
+    assert list(image.getdata()) == before
+
+
+def test_a_dark_stripe_thinner_than_the_minimum_is_not_a_band():
+    image = Image.new("L", (100, 40), 215)
+    ImageDraw.Draw(image).rectangle((0, 10, 99, 10 + pdf_engine.TABLE_DARK_BAND_MIN_PX - 2), fill=40)
+
+    assert pdf_engine._invert_dark_bands(image, (0, 0, 100, 40)) == 0
+
+
+def test_a_fully_dark_cell_is_still_inverted_whole():
+    image = Image.new("RGB", (100, 30), (100, 100, 100))
+
+    assert pdf_engine._invert_dark_cells(image, [(0, 0, 100, 30)]) == 1
+
+
+# --------------------------------------------------- re-reading short Thai labels
+
+
+class _ShortRead(types.ModuleType):
+    """pytesseract stand-in for the one-word re-read: records what it was given."""
+
+    Output = types.SimpleNamespace(DICT="dict")
+
+    def __init__(self, text="สี", conf=80.0):
+        super().__init__("pytesseract")
+        self.text, self.conf, self.calls = text, conf, []
+
+    def image_to_data(self, image, lang="eng", config="", output_type=None):
+        self.calls.append({"size": image.size, "lang": lang, "config": config})
+        words = [self.text] if self.text else []
+        return {
+            "text": words, "conf": [self.conf] * len(words), "block_num": [1] * len(words),
+            "par_num": [1] * len(words), "line_num": [1] * len(words),
+            "left": [10] * len(words), "top": [10] * len(words), "width": [30] * len(words),
+            "height": [20] * len(words),
+        }
+
+
+def _label_crop():
+    """A wide cell with one small mark of ink at its left (a short label)."""
+    crop = Image.new("RGB", (214, 28), (215, 215, 215))
+    ImageDraw.Draw(crop).rectangle((6, 8, 18, 20), fill=(0, 0, 0))
+    return crop
+
+
+def test_a_short_label_is_read_with_thai_only_after_cropping_to_its_ink(monkeypatch, region):
+    fake = _ShortRead("สี")
+    monkeypatch.setitem(sys.modules, "pytesseract", fake)
+
+    assert pdf_engine._reread_short_cell(_label_crop(), "tha+eng", _S) == "สี"
+
+    call = fake.calls[0]
+    assert call["lang"] == "tha"  # no eng: with it a tiny Thai word reads as "a"
+    assert call["config"] == "--psm 7"
+    assert call["size"][0] < 214 * pdf_engine.TABLE_SHORT_REREAD_MAX_FACTOR  # cropped, not the whole cell
+    assert call["size"][1] > 28  # and enlarged
+    assert region == [(214, 28)]  # the plain per-cell read goes first and found no Thai
+
+
+def test_the_thai_only_read_is_not_used_without_a_thai_letter(monkeypatch, region):
+    monkeypatch.setitem(sys.modules, "pytesseract", _ShortRead("LED"))
+
+    assert pdf_engine._reread_short_cell(_label_crop(), "tha+eng", _S) == "CELL"
+    assert region == [(214, 28)]  # fell back to the plain per-cell read
+
+
+def test_an_unsure_thai_only_read_is_not_used(monkeypatch, region):
+    monkeypatch.setitem(sys.modules, "pytesseract", _ShortRead("สี", conf=pdf_engine.TABLE_SHORT_REREAD_MIN_CONF - 1))
+
+    assert pdf_engine._reread_short_cell(_label_crop(), "tha+eng", _S) == "CELL"
+
+
+def test_without_thai_in_the_languages_the_plain_read_is_used(monkeypatch, region):
+    fake = _ShortRead("สี")
+    monkeypatch.setitem(sys.modules, "pytesseract", fake)
+
+    assert pdf_engine._reread_short_cell(_label_crop(), "eng", _S) == "CELL"
+    assert fake.calls == []
+
+
+def test_a_cell_without_ink_uses_the_plain_read(monkeypatch, region):
+    fake = _ShortRead("สี")
+    monkeypatch.setitem(sys.modules, "pytesseract", fake)
+
+    assert pdf_engine._reread_short_cell(Image.new("RGB", (100, 30), "white"), "tha+eng", _S) == "CELL"
+    assert fake.calls == []
+
+
+def test_a_misread_label_goes_through_the_short_reader(tesseract, monkeypatch):
+    monkeypatch.setattr(pdf_engine, "TABLE_SHORT_TEXT_MAX_CHARS", 3)
+    seen = []
+    monkeypatch.setattr(
+        pdf_engine, "_reread_short_cell", lambda crop, language, scale: seen.append((crop.size, language, scale)) or "สี"
+    )
+    tesseract(_data(("a", 10, 40, 10, 20, 96)))
+
+    assert _read(_two_cells()) == [["สี", ""]]
+    assert seen == [((100, 100), "tha+eng", 1.0)]
+
+
+def test_a_dash_or_dot_is_not_a_short_label():
+    for text in ("-", "--", ".", "..", "•", "- -"):
+        assert not pdf_engine._needs_short_reread(text), text
+
+
+def test_a_short_label_read_in_pieces_is_joined_without_inventing_spaces():
+    join = pdf_engine._join_label_words
+    key = (1, 1, 1)
+
+    assert join([(key, "มม", 10, 0, 20, 20, 90.0), (key, ".", 32, 0, 4, 20, 90.0)]) == "มม."
+    assert join([(key, "ป", 50, 0, 10, 20, 90.0), (key, "ม", 5, 0, 10, 20, 90.0)]) == "มป"  # left to right
+    assert join([(key, "Light", 5, 0, 30, 20, 90.0), (key, "2", 40, 0, 8, 20, 90.0)]) == "Light 2"
+
+
+def test_a_plain_read_that_found_thai_is_kept_and_the_thai_only_read_is_not_run(monkeypatch):
+    fake = _ShortRead("ลิตธร")  # what the Thai-only read would garble it into
+    monkeypatch.setitem(sys.modules, "pytesseract", fake)
+    monkeypatch.setattr(pdf_engine, "recognize_region", lambda image, language: "ลิตร")
+
+    assert pdf_engine._reread_short_cell(_label_crop(), "tha+eng", _S) == "ลิตร"
+    assert fake.calls == []
+
+
+def test_a_latin_only_plain_read_is_replaced_by_the_thai_only_read(monkeypatch):
+    fake = _ShortRead("สี")
+    monkeypatch.setitem(sys.modules, "pytesseract", fake)
+    monkeypatch.setattr(pdf_engine, "recognize_region", lambda image, language: "a")
+
+    assert pdf_engine._reread_short_cell(_label_crop(), "tha+eng", _S) == "สี"

@@ -1,5 +1,75 @@
 # History
 
+## [1.5.5] - 2026-10-19 - Symbols, labels, and what the old files kept
+
+Four things were lost between the file and the Markdown, and each was found by
+reading real output rather than by a test. None of them was a crash. Each one
+produced a result that looked finished.
+
+The first was in the EU2043 tour brochure. Its meal table marks what is included
+with a tick and what is not with a cross, and the page draws hotels with a bed.
+The text layer held all of them, but they were drawn with the Wingdings, Wingdings
+2, Webdings and ZapfDingbats fonts, so each was stored as a code with no Unicode
+meaning. They came out as invisible private-use characters, or as digits such as
+"3478". The character was in the file the whole time; the reader just had no name
+for it. The fix maps those codes to the symbols they stand for, but only when the
+character's own font is a dingbat font. The same code value means something else
+in an ordinary text font, and a map applied to every character would have damaged
+ordinary text in order to fix a table. Codes whose meaning could not be checked
+were left out rather than guessed. The meal table now shows ✓ and ✗ where it had
+31 invisible characters.
+
+The second was in the table reader. On Fortuner, a short Thai label in a wide cell
+was lost in both reads. The one-pass read turned "สี" into "a", and the per-cell
+re-read returned nothing for a wide cell holding one small word, so the garbled
+text was kept. A short cell is now re-read on its own first. If that is empty or
+Latin-only, the cell is cropped to its ink, enlarged, and read as one Thai line.
+That fallback is accepted only with Thai letters and a mean confidence of 50 or
+more, so a weak guess is not taken as a reading. It fixed "สี", "สีภายใน", "4สูบ",
+"พร้อม" and "ปรับ", and the table score rose from 0.941 to 0.945. It was not a clean
+win. The same table's "อัตโนมัติ" now comes out as "อฮิตโนมัติ", and the section bar
+"ภายในและอุปกรณ์อำนวยความสะดวก" is still unread. The score went up, and one word got
+worse. Both facts are in the known limits rather than hidden behind the number.
+
+The third is the rule for logo rows on scans. Tesseract reads logos and photo
+captions as lines of stray symbols and single letters, and those lines do not
+belong in the Markdown. A rule that removes them can also remove real text, so this
+one drops a row only when every condition holds: low confidence, at least two
+tokens, no word, number or list marker, and at least 60% of its tokens stray. The
+narrowness is deliberate. Dropping real text is worse than keeping junk. Junk costs
+a reader a glance. A lost sentence is silent, and nobody knows to look for it. A
+rule that does not know Thai would take ที่ or ดี for stray letters, so Thai
+one-letter words are protected, and so are page numbers like "- 2 -", which look
+like noise and are not. The rule dropped 27 junk rows across four scanned samples,
+with no real row lost, checked by eye. QP 7 still finds all 24 of its expected
+phrases, and the time cost is under 1%.
+
+The fourth was in the legacy Office readers, which had said they did not recover
+these things and had not. In `.doc`, bold and italic are stored in the
+character-property records, not in the text, and the 1.3.0 reader never read
+them. In `.ppt`, speaker notes sit in a notes container reached through the slide's
+own reference, and the reader followed only the slides. Both are now read. Emphasis
+is written at word level, so it never splits a Thai syllable, and it stays out of
+headings and the table header row. The notes lookup follows PowerPoint's current
+edit chain, so a note that a later save replaced is never emitted. An RTF file
+saved under a `.doc` name is still converted, and gets its own note saying it has no
+emphasis.
+
+The legacy fixtures are real Word and PowerPoint files written with made-up text
+and author metadata scrubbed, not only hand-built bytes, and their generator
+scripts are kept beside them in `tests/fixtures/`. The full suite has 1410 passing
+tests and 2 skipped.
+
+All eight approved samples were re-run with `tools/regress.py`, and none regressed.
+The four that changed are the ones the fixes were aimed at: Fortuner, QP 7, camry
+and EU2043. The other four were unchanged: mu-X, QMEL, the quote and the guideline.
+
+Three things remain open, and all three are in the known limits. "อัตโนมัติ" reads
+as "อฮิตโนมัติ", and one section bar stays unread. Drawn tick and cross detection has
+been tested only on synthetic images, because no real sample has drawn ticks yet.
+And a lone "X" in a table cell now reads as ✗, which will be wrong wherever the
+letter really is an X.
+
 ## [1.5.4] - 2026-10-19 - The marks were in the file all along
 
 Fortuner's catalogue had a text layer that was half right. On pages 3 to 6 the

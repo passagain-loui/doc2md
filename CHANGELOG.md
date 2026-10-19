@@ -1,5 +1,93 @@
 # Changelog
 
+## [1.5.5] (2026-10-19) - DINGBAT SYMBOLS, SHORT LABELS, LEGACY EMPHASIS AND NOTES
+
+### Added
+
+- **Legacy `.doc` keeps bold and italic.** Bold and italic are recovered from
+  the character-property records (`PlcBteChpx`, CHPX sprms 0x0835, 0x0836 and
+  0x4A30) and the style sheet. Toggle values 0x80 and 0x81 are folded through
+  the paragraph style, the character style and the direct run. Emphasis is
+  emitted at word level as `**…**`, `*…*` or `***…***`, never inside a Thai
+  syllable, and not in headings or the table header row. Malformed structures
+  fall back to plain text. The legacy note now says bold and italic are
+  recovered. An RTF file saved with a `.doc` name gets its own `RTF_NOTE`, which
+  says there is no emphasis.
+- **Legacy `.ppt` keeps speaker notes.** Notes are found through
+  `SlideAtom.notesIdRef`, the notes list (`SlideListWithText` instance 2), the
+  persist directory and the Notes container's body text. They resolve through
+  the current edit chain, so a note that a later save replaced is never emitted.
+  Output is `> Speaker notes: …` under the slide, as in the `.pptx` engine.
+- **Real Word and PowerPoint fixtures.** `tests/fixtures/` holds legacy files
+  with made-up text and author metadata scrubbed. The scripts that generate them
+  are in `tests/fixtures/make_legacy_fixtures/`.
+
+### Fixed
+
+- **Tick, cross and other dingbat symbols in text-layer PDFs.** Symbols drawn
+  with Wingdings, Wingdings 2, Webdings or ZapfDingbats came out as invisible
+  private-use characters, or as letters and digits such as "3478". They are now
+  mapped to Unicode by `map_dingbat` in `doc2md/core/pdf_text.py`, and only when
+  the character's own font is a dingbat font, because the same code can mean a
+  different character in an ordinary font. Mapped: Wingdings 0xFC ✓, 0xFB ✗,
+  0xFE ☑, 0xFD ☒, 0xA8 ☐, 0x6C ●; Wingdings 2 0x52 ☑, 0x54 ☒; Webdings 0xE3 🛏;
+  ZapfDingbats 0x33 ✓, 0x34 ✔, 0x35 ✕, 0x36 ✖, 0x37 ✗, 0x38 ✘. Codes that could
+  not be verified were left out on purpose. Only pages that use a dingbat font
+  are read character by character. On the EU2043 tour PDF, the meal table now
+  shows ✓ and ✗, hotels show 🛏, and included and excluded items show ☑ and ☒.
+  Before, there were 31 invisible characters.
+- **Tick and cross cells in OCR'd tables.** `_symbol_in_cell` now also recognises
+  a single ink stroke shaped like ✓ or ✗ from the image, with sizes in PDF points,
+  so the rule holds at any DPI. Shapes that must not match are tested: V, /, \,
+  +, L, and the x in "4 x 4". A lone "X" or "x" alone in a cell reads as ✗.
+  Tested on synthetic images only; no real sample has drawn ticks.
+- **Short table labels on OCR'd tables.** The one-pass table read (`tha+eng`)
+  turned small Thai words into Latin, so "สี" came out as "a", and the per-cell
+  re-read returned nothing for a wide cell with one small word, so the bad text
+  was kept. In `_reread_short_cell`, a short cell is now re-read alone first, and
+  a result that contains Thai is kept. If that result is empty or Latin-only, the
+  cell is cropped to its ink, upscaled to about 45 px high (at most 4x) and read
+  as a single line with Thai only (`--psm 7`). That result is used when it has
+  Thai letters and a mean confidence of 50 or more. Constants: `TABLE_SHORT_REREAD_*`.
+  Two helpers came with it: `_invert_dark_bands` inverts only a dark section-bar
+  band inside a tall, otherwise light cell, where pdfplumber had merged a heading
+  bar into the next row; and `_join_label_words` fixes "มม ." spacing. Now read
+  correctly: "สี", "สีภายใน", "4สูบ", "พร้อม", "ปรับ". On Fortuner page 1 table 1,
+  accuracy went from 0.941 to 0.945 (0.940 to 0.944 with symbols kept), and rows
+  below 0.8 went from 8 to 6.
+- **Logo noise rows on scans.** `_is_logo_noise` in `doc2md/core/ocr_text.py`
+  drops a row only when every one of these holds: its mean OCR confidence is below
+  75; it has at least 2 tokens; it has no word (3 or more letters in one script),
+  no number and no list marker (ก., a), (ข)); and at least 60% of its tokens are
+  stray - symbols, lone letters that are not real one-letter Thai words, or
+  unknown 2-letter Latin. Thai one-letter words (ที่ นี้ ดี ปี ผู้ ก็ ณ ๆ) and page
+  numbers such as "- 2 -" are protected. Results on the samples: 27 junk rows
+  dropped across four scanned samples (QP 7: 10, EU2043: 7, camry: 10), with 0 real
+  rows dropped, checked by eye. QP 7 still finds all 24 of 24 expected phrases.
+  Review lines went from 63 to 55 on QP 7, 97 to 87 on camry and 60 to 53 on
+  EU2043. The time change is under 1%.
+
+### Changed
+
+- **Regression check.** All 8 approved samples were re-run with `tools/regress.py`.
+  None regressed. Changed on purpose: Fortuner, QP 7, camry and EU2043. Unchanged:
+  mu-X, QMEL, quote and guideline.
+
+### Added (tests)
+
+- New: `tests/test_legacy_emphasis_notes.py` (57 tests), `tests/test_ocr_logo_noise.py`
+  (93 tests) and `tests/test_pdf_dingbats.py`.
+- Extended: `tests/test_table_ocr.py`.
+- Full suite: 1410 passed, 2 skipped.
+
+### Known limits
+
+- In the table read, "อัตโนมัติ" now comes out as "อฮิตโนมัติ" in the same Fortuner
+  table, and the section bar "ภายในและอุปกรณ์อำนวยความสะดวก" is still unread.
+- Drawn tick and cross detection is tested only on synthetic images.
+- A lone "X" or "x" in a table cell reads as ✗, even where the letter is meant as
+  a letter and not as a cross.
+
 ## [1.5.4] (2026-10-19) - REPAIRED THAI MARKS, TABLE SYMBOLS, OCR FIXES
 
 ### Changed

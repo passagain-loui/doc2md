@@ -1,4 +1,4 @@
-# doc2md v1.5.4
+# doc2md v1.5.5
 
 Drag a document in, get clean Markdown out. PDF, Word, Excel, PowerPoint, HTML,
 e-mail, images and source files, with Thai text and Thai filenames handled
@@ -15,11 +15,11 @@ correctly throughout.
 | --- | --- | --- |
 | `.pdf` | PyMuPDF + pdfplumber | text layer on the fast path, OCR when scanned, tables extracted |
 | `.docx` | python-docx | headings, nested lists, bold/italic, tables |
-| `.doc` | built in (olefile) | legacy Word: text, headings, lists, tables; not bold/italic, headers, footnotes |
+| `.doc` | built in (olefile) | legacy Word: text, headings, lists, tables, bold/italic; not headers/footers, footnotes, text boxes |
 | `.xlsx` `.xlsm` `.csv` | openpyxl | one table per sheet, truncated summary past the row limit |
 | `.xls` | xlrd | legacy Excel: same output as `.xlsx` (dates, percentages, merged headers, hidden sheets) |
 | `.pptx` | python-pptx | slide titles, bullet nesting, tables, speaker notes |
-| `.ppt` | built in (olefile) | legacy PowerPoint: slide titles and text; not notes, table layout, pictures |
+| `.ppt` | built in (olefile) | legacy PowerPoint: slide titles, text and speaker notes; not table layout, bullet levels, pictures |
 | `.html` `.htm` `.eml` | BeautifulSoup | article text, links, tables |
 | `.png` `.jpg` `.jpeg` `.bmp` `.tif` `.webp` | Tesseract | Thai + English OCR |
 | source files, `.json`, `.txt` | built in | fenced with the right language |
@@ -78,7 +78,7 @@ a scan silently produce metadata-only output.
 - **Scanned and image-based Thai is good, not perfect.** Letters that differ by
  a small stroke (ข/ย) are still occasionally confused on poor scans, stylised
  display text and text on dark gradients is often missed, Chinese is not
- installed, and tick/cross matrices come out as noise. Check important
+ installed. Ticks and crosses are read from dingbat-font text layers, and from drawn strokes in OCR'd tables (tested on synthetic images only). Check important
  numbers against the original - a line Tesseract kept but was still unsure
  about is highlighted in the preview (amber, with its confidence on hover) on
  the PDF scanned/mis-encoded-page OCR path, so you know which lines are worth
@@ -86,9 +86,10 @@ a scan silently produce metadata-only output.
  carry the flag through) does not yet get this. Exported and copied Markdown
  is clean by default, so the marks are not in the text unless you turn them on
  (see *Scanned pages and Thai text layers* below).
-- **Legacy `.doc` and `.ppt` are read without formatting** that the modern
- formats keep: no bold/italic, headers or footnotes in `.doc`; no speaker
- notes, table layout or pictures in `.ppt`.
+- **Legacy `.doc` and `.ppt` keep less than the modern formats**: `.doc` has no
+ headers/footers, footnotes or text boxes; `.ppt` has no table layout, bullet
+ levels or pictures. Bold/italic in `.doc` and speaker notes in `.ppt` are
+ recovered. An RTF saved with a `.doc` name has no emphasis.
 - **RapidOCR does not have verified Thai support** in this project; its
  readiness is reported as "has a backend" rather than folded into the
  Thai/English readiness message, which is specific to Tesseract's installed
@@ -253,12 +254,17 @@ selector to Custom.
 At 300 DPI by default, scanned pages are read by OCR with several safeguards:
 pale coloured table header bars are cleaned so the header row is read, pages
 with side-by-side panels are read one panel at a time, low-confidence lines are
-dropped, and posters/images are read in several passes and merged.
+dropped, rows that are only logo noise (stray symbols and lone letters, with no
+real word or number) are dropped too, and posters/images are read in several
+passes and merged.
 
 Some PDFs carry a text layer that *looks* like Thai but is wrong (for example
 PDFs exported from Excel with certain fonts). Known font-map errors (sara aa /
 sara am) are repaired; a page whose text is garbled in other ways is detected
-and re-read by OCR, or marked with a Warning if OCR is unavailable.
+and re-read by OCR, or marked with a Warning if OCR is unavailable. Symbols drawn
+with Wingdings, Wingdings 2, Webdings or ZapfDingbats in a text layer are mapped
+to Unicode (✓, ✗, ☑, ☒, 🛏), but only when the character's own font is one of
+those fonts.
 
 Some PDFs store Thai tone and vowel marks as other characters (Latin letters
 such as Ē, or private-use glyphs), so the text reads as "อยĒาง" for "อย่าง".
@@ -280,8 +286,12 @@ in, so a value that spans several columns stays together. A cell is read again
 on its own only when it has ink but no words, or when its words are unsure.
 Some PDFs draw a frame around a whole page; a frame that only wraps real tables
 is not shown as a table, so the page's text is kept instead of hidden inside one
-large cell. A cell that holds only a bullet or a dash is read as that symbol. Short
-Thai labels are still sometimes misread: "สี" comes out as "a".
+large cell. A cell that holds only a bullet or a dash is read as that symbol, and a single
+drawn tick or cross is read as ✓ or ✗ (tested on synthetic images only). A lone
+"X" in a cell reads as ✗. Short
+Thai labels are still sometimes misread: "อัตโนมัติ" comes out as "อฮิตโนมัติ",
+and the section bar "ภายในและอุปกรณ์อำนวยความสะดวก" is still unread. "สี" now reads
+correctly.
 
 Upper vowels and tone marks that Tesseract splits off into a separate row above
 their line are re-read together with that line and merged back only where the
