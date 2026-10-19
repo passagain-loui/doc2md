@@ -425,12 +425,11 @@ The suite cannot cover these; nobody has done them on the built exe yet:
     OCR, frame tables; checked by eye, no REGRESSED file). The user approved
     both, and they were re-approved from that run on 2026-10-17, so all 8
     references now hold 1.5.3 output.
-12. **(waiting for the user) 1.5.4 regression approvals.** Run
+12. **(done 2026-10-19) 1.5.4 regression approvals.** From run
     `.runs\20261019-065516` (1.5.4 code): QP 7 fixed (24/24 phrases), Fortuner
     changed on purpose (repaired Thai marks on pages 3-6, bullet cells),
-    EU2043 one word better, the rest identical, no REGRESSED file. Approve with
-    `python tools/regress.py approve "QP 7.pdf" "Fortuner_Leader_Catalog_2025.pdf" "ยุโรป-EU2043_Oct 26 - Feb 27.pdf"`
-    once the user says so.
+    EU2043 one word better, the rest identical, no REGRESSED file. The user
+    approved all three; all 8 references now hold 1.5.4 output.
 
 Report findings as: file type, what the output should have said, what it said.
 Fixes so far came from exactly that kind of sample.
