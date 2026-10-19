@@ -75,7 +75,8 @@ readers (`doc2md/core/pdf_text.py`, `doc2md/engine/pdf_engine.py`,
   Full suite: 1410 passed, 2 skipped.
 - Regression: all 8 approved samples re-run with `tools/regress.py`; none REGRESSED.
   Changed on purpose: Fortuner, QP 7, camry, EU2043. Unchanged: mu-X, QMEL, quote,
-  guideline. Re-approving those four references waits for the user's go-ahead.
+  guideline. The user approved those four; they were re-approved from run
+  `.runs\20261019-203414` on 2026-10-19, so all 8 references hold 1.5.5 output.
 
 ### What changed in 1.5.4
 
