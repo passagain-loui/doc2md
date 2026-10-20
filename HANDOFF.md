@@ -4,20 +4,22 @@ Written 2026-10-04, updated 2026-10-19. Read this first, then README.md (what
 the tool does) and CLAUDE.md (the release pipeline rules).
 
 > **In progress (2026-10-20): v1.5.6, the scan pipeline loses text that plain
-> Tesseract reads.** New 9th sample (confidential HR manual, outside git):
-> `D:\AI\OpenCode\doc2md-samples\MDP-SD-HR-001 (1)_คู่มือบริษัทเกี่ยวกับกฎระเบียบการทำงาน.pdf`
-> with a 27-phrase `.expect.txt`. Plain `pytesseract.image_to_string` reads the
-> page 2 table of contents and the page 26 severance table completely;
-> `ocr_text.recognize` drops them (also the page 15 OT rates "1.5 เท่า / 3 เท่า",
-> garbled page 9 vacation lines, a fragmented cover, and "วัน" read as "Tu"/"Iu").
-> Suspects: `find_vertical_gutters` band splitting, the junk filter that drops
-> rows on a rule line (bordered-table rows), `prepare_for_ocr`, the logo-noise
-> rule. Uncommitted, unfinished edits in `doc2md/core/ocr_text.py` and
-> `tests/test_ocr_text.py` are that work: review before use. Acceptance: find the
-> dropping stage, fix the cause (recognize must not lose lines plain Tesseract
-> reads confidently), re-read short Latin-in-Thai tokens Thai-only, no REGRESSED
-> on the 8 approved samples, QP 7 24/24, scan time within +15%. Then docs,
-> version 1.5.6, gate, build, commit/push, CI. The sample is not approved yet.
+> Tesseract reads.** New 9th sample (confidential HR manual, outside git, in
+> `doc2md-samples`, 27-phrase `.expect.txt`, not approved yet). Diagnosis done:
+> (a) a scanner edge shadow made `find_vertical_gutters` cut the page-2 TOC into
+> column bands; (b) `prepare_for_ocr`'s autocontrast cutoff=1 clips more than the
+> page's ink (0.8%), thickening text; (c) Tesseract treats bordered tables (pages
+> 26, 15) as images and skips their rows; (d) "วัน" read as Latin "Tu"/"Iu".
+> Uncommitted code in `doc2md/core/ocr_text.py` fixes all four (edge-shadow trim,
+> ink-limited autocontrast, unread-run rescue with ruling lines removed, Thai-only
+> re-read of short Latin tokens) plus new tests `tests/test_ocr_rescue.py` and
+> `tests/test_ocr_thai_reread.py`: HR 11/27 -> 21/27 phrases, QP 7 24/24, no
+> REGRESSED. NOT releasable yet: line diffs show some approved-sample lines got
+> worse (Fortuner "ของ" -> "หอง", "TOPSERV" garbled, rescued T-Connect text spliced
+> at the page top; junk lines in the guideline sample). Next step: ablate the four
+> factors one at a time on all 9 samples, keep only those with no worse lines,
+> fix rescue ordering (splice by y) and its junk filter (needs a real word or an
+> ASCII number), then the full pipeline. Working files: scratchpad `hr\`.
 
 > **CI note (2026-10-19):** the 1.5.4 release commit `5b55aeb` failed GitHub CI
 > in one test, `test_real_tesseract_reads_the_thai_image` ("no readable text").
