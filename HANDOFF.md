@@ -3,17 +3,10 @@
 Written 2026-10-04, updated 2026-10-21. Read this first, then README.md (what
 the tool does) and CLAUDE.md (the release pipeline rules).
 
-> **CI note (2026-10-19):** the 1.5.4 release commit `5b55aeb` failed GitHub CI
-> in one test, `test_real_tesseract_reads_the_thai_image` ("no readable text").
-> Real cause: that test had never run on CI. Before 1.5.4 its `shutil.which`
-> skip always fired there (choco does not install Tesseract into the folder the
-> workflow adds to PATH). The new `real_tesseract` fixture finds Tesseract the
-> way the app does, so the test ran for the first time, on a choco Tesseract
-> with English data only. Two guesses (`4f87207`, `a2b8b32`) were wrong. The
-> fix: the fixture lifts the whole app-style lookup (install folders and
-> doc2md's per-user tessdata, where this machine keeps Thai) and skips when
-> Tesseract has no `tha`. Locally the test runs and passes; with no Thai data
-> it skips. Gate passed (EXIT_CODE 0), installer rebuilt.
+> **CI note (2026-10-19):** release 1.5.4 (`5b55aeb`) failed GitHub CI in
+> `test_real_tesseract_reads_the_thai_image`, a test that had never run on CI. The
+> `real_tesseract` fixture now finds Tesseract as the app does; on CI's English-only
+> Tesseract it skips. CI is green on Python 3.11-3.13.
 
 ## 1. State right now
 
@@ -22,10 +15,12 @@ the tool does) and CLAUDE.md (the release pipeline rules).
 | Version | 1.5.6 |
 | Last release commit | `f51a2e5` (v1.5.6; CI green on 3.11-3.13, run 39620872708) |
 | Branch | `main` |
-| Remote | `origin` = https://github.com/passagain-loui/doc2md.git - check `git status -sb` for unpushed commits; GitHub CI (Python 3.11-3.13) green since commit `8d9adde` |
+| Remote | `origin` = https://github.com/passagain-loui/doc2md.git. Everything is committed and pushed (as of 2026-10-21); CI green on Python 3.11-3.13 |
+| Working tree | Clean. Nothing is in progress |
+| Regression samples | `D:\AI\OpenCode\doc2md-samples\`, outside git and confidential (copy privately only). 9 approved references, all from v1.5.6 output (run `20261021-212030`) |
 | Gate | `tools/verify.ps1` passed (EXIT_CODE 0) for 1.5.6 on 2026-10-21; 2 expected skips (symlink, RapidOCR not installed) - the real-Tesseract test now runs |
 | Installer | built 2026-10-21 from the gated 1.5.6 tree: `dist/doc2md_Setup_v1.5.6.exe` (69 MB), `dist/doc2md.exe` (95 MB), `dist/doc2md/` - git-ignored, rebuild with `python build.py` on another machine |
-| Tesseract | **installed and working on this machine** (checked 2026-10-17): v5.4.0 at `C:/Program Files/Tesseract-OCR/tesseract.exe`, languages `eng` + `tha`. It is not on PATH, but `find_tesseract()` locates it in the standard install folder, so the app uses it. A real Thai test image and scanned PDF converted correctly apart from a lost tone mark (นี้ read as นี). The gate's one 'Tesseract not installed' skip (`tests/test_thai_documents.py`) checks `shutil.which("tesseract")`, i.e. PATH only, so it skips here; add the folder to PATH if you want that real-OCR test to run |
+| Tesseract | 5.4.0, installed and working on this machine (2026-10-21). Binary: `C:\Program Files\Tesseract-OCR\tesseract.exe`, not on PATH; `find_tesseract()` finds it there. That folder's tessdata has only `eng` and `osd`. The Thai and English data the app uses is `tha.traineddata` and `eng.traineddata` in `%LOCALAPPDATA%\doc2md\tessdata`, put there by OCR Diagnostics → Install OCR. A real Thai test image and scanned PDF converted correctly apart from a lost tone mark (นี้ read as นี) |
 
 ### What changed in 1.5.6
 
@@ -54,10 +49,10 @@ synthetic only. The OCR test set is 329 passing.
   page.
 - Method: each factor was measured alone on all 9 samples (ablation); only the
   clean ones were kept.
-- Results are in section 7, known limits in section 8, and approvals pending in
-  section 9.
-- Not done for 1.5.6: the version bump (`pyproject.toml` and `doc2md/__init__.py`
-  still say 1.5.5), the gate, and the release build.
+- Results are in section 7, known limits in section 8, and the approvals (done
+  2026-10-21) in section 9.
+- Release steps for 1.5.6 are done: version bump, gate (EXIT_CODE 0) and release
+  build. See section 1.
 
 ### What changed in 1.5.5
 
@@ -283,22 +278,32 @@ Not in the repo, and therefore not on the new machine unless you copy them:
    olefile 0.47, PyInstaller 6.22.2, pytest 9.1.1.
 3. **Inno Setup 6** for the installer. `build_installer.py` looks in the usual
    Program Files locations and falls back to `winget install JRSoftware.InnoSetup`.
-4. **Tesseract** (only needed to run OCR, not the tests): launch the app, open
-   **OCR Diagnostics...**, press **Install OCR (Thai + English)...**. It runs
-   `winget install --id UB-Mannheim.TesseractOCR` (Windows asks for admin) and
-   downloads `tha` and `eng` from `tessdata_fast` 4.1.0 into
-   `%LOCALAPPDATA%\doc2md\tessdata`.
-5. Optional: `tiktoken` gives exact token counts. It is **not** a dependency;
+4. **GitHub CLI** (`gh`, 2.98.0 used here) to watch CI: run `gh auth login` once,
+   then `gh run list` and `gh run watch <id> --exit-status` after each push.
+5. **Tesseract 5.4.0** (only needed to run OCR, not the tests): launch the app,
+   open **OCR Diagnostics...**, press **Install OCR (Thai + English)...**. It runs
+   `winget install --id UB-Mannheim.TesseractOCR` (Windows asks for admin); the
+   binary goes to `C:\Program Files\Tesseract-OCR\`, which the app finds without PATH.
+   It downloads `tha` and `eng` from `tessdata_fast` 4.1.0 so that they end up as
+   `%LOCALAPPDATA%\doc2md\tessdata\tha.traineddata` and `eng.traineddata`. Copying
+   that `tessdata` folder from the old machine works too. Without `tha.traineddata`,
+   the real-Tesseract Thai test skips.
+6. Optional: `tiktoken` gives exact token counts. It is **not** a dependency;
    without it the app uses a fitted heuristic (`doc2md/core/tokens.py`).
-6. Confirm everything is healthy:
+7. Confirm everything is healthy:
 
    ```
    powershell -ExecutionPolicy Bypass -File ./tools/verify.ps1
    ```
 
-   Expect `ALL CHECKS PASSED` and `EXIT_CODE: 0`. The pytest suite is roughly
-   600+ tests and takes a few minutes. If a test needs Tesseract it skips or is
-   isolated by `tests/conftest.py` (see gotchas).
+   Expect `ALL CHECKS PASSED` and `EXIT_CODE: 0`, 1,523 tests and 2 expected skips
+   (symlinks, RapidOCR not installed). The suite takes several minutes. The
+   real-Tesseract Thai test runs only when Tesseract with `tha` is found the way the
+   app finds it; on CI, which has English data only, it skips by design.
+
+Microsoft Word and PowerPoint are needed only to regenerate the legacy `.doc` and
+`.ppt` fixtures in `tests/fixtures/make_legacy_fixtures/`. The committed fixtures are
+enough for the tests, so skip them on the new machine.
 
 ## 3. Everyday commands
 
@@ -580,8 +585,22 @@ Run it before every release build, alongside the gate. The README's
 
 ## 11. First steps on the new machine
 
-1. Get the code: `git clone` (after pushing) or copy the folder.
-2. Section 2 setup, then run the gate.
-3. `python build.py` and install the result; try the section 9 checks.
-4. Read `HISTORY.md` for the story of each release and `CHANGELOG.md` for the
+1. Before leaving the old machine: `git status` must be clean and pushed (it is, as of 2026-10-21).
+2. Copy the private files by USB or a private share, never through GitHub or a cloud share:
+   - `D:\AI\OpenCode\doc2md-samples\` with `.golden\` and the `.expect.txt` files (`.runs\` is optional);
+   - optionally `%LOCALAPPDATA%\doc2md\tessdata` (saves the OCR language download);
+   - optionally the Claude memory folder `C:\Users\passa\.claude\projects\D--AI-OpenCode-Markdown\memory\`.
+3. Clone the repo so that its parent folder also holds `doc2md-samples`, for example
+   `git clone https://github.com/passagain-loui/doc2md.git D:\AI\OpenCode\Markdown`
+   next to `D:\AI\OpenCode\doc2md-samples`. `tools/regress.py` looks there (or pass
+   `--samples <path>` before the subcommand). If the repo lives at another path, copy
+   the memory files into the memory folder for that path, since its name comes from the path.
+4. Section 2 setup (includes `gh auth login`).
+5. Run the gate: `powershell -ExecutionPolicy Bypass -File ./tools/verify.ps1`. Expect
+   `ALL CHECKS PASSED`, `EXIT_CODE: 0`, 1,523 tests and 2 expected skips.
+6. Run `python tools/regress.py run`; expect all 9 "same". If some are "changed", check
+   the Tesseract version and its language data first, since a different version can
+   change OCR output with no code change. Re-approve only with the user's say-so.
+7. `python build.py`, install `dist\doc2md_Setup_v1.5.6.exe`, and do the section 9 checks.
+8. Read `HISTORY.md` for the story of each release and `CHANGELOG.md` for the
    precise list of changes.
