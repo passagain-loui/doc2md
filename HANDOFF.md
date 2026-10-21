@@ -545,11 +545,11 @@ The suite cannot cover these; nobody has done them on the built exe yet:
     changed on purpose (repaired Thai marks on pages 3-6, bullet cells),
     EU2043 one word better, the rest identical, no REGRESSED file. The user
     approved all three; all 8 references now hold 1.5.4 output.
-13. **(pending, 2026-10-21) 1.5.6 regression approvals.** From run
-    `.runs\20261021-212030` (1.5.6 code). The new HR manual (the 9th sample, with its
-    27-phrase `.expect.txt`) is not approved yet. The changed QP 7, camry, EU2043 and
-    guideline references await the user's approval. Fortuner, mu-X, QMEL and the
-    quote are unchanged.
+13. **(done 2026-10-21) 1.5.6 regression approvals.** From run
+    `.runs\20261021-212030` (1.5.6 code), the user approved the new HR manual (the
+    9th sample, 22/27 phrases of its `.expect.txt`) and the changed QP 7, camry,
+    EU2043 and guideline references. Fortuner, mu-X, QMEL and the quote were
+    unchanged. All 9 references now hold 1.5.6 output.
 
 Report findings as: file type, what the output should have said, what it said.
 Fixes so far came from exactly that kind of sample.
