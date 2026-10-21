@@ -1,4 +1,4 @@
-# doc2md v1.5.5
+# doc2md v1.5.6
 
 Drag a document in, get clean Markdown out. PDF, Word, Excel, PowerPoint, HTML,
 e-mail, images and source files, with Thai text and Thai filenames handled
@@ -292,6 +292,12 @@ drawn tick or cross is read as ✓ or ✗ (tested on synthetic images only). A l
 Thai labels are still sometimes misread: "อัตโนมัติ" comes out as "อฮิตโนมัติ",
 and the section bar "ภายในและอุปกรณ์อำนวยความสะดวก" is still unread. "สี" now reads
 correctly.
+
+Bordered tables on scans are now read as text lines. Where Tesseract skips a ruled
+table as if it were a picture, the unread bands are re-read with the ruling lines
+removed and placed back by position, so whole rows and value columns are kept. A
+short Latin misreading beside a number, such as "Tu" where the page says "วัน", is
+re-read as Thai and corrected.
 
 Upper vowels and tone marks that Tesseract splits off into a separate row above
 their line are re-read together with that line and merged back only where the

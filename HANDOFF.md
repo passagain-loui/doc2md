@@ -1,25 +1,7 @@
-# Handoff - doc2md v1.5.5
+# Handoff - doc2md v1.5.6
 
-Written 2026-10-04, updated 2026-10-19. Read this first, then README.md (what
+Written 2026-10-04, updated 2026-10-21. Read this first, then README.md (what
 the tool does) and CLAUDE.md (the release pipeline rules).
-
-> **In progress (2026-10-20): v1.5.6, the scan pipeline loses text that plain
-> Tesseract reads.** New 9th sample (confidential HR manual, outside git, in
-> `doc2md-samples`, 27-phrase `.expect.txt`, not approved yet). Diagnosis done:
-> (a) a scanner edge shadow made `find_vertical_gutters` cut the page-2 TOC into
-> column bands; (b) `prepare_for_ocr`'s autocontrast cutoff=1 clips more than the
-> page's ink (0.8%), thickening text; (c) Tesseract treats bordered tables (pages
-> 26, 15) as images and skips their rows; (d) "วัน" read as Latin "Tu"/"Iu".
-> Uncommitted code in `doc2md/core/ocr_text.py` fixes all four (edge-shadow trim,
-> ink-limited autocontrast, unread-run rescue with ruling lines removed, Thai-only
-> re-read of short Latin tokens) plus new tests `tests/test_ocr_rescue.py` and
-> `tests/test_ocr_thai_reread.py`: HR 11/27 -> 21/27 phrases, QP 7 24/24, no
-> REGRESSED. NOT releasable yet: line diffs show some approved-sample lines got
-> worse (Fortuner "ของ" -> "หอง", "TOPSERV" garbled, rescued T-Connect text spliced
-> at the page top; junk lines in the guideline sample). Next step: ablate the four
-> factors one at a time on all 9 samples, keep only those with no worse lines,
-> fix rescue ordering (splice by y) and its junk filter (needs a real word or an
-> ASCII number), then the full pipeline. Working files: scratchpad `hr\`.
 
 > **CI note (2026-10-19):** the 1.5.4 release commit `5b55aeb` failed GitHub CI
 > in one test, `test_real_tesseract_reads_the_thai_image` ("no readable text").
@@ -37,13 +19,45 @@ the tool does) and CLAUDE.md (the release pipeline rules).
 
 | Item | Value |
 | --- | --- |
-| Version | 1.5.5 |
-| Last release commit | `4bafb73` (v1.5.5; CI green on 3.11-3.13, run 39264101605) |
+| Version | 1.5.6 |
+| Last release commit | (pending) |
 | Branch | `main` |
 | Remote | `origin` = https://github.com/passagain-loui/doc2md.git - check `git status -sb` for unpushed commits; GitHub CI (Python 3.11-3.13) green since commit `8d9adde` |
-| Gate | `tools/verify.ps1` passed (EXIT_CODE 0) for 1.5.5 on 2026-10-19; 2 expected skips (symlink, RapidOCR not installed) - the real-Tesseract test now runs |
-| Installer | built 2026-10-19 from the gated 1.5.5 tree: `dist/doc2md_Setup_v1.5.5.exe` (69 MB), `dist/doc2md.exe` (95 MB), `dist/doc2md/` - git-ignored, rebuild with `python build.py` on another machine |
+| Gate | `tools/verify.ps1` passed (EXIT_CODE 0) for 1.5.6 on 2026-10-21; 2 expected skips (symlink, RapidOCR not installed) - the real-Tesseract test now runs |
+| Installer | built 2026-10-21 from the gated 1.5.6 tree: `dist/doc2md_Setup_v1.5.6.exe` (69 MB), `dist/doc2md.exe` (95 MB), `dist/doc2md/` - git-ignored, rebuild with `python build.py` on another machine |
 | Tesseract | **installed and working on this machine** (checked 2026-10-17): v5.4.0 at `C:/Program Files/Tesseract-OCR/tesseract.exe`, languages `eng` + `tha`. It is not on PATH, but `find_tesseract()` locates it in the standard install folder, so the app uses it. A real Thai test image and scanned PDF converted correctly apart from a lost tone mark (นี้ read as นี). The gate's one 'Tesseract not installed' skip (`tests/test_thai_documents.py`) checks `shutil.which("tesseract")`, i.e. PATH only, so it skips here; add the folder to PATH if you want that real-OCR test to run |
+
+### What changed in 1.5.6
+
+Scan OCR fixes in `doc2md/core/ocr_text.py` (no engine changes). New tests:
+`tests/test_ocr_rescue.py` (71) and `tests/test_ocr_thai_reread.py` (40), both
+synthetic only. The OCR test set is 329 passing.
+
+- Ink-limited autocontrast: `prepare_for_ocr` stretches only when the 1% dark point
+  would fall on paper (gray >= 160). Constants `AUTOCONTRAST_INK_SHARE = 0.1` and
+  `AUTOCONTRAST_CUTOFF = 1.0`; switch `LIMIT_CONTRAST`. Unrestricted, it damaged
+  "TOPSERV" and "ของ" on other samples.
+- Unread-run rescue: `_unread_runs` finds line-sized ink bands that no read word
+  covers and whose ink share is text-like (`RESCUE_INK = (0.09, 0.62)`);
+  `_reread_run` re-reads each with ruling lines removed (`--psm 6`);
+  `_splice_rescued` places the results by vertical position. A rescued row must
+  hold a real word (Thai 3+ letters, Latin 4+), an ASCII number, a Latin code, or a
+  Thai phrase with a number. It replaces a shaky existing line only if it covers at
+  least 60% of that line's width. Caps: `MAX_RUN_RESCUES`, `RESCUE_MAX_MISSES`.
+  Switch `RESCUE_UNREAD`.
+- Thai re-read of short Latin tokens: `_reread_thai_words`, switch `THAI_REREAD`.
+  A lowercase Latin token of 2-3 letters (confidence < 90) next to a number is
+  re-read Thai-only, and accepted when a Thai word comes back at confidence >= 80.
+  Uppercase codes are never touched.
+- Dropped after testing: an edge-shadow trim for `find_vertical_gutters`. It changed
+  band splitting on an approved brochure and moved a block of text to the top of a
+  page.
+- Method: each factor was measured alone on all 9 samples (ablation); only the
+  clean ones were kept.
+- Results are in section 7, known limits in section 8, and approvals pending in
+  section 9.
+- Not done for 1.5.6: the version bump (`pyproject.toml` and `doc2md/__init__.py`
+  still say 1.5.5), the gate, and the release build.
 
 ### What changed in 1.5.5
 
@@ -428,6 +442,17 @@ an entry headed `[x.y.z]` to **both** `CHANGELOG.md` and `HISTORY.md` (the gate'
   Review lines: QP 7 63 -> 55, camry 97 -> 87, EU2043 60 -> 53. Time change under 1%.
 - **Regression (1.5.5):** 8 approved samples, none REGRESSED. Changed on purpose:
   Fortuner, QP 7, camry, EU2043. Unchanged: mu-X, QMEL, quote, guideline.
+- **Scan text kept (1.5.6), HR manual** (9th sample, confidential, 27-phrase
+  `.expect.txt`, not approved): 11 -> 22 of 27 phrases. Table of contents, severance
+  table and overtime rates now read. Still missing: cover display type and address
+  line, one section heading, one vacation line (median filter).
+- **Scan text kept (1.5.6), QP 7 / camry / EU2043:** QP 7 still 24/24 and gains
+  header-table text (document number, date, company name). camry gains "4 ล้อ" and
+  "4.2 นิ้ว". EU2043 gains a price table and form text.
+- **Time (1.5.6):** QP 7 +6%, HR manual +5%, EU2043 +12-15% (most rescue reads).
+- **Regression (1.5.6):** 8 approved samples, none REGRESSED, no previously good line
+  worse. Changed: QP 7, camry, EU2043, guideline. Unchanged: Fortuner, mu-X, QMEL,
+  quote.
 
 ## 8. Known limits and open ideas
 
@@ -451,6 +476,14 @@ Not solved:
 - A repaired page can lose up to 20% of its swapped Thai marks (1.5.4). Those
   lines are highlighted for review.
 - The mu-X page 8 text layer has labels clipped by the PDF itself.
+- Cover pages with large display type still split into fragments. On the HR manual
+  sample, the cover title and address line and one section heading are still
+  missing (1.5.6).
+- One vacation line in the HR manual sample is lost to the median filter. Removing
+  the filter costs QP 7 3-7 phrases, so it stays (1.5.6).
+- Rescued text on low-quality scans can be garbled but real: camry and EU2043 each
+  gained a few such lines (1.5.6).
+- The row rescue adds up to about 15% time on form-heavy scans (1.5.6).
 
 Small maintenance items seen in the last gate run (2026-10-16, v1.4.11):
 
@@ -512,6 +545,11 @@ The suite cannot cover these; nobody has done them on the built exe yet:
     changed on purpose (repaired Thai marks on pages 3-6, bullet cells),
     EU2043 one word better, the rest identical, no REGRESSED file. The user
     approved all three; all 8 references now hold 1.5.4 output.
+13. **(pending, 2026-10-21) 1.5.6 regression approvals.** From run
+    `.runs\20261021-212030` (1.5.6 code). The new HR manual (the 9th sample, with its
+    27-phrase `.expect.txt`) is not approved yet. The changed QP 7, camry, EU2043 and
+    guideline references await the user's approval. Fortuner, mu-X, QMEL and the
+    quote are unchanged.
 
 Report findings as: file type, what the output should have said, what it said.
 Fixes so far came from exactly that kind of sample.

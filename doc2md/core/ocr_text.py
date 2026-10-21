@@ -130,6 +130,10 @@ LIGHT_PAGE_BRIGHTNESS = 200
 FILL_LEVEL = 175
 FILL_CHROMA = 25  # a pastel fill is coloured; paper and pencil-grey are not
 DENOISE_MIN_HEIGHT = 2500  # px; only text this large survives a median filter
+AUTOCONTRAST_CUTOFF = 1.0  # percent of pixels clipped at each end of the stretch, at most
+AUTOCONTRAST_INK_SHARE = 0.1  # of the page's dark pixels the black point may clip
+BLACK_POINT_ON_PAPER = 160  # gray level: a stretch whose black point is this light has landed on the paper
+LIMIT_CONTRAST = True  # off: the stretch always clips AUTOCONTRAST_CUTOFF, as before 1.5.6
 
 
 def _whiten_coloured_fills(gray, image):
@@ -150,17 +154,88 @@ def _whiten_coloured_fills(gray, image):
     return ImageChops.lighter(gray, ImageChops.multiply(coloured, light))
 
 
-def prepare_for_ocr(image):
+RULE_CELL = 12  # px: rules are found on a grid this coarse
+RULE_MIN_LENGTH = 120  # px: a dark line this long is a rule, not a stroke
+RULE_MAX_THICKNESS = 18  # px: anything thicker is a filled bar, not a rule
+RULE_DARK_LEVEL = 140  # gray level below which a pixel is ink
+RULE_FILL = 0.85  # share of a grid cell that must be ink
+RULE_MARGIN = 5  # px the erased rule is widened by, to take its blurred edges
+
+
+def _runs_along(strip, cells: int, axis: int):
+    """255 where at least *cells* consecutive cells of *strip* are 255 along
+    *axis* (0 = x, 1 = y), spread over the whole run."""
+    from PIL import ImageChops
+
+    def shifted(image, step):
+        return ImageChops.offset(image, step, 0) if axis == 0 else ImageChops.offset(image, 0, step)
+
+    both = strip
+    for step in range(1, cells):
+        both = ImageChops.darker(both, shifted(strip, step))
+    spread = both
+    for step in range(1, cells):
+        spread = ImageChops.lighter(spread, shifted(both, -step))
+    return spread
+
+
+def _rule_mask(gray, shrink: int = 1):
+    """255 on the long thin dark lines of *gray* (table borders, underlines,
+    separators), 0 elsewhere; filled bars (a coloured header) are not lines.
+
+    With *shrink* > 1 the lines are searched on an image that many times
+    smaller, and the mask comes back at that size.
+    """
+    from PIL import Image, ImageChops, ImageFilter
+
+    if shrink > 1:
+        gray = gray.resize((max(1, gray.size[0] // shrink), max(1, gray.size[1] // shrink)), Image.BOX)
+    width, height = gray.size
+    cell = max(2, RULE_CELL // shrink)
+    cells = max(2, RULE_MIN_LENGTH // shrink // cell)
+    thickness = max(3, RULE_MAX_THICKNESS // shrink)
+    margin = max(1, RULE_MARGIN // shrink)
+    dark = gray.point(lambda v: 255 if v < RULE_DARK_LEVEL else 0)
+    found = []
+    for axis in (0, 1):
+        size = (max(1, width // cell), height) if axis == 0 else (width, max(1, height // cell))
+        strip = dark.resize(size, Image.BOX).point(lambda v: 255 if v >= 255 * RULE_FILL else 0)
+        runs = _runs_along(strip, cells, axis)
+        # a run that is also `thickness` deep the other way is a bar
+        bar = _runs_along(runs, thickness, 1 - axis)
+        found.append(ImageChops.subtract(runs, bar).resize((width, height), Image.NEAREST))
+    return ImageChops.lighter(found[0], found[1]).filter(ImageFilter.MaxFilter(2 * max(1, margin // 2) + 1))
+
+
+def _erase_rules(gray):
+    """*gray* with its ruling lines painted white.
+
+    Tesseract's layout analysis takes a ruled box for a picture and skips the
+    text inside it: on a clean 300 dpi scan a six-row bordered table came back
+    as a single line of noise. Without the lines the rows are ordinary text
+    lines, the columns separated by spacing.
+    """
+    from PIL import ImageChops
+
+    return ImageChops.lighter(gray, _rule_mask(gray))
+
+
+def prepare_for_ocr(image, limit_clipping: bool = False):
     """Make a light page easier for Tesseract; dark pages are returned unchanged.
 
     * pale coloured fills are whitened (see :func:`_whiten_coloured_fills`);
     * large pages are median-filtered to remove scanner speckle;
-    * contrast is stretched.
+    * contrast is stretched; with *limit_clipping* the black point may clip only a
+      share of the page's own ink (see :func:`_dark_cutoff`), which a sparse page
+      needs and a table cell does not.
 
     Measured on three pages of a scanned company certificate, the contrast
     stretch with the median filter cut ข-read-as-ย errors from 8 to 4 against the
     unprocessed page, while flattening every light pixel (the first version of
-    the fill fix) raised them to 11.
+    the fill fix) raised them to 11. (On a clean 300 dpi scan the same median
+    breaks some thin Thai strokes, but on a scanned procedure a Gaussian blur,
+    speck removal and no filter at all each cost 3 to 7 of its 24 checked
+    phrases, so the median stays.)
     """
     gray = image.convert("L")
     sample = _pixel_values(gray.resize((64, 64)))
@@ -172,7 +247,32 @@ def prepare_for_ocr(image):
         gray = _whiten_coloured_fills(gray, image)
     if gray.size[1] >= DENOISE_MIN_HEIGHT:
         gray = gray.filter(ImageFilter.MedianFilter(3))
-    return ImageOps.autocontrast(gray, cutoff=1)
+    dark = _dark_cutoff(gray) if limit_clipping and LIMIT_CONTRAST else AUTOCONTRAST_CUTOFF
+    return ImageOps.autocontrast(gray, cutoff=(dark, AUTOCONTRAST_CUTOFF))
+
+
+def _dark_cutoff(gray) -> float:
+    """Percent of the darkest pixels the contrast stretch may clip.
+
+    ``AUTOCONTRAST_CUTOFF`` (1%) is more than the ink of a very sparse page (a
+    table of contents has 0.8% dark pixels): the black point lands on the paper,
+    every grey stroke edge turns black and the text comes out fat and misread.
+    Only then, when the 1% black point is lighter than ``BLACK_POINT_ON_PAPER``,
+    is the clip limited to ``AUTOCONTRAST_INK_SHARE`` of the page's own ink; any
+    page whose 1% black point is on ink is stretched exactly as before.
+    """
+    histogram = gray.histogram()
+    total = max(1, sum(histogram))
+    clipped, black_point = 0, 0
+    for level, count in enumerate(histogram):
+        clipped += count
+        if clipped >= total * AUTOCONTRAST_CUTOFF / 100.0:
+            black_point = level
+            break
+    if black_point < BLACK_POINT_ON_PAPER:
+        return AUTOCONTRAST_CUTOFF
+    ink_percent = 100.0 * sum(histogram[:128]) / total
+    return min(AUTOCONTRAST_CUTOFF, AUTOCONTRAST_INK_SHARE * ink_percent)
 
 
 def _normalized(text: str) -> str:
@@ -874,6 +974,452 @@ def _apply_latin_runs(
     return "\n".join(lines)
 
 
+# --------------------------------------------------------------------------
+# Thai words read as Latin
+# --------------------------------------------------------------------------
+#
+# The other way round from the abbreviations above: next to a number, the unit
+# word วัน comes back as "Tu" or "Iu" ("119 Iu", "13 Tu"). The Latin read is
+# shaky, and the same pixels read with Thai alone are the word. So a short,
+# lower-case-looking Latin token right after a number (or right before one, after
+# Thai) is read again with tha only, and swapped only if that read is a confident
+# Thai word of at least two letters. Real units and abbreviations ("km", "PM 2.5",
+# "LED", "QM") are either capitals or come back from the Thai model as
+# nothing it is sure of.
+
+THAI_REREAD = True  # off: a Latin-looking Thai word is not read again
+THAI_REREAD_MAX_CONFIDENCE = 90.0  # a Latin token any surer than this is left alone
+THAI_REREAD_MIN_CONFIDENCE = 80.0  # the Thai-only read (mean over its pieces) must be at least this sure
+THAI_REREAD_MIN_LETTERS = 2  # of the Thai result: a lone letter is not a word
+THAI_REREAD_MAX_LATIN = 3  # letters of the Latin token
+THAI_REREAD_MAX_GAP = 1.3  # of the token's height, between it and the number
+THAI_REREAD_PAD = 8  # px around the token when re-reading
+MAX_THAI_REREADS = 30  # per band: each is one more Tesseract call
+
+
+def _is_digit_token(text: str) -> bool:
+    return bool(text) and any(char.isdigit() for char in text) and all(
+        char.isdigit() or char in ".,/:-" for char in text
+    )
+
+
+def _reread_thai_words(band, data: dict, tesseract) -> list[tuple[str, str, str, bool]]:
+    """Short Latin tokens that are really a Thai word, as ``(token, neighbour,
+    Thai word, neighbour_follows)`` (see the section comment)."""
+    if not all(name in data for name in ("left", "top", "width", "height", "conf", "text")):
+        return []
+    lines: dict[tuple, list[tuple[int, int, int, int, float, str]]] = {}
+    for index, text in enumerate(data["text"]):
+        word = (text or "").strip()
+        if not word:
+            continue
+        try:
+            confidence = float(data["conf"][index])
+            left, top = int(data["left"][index]), int(data["top"][index])
+            width, height = int(data["width"][index]), int(data["height"][index])
+            key = (data["block_num"][index], data["par_num"][index], data["line_num"][index])
+        except (KeyError, ValueError, TypeError, IndexError):
+            continue
+        lines.setdefault(key, []).append((left, top, left + width, top + height, confidence, word))
+
+    found: list[tuple[str, str, str, bool]] = []
+    attempts = 0
+    for pieces in lines.values():
+        pieces.sort(key=lambda piece: piece[0])
+        for at, (left, top, right, bottom, confidence, word) in enumerate(pieces):
+            if not (word.isascii() and word.isalpha() and 2 <= len(word) <= THAI_REREAD_MAX_LATIN):
+                continue
+            if word.isupper() or confidence >= THAI_REREAD_MAX_CONFIDENCE:
+                continue
+            reach = THAI_REREAD_MAX_GAP * (bottom - top)
+            before = pieces[at - 1] if at > 0 else None
+            after = pieces[at + 1] if at + 1 < len(pieces) else None
+            if before is not None and _is_digit_token(before[5]) and left - before[2] <= reach:
+                neighbour, follows = before[5], False
+            elif (
+                before is not None and _is_thai_piece(before[5]) and left - before[2] <= reach
+                and after is not None and _is_digit_token(after[5]) and after[0] - right <= reach
+            ):
+                neighbour, follows = after[5], True
+            else:
+                continue
+            attempts += 1
+            if attempts > MAX_THAI_REREADS:
+                return found
+            width, height = band.size
+            crop = band.crop((
+                max(0, left - THAI_REREAD_PAD), max(0, top - THAI_REREAD_PAD),
+                min(width, right + THAI_REREAD_PAD), min(height, bottom + THAI_REREAD_PAD),
+            ))
+            reread = tesseract.image_to_data(
+                crop, lang="tha", config="--psm 8", output_type=tesseract.Output.DICT
+            )
+            # Tesseract reports Thai in pieces (letters, marks): one word, many pieces
+            pieces_read = [
+                (str(text).strip(), float(conf))
+                for text, conf in zip(reread.get("text", []), reread.get("conf", []))
+                if str(text).strip()
+            ]
+            if not pieces_read:
+                continue
+            thai = "".join(piece[0] for piece in pieces_read)
+            thai_confidence = sum(piece[1] for piece in pieces_read) / len(pieces_read)
+            if (
+                thai_confidence >= THAI_REREAD_MIN_CONFIDENCE
+                and _is_thai_piece(thai)
+                and len(_base_letters(thai)) >= THAI_REREAD_MIN_LETTERS
+            ):
+                found.append((word, neighbour, thai, follows))
+    return found
+
+
+# --------------------------------------------------------------------------
+# Text that Tesseract skipped
+# --------------------------------------------------------------------------
+#
+# Tesseract's layout analysis sometimes drops text it has plainly seen: it takes
+# a bordered table, or a column of one, for a picture (on a clean 300 dpi scan a
+# six-row table came back as one line of noise, and in another table every value
+# of the right-hand column went missing), or it splits a line in two and leaves
+# the middle of it unread ("ครบ" ... "8 วัน" with the years between them gone).
+# Erasing the rules on every page is no cure - a ruled table Tesseract *does*
+# read comes out as "a | b | c" rows, and with its rules gone the columns fell
+# apart into separate blocks. So the page's own read is checked instead: runs of
+# ink the size of a line of text, rules left out, that no word covers. Each run
+# is read again on its own, rules erased, and its text kept only if the re-read
+# is sure and has a word or a number in it (a logo or a signature never does); it
+# is then put on the line it sits beside, or on a line of its own.
+
+RESCUE_UNREAD = True  # off: no run of unread text is read again
+RESCUE_SHRINK = 3  # rules are searched for on a page this many times smaller
+RESCUE_CELL = 8  # px per cell when measuring how much of the ink was read
+RESCUE_TEXT_DENSITY = (0.03, 0.6)  # ink share of a cell that looks like text, not blank or solid
+RESCUE_WORD_CONFIDENCE = 60.0  # a word less sure than this does not count as reading its cell
+RESCUE_SHORT_CONFIDENCE = 80.0  # ... nor does a Latin token of one or two characters unless this sure
+RESCUE_LINE_CONFIDENCE = 60.0  # a run inside the box of a line this sure is part of that line
+RESCUE_JOIN = (3, 1)  # cells (across, down) by which unread cells still belong to one run
+RESCUE_MIN_RUN = 12  # cells: fewer is a speck or a stroke, not a word
+RESCUE_MIN_HEIGHT = 3  # cells: a thinner run is a rule's remains, not a line of text
+RESCUE_MIN_ASPECT = 2.0  # width over height: a word or two of text is wide, a logo or a stamp is squarer
+RESCUE_MAX_RUN_HEIGHT = 14  # cells: a taller run is a picture, not a line or two of text
+RESCUE_ROW_CONFIDENCE = 75.0  # a re-read row less sure than this is dropped
+RESCUE_THAI_FIGURE_LETTERS = 5  # Thai letters a token needs to carry digits ('ธั่อว3' is a scrap, 'ครบ3ปี' is text)
+RESCUE_LATIN_WORD_LETTERS = 4  # a Latin word shorter than this is as likely a logo's scrap (IVI) as a word (ABS)
+RESCUE_PAD = 6  # px around a run when re-reading it
+RESCUE_INK = (0.09, 0.62)  # share of ink in a run's box: more is a bar or a photograph, less a smudge; text has about a third
+RESCUE_REPLACE_SHARE = 0.6  # of a shaky line's width that a run must cover for the re-read to replace the line
+RESCUE_COLUMN_GAP = 1.5  # of the row height: a wider gap is a column break
+MAX_RUN_RESCUES = 16  # per band: each is one more Tesseract call
+RESCUE_MAX_MISSES = 6  # re-reads in a row that gave nothing, after which a band is given up on
+
+
+def _reads_its_cell(text: str, confidence: float) -> bool:
+    """Whether a word of *data* counts as having read the ink under it.
+
+    Tesseract covers a stretch it cannot read with scraps - ``W``, ``av``, ``PR`` at
+    41 to 78 - so a Latin token of one or two characters has to be sure to count;
+    anything else has to reach ``RESCUE_WORD_CONFIDENCE``.
+    """
+    if text.isascii() and not any(char.isdigit() for char in text) and len(text) <= 2:
+        return confidence >= RESCUE_SHORT_CONFIDENCE
+    return confidence >= RESCUE_WORD_CONFIDENCE
+
+
+def _unread_runs(gray, data: dict) -> list[tuple[int, int, int, int]]:
+    """Runs of text-like ink in *gray* that no word of *data* covers, as boxes
+    ``(left, top, right, bottom)``, text-sized and no more than a couple of lines high.
+
+    The ink counted is that of cells (``RESCUE_CELL`` px square) whose density is
+    the density of text, rules left out; a cell is read if a word of at least
+    ``RESCUE_WORD_CONFIDENCE`` overlaps it. Unread cells that lie close together
+    (``RESCUE_JOIN``) make one run.
+    """
+    from PIL import Image, ImageChops
+
+    dark = gray.point(lambda v: 255 if v < RULE_DARK_LEVEL else 0)
+    rules = _rule_mask(gray, RESCUE_SHRINK).resize(gray.size, Image.NEAREST)
+    dark = ImageChops.subtract(dark, rules)
+    cols, rows = max(1, gray.size[0] // RESCUE_CELL), max(1, gray.size[1] // RESCUE_CELL)
+    density = _pixel_values(dark.resize((cols, rows), Image.BOX))
+    low, high = (255 * share for share in RESCUE_TEXT_DENSITY)
+    unread = {index for index, value in enumerate(density) if low <= value <= high}
+    for index, word in enumerate(data.get("text", [])):
+        if not unread:
+            return []
+        if not (word or "").strip():
+            continue
+        try:
+            if not _reads_its_cell(word.strip(), float(data["conf"][index])):
+                continue
+            x0, y0 = int(data["left"][index]), int(data["top"][index])
+            x1, y1 = x0 + int(data["width"][index]), y0 + int(data["height"][index])
+        except (KeyError, ValueError, TypeError, IndexError):
+            continue
+        for cy in range(max(0, y0 // RESCUE_CELL), min(rows, y1 // RESCUE_CELL + 1)):
+            for cx in range(max(0, x0 // RESCUE_CELL), min(cols, x1 // RESCUE_CELL + 1)):
+                unread.discard(cy * cols + cx)
+    runs: list[tuple[int, int, int, int]] = []
+    seen: set[int] = set()
+    join_x, join_y = RESCUE_JOIN
+    for start in sorted(unread):
+        if start in seen:
+            continue
+        stack, members = [start], 0
+        seen.add(start)
+        x0 = x1 = start % cols
+        y0 = y1 = start // cols
+        while stack:
+            at = stack.pop()
+            members += 1
+            x, y = at % cols, at // cols
+            x0, x1, y0, y1 = min(x0, x), max(x1, x), min(y0, y), max(y1, y)
+            for ny in range(max(0, y - join_y), min(rows, y + join_y + 1)):
+                for nx in range(max(0, x - join_x), min(cols, x + join_x + 1)):
+                    neighbour = ny * cols + nx
+                    if neighbour in unread and neighbour not in seen:
+                        seen.add(neighbour)
+                        stack.append(neighbour)
+        rows_high, columns_wide = y1 - y0 + 1, x1 - x0 + 1
+        if (
+            members >= RESCUE_MIN_RUN
+            and RESCUE_MIN_HEIGHT <= rows_high <= RESCUE_MAX_RUN_HEIGHT
+            and columns_wide >= RESCUE_MIN_ASPECT * rows_high
+        ):
+            runs.append((x0 * RESCUE_CELL, y0 * RESCUE_CELL, (x1 + 1) * RESCUE_CELL, (y1 + 1) * RESCUE_CELL))
+    return runs
+
+
+def _join_row(pieces: list[tuple[str, int, int, int]]) -> str:
+    """One row's words ``(text, left, width, height)``, joined as posters are
+    (:func:`_join_pieces`), a wide gap (a column break) as three spaces."""
+    pieces = sorted(pieces, key=lambda piece: piece[1])
+    groups: list[list[tuple[str, int, int, int]]] = [[pieces[0]]]
+    for previous, piece in zip(pieces, pieces[1:]):
+        if piece[1] - (previous[1] + previous[2]) > RESCUE_COLUMN_GAP * max(previous[3], piece[3]):
+            groups.append([])
+        groups[-1].append(piece)
+    return "   ".join(_join_pieces(group) for group in groups)
+
+
+_ASCII_NUMBER = re.compile(r"^[0-9][0-9.,/:-]*$")
+_NUMBER_THEN_THAI = re.compile(r"^([0-9][0-9.,/:-]*)([ก-๛]+)$")
+_EDGE_PUNCTUATION = ".,:;()\"'"
+_LEADING_VOWELS = frozenset(chr(code) for code in range(0x0E40, 0x0E45))
+
+
+def _is_plausible_thai_word(token: str) -> bool:
+    """Whether *token*, all Thai, could be spelt: it does not start with a
+    combining mark, does not end with a mark that needs a letter after it (mai
+    han-akat) or with a vowel that is written before its letter."""
+    if token[0] in _THAI_MARKS or token[-1] in _LEADING_VOWELS or token[-1] == chr(0x0E31):
+        return False
+    return True
+
+
+def _has_thai(token: str) -> bool:
+    return any(0x0E01 <= ord(char) <= 0x0E5B for char in token)
+
+
+_STRAY_SYMBOLS = frozenset("[]{}|=<>~^*_")
+
+
+def _is_plausible_thai_token(token: str) -> bool:
+    """A token with Thai letters in it that can be a Thai word: no stray symbol
+    inside it, and spelt in a way Thai can be (see :func:`_is_plausible_thai_word`)."""
+    core = token.strip(_EDGE_PUNCTUATION)
+    if not core or any(char in _STRAY_SYMBOLS for char in core):
+        return False
+    thai = "".join(char for char in core if 0x0E01 <= ord(char) <= 0x0E5B)
+    return _is_plausible_thai_word(thai) if thai == core else core[0] not in _THAI_MARKS
+
+
+def _is_real_row(tokens: list[str]) -> bool:
+    """Whether a re-read row has something a reader could use: a word (three or more
+    letters of one script, four for Latin, and nothing else in the token but
+    punctuation at its edges; a Thai word must be spelt in a way Thai can be), an
+    ASCII number (``1.5``, ``01-10-2569``) or a Latin code (``INT-QP-PR-007``). Two
+    Thai numerals, a lone capital, a Thai word with a digit stuck to it ("ธั่อว3")
+    or one with a bracket in it are what a logo or a stamp reads as."""
+    for token in tokens:  # one unspellable Thai token spoils the row
+        if _has_thai(token) and not _is_plausible_thai_token(token):
+            return False
+    for token in tokens:
+        if _ASCII_NUMBER.match(token):
+            return True
+        word = token.strip(_EDGE_PUNCTUATION)
+        stuck = _NUMBER_THEN_THAI.match(word)  # "1.5เท่า", "30วัน": the join left no space
+        if stuck and len(_base_letters(stuck.group(2))) >= 2 and _is_plausible_thai_word(stuck.group(2)):
+            return True
+        letters = _base_letters(word)
+        if len(letters) < LOGO_NOISE_WORD_LETTERS or not _is_word_token(word):
+            continue
+        has_digit = any(char.isdigit() for char in word)
+        latin = all(char.isascii() for char in letters)
+        if has_digit:
+            # a Latin code such as INT-QP-PR-007; or a Thai phrase with figures stuck in it
+            # ("ครบ3ปีแต่ไม่เกิน6ปี") - long enough that it is not a scrap with a digit on it
+            if latin or len(letters) >= RESCUE_THAI_FIGURE_LETTERS:
+                return True
+        elif latin:
+            if len(letters) >= RESCUE_LATIN_WORD_LETTERS and word.isalpha():
+                return True
+        elif all(0x0E01 <= ord(char) <= 0x0E5B for char in word) and _is_plausible_thai_word(word):
+            return True
+    return False
+
+
+def _reread_run(gray, run: tuple[int, int, int, int], language: str, tesseract) -> list[tuple[str, float]]:
+    """The rows of *run* read as a block with rules erased: ``(text, mean
+    confidence)`` for the rows that are sure and have a word or a number."""
+    width, height = gray.size
+    left, top, right, bottom = run
+    crop = _erase_rules(gray.crop((
+        max(0, left - RESCUE_PAD), max(0, top - RESCUE_PAD),
+        min(width, right + RESCUE_PAD), min(height, bottom + RESCUE_PAD),
+    )))
+    data = tesseract.image_to_data(
+        crop, lang=language, config="--psm 6", output_type=tesseract.Output.DICT
+    )
+    rows: dict[tuple, list] = {}
+    for index, text in enumerate(data.get("text", [])):
+        word = (text or "").strip()
+        if not word:
+            continue
+        try:
+            confidence = float(data["conf"][index])
+            piece = (word, int(data["left"][index]), int(data["width"][index]), int(data["height"][index]))
+            at = (data["block_num"][index], data["par_num"][index], data["line_num"][index])
+            word_top = int(data["top"][index])
+        except (KeyError, ValueError, TypeError, IndexError):
+            continue
+        entry = rows.setdefault(at, [[], [], word_top])
+        entry[0].append(piece)
+        if confidence >= 0:
+            entry[1].append(confidence)
+        entry[2] = min(entry[2], word_top)
+    result = []
+    for pieces, confidences, _row_top in sorted(rows.values(), key=lambda entry: entry[2]):
+        mean = sum(confidences) / len(confidences) if confidences else 0.0
+        row = _join_row(pieces)
+        tokens = row.split()
+        if mean >= RESCUE_ROW_CONFIDENCE and _is_real_row(tokens):
+            result.append((row, mean))
+    return result
+
+
+def _run_ink(gray, run: tuple[int, int, int, int]) -> float:
+    """Share of the pixels of *run* that are ink."""
+    crop = gray.crop(run)
+    histogram = crop.histogram()
+    return sum(histogram[:RULE_DARK_LEVEL]) / max(1, sum(histogram))
+
+
+def _rescue_unread_text(band, data: dict, language: str, tesseract) -> list[tuple[tuple[int, int, int, int], list[tuple[str, float]]]]:
+    """``[(run, rows)]`` for the unread runs of text of *band* (the image the
+    read in *data* was made on) whose re-read is good."""
+    gray = band.convert("L")
+    good = [line for line in _line_boxes(data) if line.confidence >= RESCUE_LINE_CONFIDENCE]
+    rescued = []
+    misses = 0
+    reads = 0
+    for run in _unread_runs(gray, data):
+        if reads >= MAX_RUN_RESCUES or misses >= RESCUE_MAX_MISSES:
+            break
+        centre_x, centre_y = (run[0] + run[2]) / 2, (run[1] + run[3]) / 2
+        if any(line.left <= centre_x <= line.right and line.top <= centre_y <= line.bottom for line in good):
+            continue  # a scrap inside a line that was read: the line has it already
+        if not RESCUE_INK[0] <= _run_ink(gray, run) <= RESCUE_INK[1]:
+            continue  # measured on a tour brochure: two thirds of all re-reads, none of the text
+        reads += 1
+        rows = _reread_run(gray, run, language, tesseract)
+        if rows:
+            rescued.append((run, rows))
+            misses = 0
+        else:
+            misses += 1
+    return rescued
+
+
+def _splice_rescued(
+    text: str, data: dict, rescued: list[tuple[tuple[int, int, int, int], list[tuple[str, float]]]],
+    means: dict[str, float],
+) -> str:
+    """*text* with each re-read run put where it belongs.
+
+    A run goes at the end of the sure line it sits beside (a value on the row of
+    its label); if no such line was read, onto a row already made from a run on the
+    same level, or a new line after the last line read above it. Lines the first
+    read made inside the run, too shaky to count, are replaced.
+    """
+    lines = text.split("\n")
+    boxes = _line_boxes(data)
+    made: list[tuple[int, int, str, int]] = []  # (top, bottom, key, left) of rows made from runs
+
+    def find(key: str) -> int | None:
+        for index, existing in enumerate(lines):
+            if existing.strip() and _normalized(existing) == key:
+                return index
+        return None
+
+    for run, rows in sorted(rescued, key=lambda item: (item[0][1], item[0][0])):
+        left, top, right, bottom = run
+        height = bottom - top
+        beside = None
+        for line in boxes:
+            overlap = min(bottom, line.bottom) - max(top, line.top)
+            if overlap >= 0.5 * min(height, line.height) and line.confidence >= RESCUE_WORD_CONFIDENCE and line.right <= left + RESCUE_PAD:
+                if beside is None or line.right > beside.right:
+                    beside = line
+            elif (
+                line.confidence < RESCUE_WORD_CONFIDENCE
+                and top - RESCUE_PAD <= (line.top + line.bottom) / 2 <= bottom + RESCUE_PAD
+                and min(right, line.right) - max(left, line.left) >= RESCUE_REPLACE_SHARE * line.width
+            ):  # a shaky line the run covers, not a long one it merely touches
+                shaky = find(_normalized(line.text))
+                if shaky is not None:
+                    del lines[shaky]
+        previous: str | None = None
+        for row_index, (row, confidence) in enumerate(rows):
+            target = None
+            first = False  # the run lies left of the row it joins: it goes in front
+            if row_index == 0:
+                if beside is not None:
+                    target = find(_normalized(beside.text))
+                if target is None:
+                    for made_top, made_bottom, made_key, made_left in made:
+                        if min(bottom, made_bottom) - max(top, made_top) >= 0.5 * min(height, made_bottom - made_top):
+                            target = find(made_key)
+                            first = left < made_left
+                            break
+            if target is not None:
+                old = lines[target]
+                lines[target] = f"{row}   {old}" if first else f"{old}   {row}"
+                new_key, old_key = _normalized(lines[target]), _normalized(old)
+                means[new_key] = min(means.get(old_key, confidence), confidence)
+                for index, entry in enumerate(made):
+                    if entry[2] == old_key:
+                        made[index] = (entry[0], max(entry[1], bottom), new_key, min(entry[3], left))
+                previous = new_key
+                continue
+            if previous is not None and find(previous) is not None:
+                at = find(previous) + 1
+            else:
+                anchors = [
+                    (line.bottom, _normalized(line.text)) for line in boxes
+                    if line.bottom <= top + RESCUE_PAD and line.confidence >= RESCUE_WORD_CONFIDENCE
+                ]
+                anchors += [(made_bottom, made_key) for _top, made_bottom, made_key, _left in made if made_bottom <= top + RESCUE_PAD]
+                at = 0
+                if anchors:
+                    found = find(max(anchors, key=lambda anchor: anchor[0])[1])
+                    at = len(lines) if found is None else found + 1
+            lines[at:at] = ["", row, ""]
+            means[_normalized(row)] = confidence
+            made.append((top, bottom, _normalized(row), left))
+            previous = _normalized(row)
+    return "\n".join(lines)
+
+
 def recognize_region(image, language: str) -> str:
     """OCR of a single, already-isolated crop (a table cell) - no panel/gutter
     splitting or line-confidence filtering, since a cell crop is already a
@@ -910,7 +1456,7 @@ def recognize(image_path: str | Path, language: str) -> str:
 
     pieces: list[str] = []
     for band in bands:
-        band = prepare_for_ocr(band)
+        band = prepare_for_ocr(band, limit_clipping=True)
         text = plain(band)
         try:
             data = pytesseract.image_to_data(
@@ -937,6 +1483,21 @@ def recognize(image_path: str | Path, language: str) -> str:
                         raise
                     runs = []
                 text = _apply_latin_runs(text, runs, junk, means)
+            if THAI_REREAD and "tha" in language.split("+"):
+                try:
+                    words = _reread_thai_words(band, data, pytesseract)
+                except Exception as exc:
+                    if _is_missing_language(exc):
+                        raise
+                    words = []
+                text = _apply_latin_runs(text, words, junk, means)
+            try:
+                rescued = _rescue_unread_text(band, data, language, pytesseract) if RESCUE_UNREAD else []
+                if rescued:
+                    text = _splice_rescued(text, data, rescued, means)
+            except Exception as exc:
+                if _is_missing_language(exc):
+                    raise
             junk |= _logo_noise_keys(text, means)
             text = _without_junk(text, junk)
             text = _mark_uncertain(text, means)

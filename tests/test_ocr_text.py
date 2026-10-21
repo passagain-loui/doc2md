@@ -282,8 +282,8 @@ def test_light_grey_strokes_are_not_whitened_because_they_are_not_coloured():
     assert prepared.getpixel((60, 30)) < 235
 
 
-def test_small_pages_are_not_median_filtered():
-    """A median filter erases thin strokes of small text."""
+def test_small_pages_are_not_smoothed():
+    """Smoothing erases thin strokes of small text."""
     image = Image.new("RGB", (800, 300), "white")
     ImageDraw.Draw(image).line((10, 150, 790, 150), fill=(0, 0, 0), width=1)
 

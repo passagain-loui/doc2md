@@ -1,5 +1,64 @@
 # History
 
+## [1.5.6] - 2026-10-21 - Plain Tesseract as the floor
+
+The case that started this release was a clean 300 dpi scan of a 29-page Thai HR
+manual, a new confidential sample. Plain `pytesseract` read its table of contents
+and a bordered severance table in full. doc2md read neither. That made plain
+Tesseract the floor for this kind of page, and anything below it a loss inside
+doc2md rather than a limit of the engine. The work was to find each place where
+the pipeline handed back less text than Tesseract had read, one stage at a time.
+
+The first was the contrast stretch. Before OCR, the page was autocontrasted with a
+1% cutoff at each end, a common move for faded scans. On a sparse page, the table
+of contents has only 0.8% ink, so the 1% clip reached past the ink and into the
+paper. The dark point landed on paper, and the strokes thickened into misreads. The
+fix stretches only as far as the ink, and only when the 1% point would fall on
+paper. Applied to every page, the same stretch damaged pages that were fine, with
+"TOPSERV" and "ของ" misread, which is why the rule is as narrow as it is.
+
+The second was the table. Tesseract's layout analysis took some ruled tables for
+pictures and skipped their rows, so the right-hand value column went missing with
+them. The rescue looks for bands of ink that no read word covers and that have the
+ink share of text. Each band is re-read with the ruling lines taken out, and the
+result is placed back by its vertical position. The first version was wrong in two
+ways. It spliced rescued text at the top of a page, and it let junk lines into the
+guideline sample. Splicing by position, and requiring a rescued row to contain a
+real word, a number or a code, fixed both. A rescued row can still replace a shaky
+line only when it covers most of that line's width, so the rescue cannot push out
+text that was already right.
+
+The third was "วัน". Next to a number, it came out as the Latin "Tu" or "Iu". This
+is the mirror of the 1.5.4 Latin-run re-read: a short lowercase Latin token beside
+a number is re-read as Thai only, and accepted only when a Thai word comes back at
+confidence 80 or more. Uppercase codes such as QM and PM are left alone, because
+those really are Latin.
+
+Each factor was then measured on its own, on all 9 samples, and kept only if it
+made no line worse. That rule came from the first combined run. Its summary looked
+better, with more HR manual phrases read and no REGRESSED on any sample, but the
+line-by-line diffs showed approved lines that had got worse. A total hides that,
+which is why every changed line is compared, not only the count. The same ablation
+dropped a fourth idea, an edge-shadow trim for the column-gutter finder. It changed
+band splitting on an approved brochure and moved a block of text to the top of a
+page.
+
+On the HR manual, 22 of 27 expected phrases are now read, against 11 before. Its
+table of contents, severance table and overtime rates come through. Three things
+are still missing: the cover's large display type and address line, one section
+heading, and one vacation line, which the median filter swallows. The filter cannot
+come out, because removing it cost QP 7 three to seven phrases. Across the eight
+approved samples none regressed. QP 7 still finds all 24 of its phrases and gains
+header-table text it never read. EU2043 gains a price table and form text, and
+camry gains "4 ล้อ" and "4.2 นิ้ว". Fortuner, mu-X, QMEL and the quote are
+unchanged. The guideline sample changed, and that change is waiting for the user's
+check. Time goes up by 5 to 15%, most of it on the form-heavy EU2043.
+
+The rescue has a cost the samples show. A rescued line on a poor scan can be
+garbled but real, and camry and EU2043 each gained a few lines of that kind. Those
+are recorded as known limits. The HR manual and the changed references are waiting
+for approval, as set out in HANDOFF.md.
+
 ## [1.5.5] - 2026-10-19 - Symbols, labels, and what the old files kept
 
 Four things were lost between the file and the Markdown, and each was found by

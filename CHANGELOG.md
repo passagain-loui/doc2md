@@ -1,5 +1,63 @@
 # Changelog
 
+## [1.5.6] (2026-10-21) - SCANS KEEP THE TEXT THAT PLAIN TESSERACT READS
+
+### Fixed
+
+- **Contrast stretch limited to the ink on scans.** `prepare_for_ocr` in
+  `doc2md/core/ocr_text.py` clipped 1% of pixels at each end before OCR. On a
+  sparse page, such as a table of contents with 0.8% ink, that clipped past the
+  ink, so the dark point landed on paper and strokes thickened into misreads. The
+  stretch is now limited to the ink, and used only when the 1% dark point would
+  fall on paper (gray 160 or more). Constants: `AUTOCONTRAST_INK_SHARE = 0.1`,
+  `AUTOCONTRAST_CUTOFF = 1.0`, switch `LIMIT_CONTRAST`. Applied to every page, the
+  unrestricted version damaged other pages ("TOPSERV" and "ของ" were misread),
+  which is why the restriction is part of the fix.
+- **Bordered tables on scans keep their rows.** Tesseract skipped some ruled
+  tables as if they were pictures, so whole rows, including the right-hand value
+  column, vanished. An unread-run rescue now finds line-sized bands of ink that no
+  read word covers and whose ink share looks like text (`RESCUE_INK = (0.09,
+  0.62)`). Each band is re-read with its ruling lines removed (`--psm 6`) and
+  spliced in by vertical position (`_unread_runs`, `_reread_run`,
+  `_splice_rescued`, switch `RESCUE_UNREAD`). A rescued row must contain a real
+  word (3 or more Thai letters, 4 or more Latin), an ASCII number, a Latin code, or
+  a Thai phrase with a number. It replaces an existing line only if it covers at
+  least 60% of that line's width. Capped by `MAX_RUN_RESCUES` and
+  `RESCUE_MAX_MISSES`.
+- **"วัน" read as Latin "Tu" or "Iu".** `_reread_thai_words` (switch
+  `THAI_REREAD`) re-reads a short lowercase Latin token (2 to 3 letters, confidence
+  under 90) next to a number, with Thai only. The re-read is accepted when a Thai
+  word comes back at confidence 80 or more. It mirrors the 1.5.4 Latin-run
+  re-read. Uppercase codes (QM, PM, LED, GR) are never touched.
+
+### Changed
+
+- **Regression check.** All 8 approved samples were re-run with
+  `tools/regress.py`. None regressed, and no previously good line got worse. QP 7
+  still finds all 24 of its phrases and gains header-table text it never read
+  (document number, date, company name). EU2043 gains a price table and form text.
+  camry gains "4 ล้อ" and "4.2 นิ้ว". The guideline sample also changed and is
+  listed for review. Fortuner, mu-X, QMEL and the quote are unchanged.
+- **Measured on a new confidential sample.** A clean 300 dpi, 29-page scanned Thai
+  HR manual (27 expected phrases, not yet approved) went from 11 to 22 phrases
+  read. Its table of contents, severance table and overtime rates now come through.
+- **Time.** QP 7 +6%, the HR manual +5%, EU2043 +12 to 15%, the most rescue reads.
+  Rescue adds up to about 15% on form-heavy scans.
+
+### Added (tests)
+
+- New: `tests/test_ocr_rescue.py` (71 tests) and `tests/test_ocr_thai_reread.py`
+  (40 tests), both on synthetic images only. The OCR test set is 329 passing.
+
+### Known limits
+
+- Cover pages with large display type still split into fragments. The HR manual
+  cover's title and address line, and one section heading, are still missing.
+- One vacation line in the HR manual sample is still lost to the median filter.
+  Removing the filter would recover it but cost QP 7 3 to 7 phrases, so it stays.
+- Rescued text on low-quality scans can be garbled but real: camry and EU2043 each
+  gain a few such lines.
+
 ## [1.5.5] (2026-10-19) - DINGBAT SYMBOLS, SHORT LABELS, LEGACY EMPHASIS AND NOTES
 
 ### Added
