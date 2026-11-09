@@ -13,13 +13,13 @@ the tool does) and CLAUDE.md (the release pipeline rules).
 | Item | Value |
 | --- | --- |
 | Version | 1.5.7 |
-| Last release commit | `f0b8aa5` (v1.5.7; CI green, run 42600615945) |
+| Last release commit | `f0b8aa5` (v1.5.7; CI green, run 42600615945); `251a765` on top records the HANDOFF update |
 | Branch | `main` |
 | Remote | `origin` = https://github.com/passagain-loui/doc2md.git. Everything is committed and pushed (as of 2026-11-09); CI green |
-| Working tree | Clean (besides an unrelated, untracked "Mediplex AI Sandbox" folder - a separate git repo with its own `.git`/`node_modules` that ended up sitting inside this working directory; not part of doc2md, flagged, not touched) |
+| Working tree | Clean. The stray unrelated "Mediplex AI Sandbox" folder (a separate git repo that had ended up sitting inside this working directory, not part of doc2md) has been deleted |
 | Regression samples | `D:\AI\OpenCode\doc2md-samples\`, outside git and confidential (copy privately only). 9 approved references, all from v1.5.7 output (run `20261109-172352`) |
 | Gate | `tools/verify.ps1` passed (EXIT_CODE 0) for 1.5.7 on 2026-11-09 |
-| Installer | **not rebuilt for 1.5.7** - the last build on disk, if any, is from 1.5.6; run `python build.py` before shipping an installer |
+| Installer | built 2026-11-09 from the gated 1.5.7 tree: `dist/doc2md_Setup_v1.5.7.exe` (100 MB), `dist/doc2md.exe` (139 MB), `dist/doc2md/` - git-ignored, rebuild with `python build.py` on another machine |
 | Tesseract | 5.4.0 as of 2026-10-21 (see section 2 step 5 for where it lives); not re-checked this session |
 
 ### What changed in 1.5.7
