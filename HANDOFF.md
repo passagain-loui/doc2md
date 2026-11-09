@@ -1,6 +1,6 @@
-# Handoff - doc2md v1.5.6
+# Handoff - doc2md v1.5.7
 
-Written 2026-10-04, updated 2026-10-21. Read this first, then README.md (what
+Written 2026-10-04, updated 2026-11-09. Read this first, then README.md (what
 the tool does) and CLAUDE.md (the release pipeline rules).
 
 > **CI note (2026-10-19):** release 1.5.4 (`5b55aeb`) failed GitHub CI in
@@ -12,15 +12,76 @@ the tool does) and CLAUDE.md (the release pipeline rules).
 
 | Item | Value |
 | --- | --- |
-| Version | 1.5.6 |
-| Last release commit | `f51a2e5` (v1.5.6; CI green on 3.11-3.13, run 39620872708) |
+| Version | 1.5.7 |
+| Last release commit | `f0b8aa5` (v1.5.7; CI green, run 42600615945) |
 | Branch | `main` |
-| Remote | `origin` = https://github.com/passagain-loui/doc2md.git. Everything is committed and pushed (as of 2026-10-21); CI green on Python 3.11-3.13 |
-| Working tree | Clean. Nothing is in progress |
-| Regression samples | `D:\AI\OpenCode\doc2md-samples\`, outside git and confidential (copy privately only). 9 approved references, all from v1.5.6 output (run `20261021-212030`) |
-| Gate | `tools/verify.ps1` passed (EXIT_CODE 0) for 1.5.6 on 2026-10-21; 2 expected skips (symlink, RapidOCR not installed) - the real-Tesseract test now runs |
-| Installer | built 2026-10-21 from the gated 1.5.6 tree: `dist/doc2md_Setup_v1.5.6.exe` (69 MB), `dist/doc2md.exe` (95 MB), `dist/doc2md/` - git-ignored, rebuild with `python build.py` on another machine |
-| Tesseract | 5.4.0, installed and working on this machine (2026-10-21). Binary: `C:\Program Files\Tesseract-OCR\tesseract.exe`, not on PATH; `find_tesseract()` finds it there. That folder's tessdata has only `eng` and `osd`. The Thai and English data the app uses is `tha.traineddata` and `eng.traineddata` in `%LOCALAPPDATA%\doc2md\tessdata`, put there by OCR Diagnostics → Install OCR. A real Thai test image and scanned PDF converted correctly apart from a lost tone mark (นี้ read as นี) |
+| Remote | `origin` = https://github.com/passagain-loui/doc2md.git. Everything is committed and pushed (as of 2026-11-09); CI green |
+| Working tree | Clean (besides an unrelated, untracked "Mediplex AI Sandbox" folder - a separate git repo with its own `.git`/`node_modules` that ended up sitting inside this working directory; not part of doc2md, flagged, not touched) |
+| Regression samples | `D:\AI\OpenCode\doc2md-samples\`, outside git and confidential (copy privately only). 9 approved references, all from v1.5.7 output (run `20261109-172352`) |
+| Gate | `tools/verify.ps1` passed (EXIT_CODE 0) for 1.5.7 on 2026-11-09 |
+| Installer | **not rebuilt for 1.5.7** - the last build on disk, if any, is from 1.5.6; run `python build.py` before shipping an installer |
+| Tesseract | 5.4.0 as of 2026-10-21 (see section 2 step 5 for where it lives); not re-checked this session |
+
+### What changed in 1.5.7
+
+A detailed bug-hunt review (8 independent passes across the OCR/table/legacy-
+format code - `ocr_text.py`, `pdf_engine.py`, `pdf_text.py`/`review.py`,
+`doc_engine.py`/`ppt_engine.py`, plus a cross-file trace and a cleanup pass),
+each candidate re-verified by hand before fixing. Two confirmed and fixed:
+
+- **A flagged table row (review marker) could lose its duplicate-row
+  protection** - `review.encode()`'s marker breaks `tables.is_table_line()`'s
+  regex, so the cleaner's generic duplicate-line removal (which exists so a
+  genuinely repeated `| 0 | 0 |` row survives) could delete a real, repeated,
+  flagged row. Fixed by making the regex tolerate a trailing marker.
+- **Multi-round mojibake-map learning could forget an already-learned
+  character** - a character resolved in round 1 gets no vote in round 2
+  (expanded away, no longer a "stray"), and the old code returned only the
+  last round's votes, silently dropping it. First fix attempt (sum votes
+  across rounds) made it *worse*: it recounted one real, stable occurrence
+  as three, wrongly pushing a genuinely-unmappable character (there is a
+  test built exactly for this) over the vote-count floor. Caught immediately
+  by the existing suite (6 failures). The correct fix merges with override,
+  not sum: `tests/test_pdf_mojibake_repair.py::test_a_character_resolved_in_an_early_round_is_not_forgotten_later`
+  pins it, and was confirmed to fail against the unmodified code first.
+- New tests: `test_tables.py` (2), `test_pdf_mojibake_repair.py` (1).
+- Regression: Fortuner and camry each changed by one character inside an
+  already-flagged cell (a tie-break side effect, not new damage - both still
+  report the same unmapped-character count as before); re-approved by the
+  user 2026-11-09, run `20261109-172352`. The other 7 samples unchanged.
+
+**Six more plausible defects were found and reported but NOT fixed** - each
+needs its own careful, isolated change (the mojibake fix alone took two
+attempts to get right):
+
+1. `PdfEngine._read_text_layer`'s per-page guard starts inside the
+   `for page in doc:` loop body, so a page that fails to *load* (not just to
+   read text from) escapes it and fails the whole document - contradicting
+   its own "one page failing must not lose the other 199" docstring.
+2. `ocr_text._splice_rescued` finds the shaky line to replace by the first
+   text match anywhere on the page, not by the rescued run's position - a
+   duplicate clean label elsewhere on the page can be deleted instead.
+3. Legacy `.doc` paragraph-mark/run-formatting positions are tracked in
+   Python string-character units, not Word's own UTF-16 code units, so a
+   non-BMP character (an emoji) desyncs every later bold/italic lookup.
+4. `pdf_engine._without_frame_tables` can discard a real small table (an
+   approval form) when a drawn checkbox inside it is itself detected as its
+   own 1-cell table.
+5. A broken progress-pipe send (parent process died) is silently swallowed
+   with no fallback stop condition - an orphaned OCR worker has nothing left
+   enforcing its timeout and can run indefinitely.
+6. `QualityMetrics.ocr_review_lines` is overwritten to count every review
+   marker (including Thai-mark repair-loss, not just OCR uncertainty),
+   contradicting its own docstring.
+
+Also confirmed but not fixed: the review-nav "‹"/"Next ›" buttons
+(`gui/main_window.py`, added 1.5.0) use plain Unicode text instead of the
+project's required `theme.make_icon()` SVG icons - a CLAUDE.md violation.
+
+Also noted outside the review itself: `Image.getdata()` (deprecated,
+removed in Pillow 14) is back - this time in `pdf_engine.py`
+(`_invert_dark_bands`, `_ink_grid`), via code added after `ocr_text.py`'s own
+1.5.4 fix for the same deprecation, in a file that fix never touched.
 
 ### What changed in 1.5.6
 
