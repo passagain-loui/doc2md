@@ -11,7 +11,7 @@ import re
 
 import pytest
 
-from doc2md.core import cleaner
+from doc2md.core import cleaner, review
 from doc2md.core.tables import (
     display_width,
     escape_cell,
@@ -183,6 +183,28 @@ def test_sanitizer_keeps_repeated_table_rows():
     document = "# T\n\n| a | b |\n| --- | --- |\n| 0 | 0 |\n| 0 | 0 |\n"
 
     assert cleaner.optimize(document).count("| 0 | 0 |") == 2
+
+
+def test_a_review_flagged_row_is_still_recognized_as_a_table_line():
+    """review.encode() appends its marker after the closing "|" - before
+    cleaner.optimize() runs (converter.py calls review.extract() afterwards,
+    so line numbers match the already-cleaned text). A flagged row must not
+    lose its "this is a table row" status just because of that marker."""
+    flagged = review.encode("| 0 | 0 |", 0)
+
+    assert is_table_line(flagged)
+
+
+def test_sanitizer_keeps_repeated_review_flagged_table_rows():
+    """The exact bug the marker-tolerant regex fixes: two identical flagged
+    table rows must both survive, not have the second one deleted as a
+    duplicate because the marker hid it from is_table_line()."""
+    row = review.encode("| 0 | 0 |", 0)
+    document = f"# T\n\n| a | b |\n| --- | --- |\n{row}\n{row}\n"
+
+    cleaned = cleaner.optimize(document)
+
+    assert cleaned.count("| 0 | 0 |") == 2
 
 
 def test_sanitizer_keeps_braces_inside_a_table_cell():

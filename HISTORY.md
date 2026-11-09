@@ -1,5 +1,106 @@
 # History
 
+## [1.5.7] - 2026-11-09 - A detailed bug hunt, two fixes, several leads for next time
+
+Asked for a detailed bug check. Rather than re-run the existing gate and call
+it done, dispatched eight independent review passes (line-by-line correctness
+across `ocr_text.py`, `pdf_engine.py`, `pdf_text.py`/`review.py`,
+`doc_engine.py`/`ppt_engine.py`; a cross-file trace of the progress-pipe and
+review-flag plumbing added in 1.4.11/1.5.0; reuse/simplification/efficiency;
+altitude and CLAUDE.md conventions) against the OCR/table/legacy-format code,
+then personally re-verified the most severe candidates by reading the exact
+cited lines rather than taking any agent's word for it.
+
+Two were confirmed this way and fixed:
+
+- **A flagged table row could lose its duplicate-row protection.**
+  `review.encode()` appends a confidence marker after a row's closing `|`;
+  `cleaner.optimize()` runs before that marker is stripped (`converter.py`
+  calls `review.extract()` afterwards on purpose, so a flagged line's
+  reported position matches the already-cleaned text), so
+  `tables.is_table_line()`'s `^\s*\|.*\|\s*$` no longer matched a flagged row,
+  and the generic duplicate-line cleanup - which exists specifically because
+  `| 0 | 0 |` twice in a row is real table data, not duplication - could
+  delete a genuinely repeated, flagged row. Fixed by making the regex
+  tolerate a trailing marker. Confirmed first by tracing the exact regex and
+  call order by hand, then pinned with two new tests in `test_tables.py`.
+- **Multi-round mojibake learning could forget a character it had already
+  learned.** `mojibake_votes` loops three times, each round re-expanding
+  every gap with the characters resolved so far - the whole point being that
+  a gap with three strays, unresolvable on its own, becomes resolvable once
+  one of those strays is known from an earlier round. But a character
+  resolved in round 1 is no longer a "stray" once expanded, so it gets no
+  vote in round 2; the code returned only the *last* round's votes, so that
+  character's evidence - sometimes its entire mapping - silently vanished,
+  and repair wrongly counted it as unmapped. The first fix tried (accumulate
+  every round's votes by summing) made this worse, not better: a gap whose
+  resolution had not changed between rounds produces the *same* evidence
+  every time it is reprocessed, and summing recounted one real occurrence as
+  three, pushing a genuinely-unmappable character (there is a test built
+  exactly to have one, voted exactly once, which must never reach the
+  two-vote minimum) past the vote threshold it was supposed to fail. Caught
+  immediately by the existing test suite (6 failures, one of them going the
+  *wrong* direction - 8 unmapped characters recovered correctly before,
+  0 after). The working fix is a merge, not a sum: a round's fresh vote for
+  a character it can still see replaces the stored entry for that character
+  (so re-deriving identical evidence never inflates the count), while a
+  character missing from this round's votes - because it was just resolved
+  and expanded away - keeps whatever an earlier round already settled for
+  it. Pinned with a new test that forces `_LEARN_ROUNDS` down to 2 so the
+  loop ends on a round with nothing left to vote on, which reproduces the
+  original bug against the unmodified code (verified by stashing the fix and
+  re-running that one test before committing).
+
+Six more plausible defects were found and reported but not fixed this round -
+each would need its own careful, isolated change and verification, the same
+way the mojibake fix took two attempts to get right, and "fix the most
+important ones" was read as the two with the clearest mechanism and the
+cleanest, most surgical fix, not all ten:
+
+- A page that fails to *load* (not just to read text from) inside the
+  `for page in doc:` loop in `_read_text_layer` escapes that function's own
+  per-page guard and fails the whole document, contradicting its documented
+  "one page failing must not lose the other 199" guarantee.
+- `_splice_rescued` finds the shaky line a rescued ink-run should replace by
+  the first text match anywhere on the page, not by the rescued run's actual
+  position - a duplicate clean label elsewhere on the page can be deleted
+  instead of the genuinely shaky line.
+- Legacy `.doc` paragraph-mark and run-formatting positions are tracked in
+  Python string-character units; Word's own offsets are UTF-16 code units,
+  so any character outside the Basic Multilingual Plane (an emoji) desyncs
+  every later bold/italic/style lookup for the rest of the document.
+- Frame-table detection can discard a real small table (an approval form)
+  when a drawn checkbox inside it is itself detected as its own 1-cell
+  table, since "contains another detected table" is the frame signal.
+- A broken progress-pipe send (the parent process died) is swallowed with
+  no fallback stop condition, so an orphaned OCR worker has nothing left
+  enforcing its timeout and can keep running indefinitely.
+- `QualityMetrics.ocr_review_lines` is overwritten to count every review
+  marker in the output, including Thai-mark repair-loss flags that never
+  touched OCR, contradicting its own docstring.
+
+One convention violation was also confirmed: the review-navigation "‹" and
+"Next ›" buttons (`gui/main_window.py`, added in 1.5.0) use plain Unicode
+characters where every other icon button in the file goes through
+`theme.make_icon()` - CLAUDE.md requires modern SVG icons throughout. Not
+fixed this round either.
+
+Also noted, outside the code review itself: `verify.ps1`'s pytest step now
+also warns about `Image.getdata()` in `pdf_engine.py` (`_invert_dark_bands`,
+`_ink_grid`) - the same Pillow-14 deprecation `ocr_text.py` was fixed for in
+1.5.4, re-introduced by code added after that fix, in a different file the
+fix never touched. And a second git repository ("Mediplex AI Sandbox",
+unrelated to doc2md, with its own `.git`/`node_modules`) was found sitting as
+an untracked folder inside this working directory - flagged, not touched.
+
+Regression: 7 of 9 approved samples unchanged; Fortuner and camry each
+changed by one character inside an already-flagged, already-partially-
+unmapped cell (a tie between two marks resolved differently once the vote
+count stopped being inflated) - both still report the same "4 character(s)
+could not be recovered" count as before, so this reads as a tie-break
+side effect of the correct fix, not a new defect, but it is a real content
+change and needs the user's review before re-approving those two references.
+
 ## [1.5.6] - 2026-10-21 - Plain Tesseract as the floor
 
 The case that started this release was a clean 300 dpi scan of a 29-page Thai HR

@@ -486,12 +486,29 @@ def _accepted(votes: dict[str, Counter]) -> dict[str, str]:
 
 
 def mojibake_votes(text_layer: str, ocr_text: str) -> dict[str, Counter]:
-    """For each swapped-in character, how often OCR had each mark (or pair) in its place."""
+    """For each swapped-in character, how often OCR had each mark (or pair) in its place.
+
+    Each round re-expands every gap with the *current* ``known`` map, which
+    can resolve a multi-stray gap that an earlier round had to skip - that is
+    the whole point of looping. But a character resolved in round 1 is no
+    longer a "stray" once expanded, so ``_collect_votes`` gives it no vote at
+    all from then on; returning only the last round's votes as-is would lose
+    that character's evidence, and sometimes its entire learned mapping,
+    even though it was genuinely learned.
+
+    The fix is a *merge*, not a sum: a round's votes for a character it can
+    still see replace that character's stored entry (a gap whose resolution
+    has not changed since the last round would otherwise have its one real
+    observation recounted every round, inflating a single occurrence past
+    ``MOJIBAKE_MAP_MIN_VOTES`` on vote count alone); a character missing from
+    this round's votes - because it just became known and was expanded away -
+    keeps whatever entry an earlier round already settled for it.
+    """
     layer, ocr = _clusters(text_layer), _clusters(ocr_text)
     known: dict[str, str] = {}
     votes: dict[str, Counter] = {}
     for _ in range(_LEARN_ROUNDS):
-        votes = _collect_votes(layer, ocr, known)
+        votes = {**votes, **_collect_votes(layer, ocr, known)}
         learned = _accepted(votes)
         if learned == known:
             break

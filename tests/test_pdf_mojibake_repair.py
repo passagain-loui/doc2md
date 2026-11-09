@@ -14,6 +14,7 @@ from __future__ import annotations
 import pymupdf
 import pytest
 
+from doc2md.core import pdf_text
 from doc2md.core.pdf_text import (
     MOJIBAKE_MAP_MIN_AGREEMENT,
     MOJIBAKE_MAP_MIN_VOTES,
@@ -76,6 +77,19 @@ def test_the_map_is_learned_from_aligned_pairs():
 
 def test_one_stray_character_can_stand_for_two_marks():
     assert learn_mojibake_map(LAYER, TRUTH)[UEE_EK] == SARA_UEE_EK
+
+
+def test_a_character_resolved_in_an_early_round_is_not_forgotten_later(monkeypatch):
+    """Once every stray in the page becomes `known`, the next round's
+    _collect_votes has nothing left to vote on and returns {} - replacing
+    (rather than merging into) the running votes on every round would
+    silently forget every already-learned character the moment a later
+    round's fresh pass comes back empty. Forcing _LEARN_ROUNDS to end on
+    such an empty round (2, here) reproduces that without needing a
+    multi-stray gap to engineer the timing by hand."""
+    monkeypatch.setattr(pdf_text, "_LEARN_ROUNDS", 2)
+
+    assert learn_mojibake_map(LAYER, TRUTH) == EXPECTED
 
 
 def test_word_final_marks_are_learned_too():

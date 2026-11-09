@@ -23,6 +23,8 @@ from __future__ import annotations
 import re
 import unicodedata
 
+from doc2md.core.review import REVIEW_CLOSE, REVIEW_OPEN
+
 __all__ = [
     "escape_cell",
     "is_table_line",
@@ -36,7 +38,15 @@ __all__ = [
 _CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 _WHITESPACE_RE = re.compile(r"[^\S\n]+")
 _NEWLINE_RE = re.compile(r"\r\n|\r|\n")
-_TABLE_LINE_RE = re.compile(r"^\s*\|.*\|\s*$")
+# A row review.encode() flagged carries a private-use marker (confidence
+# digits bracketed by REVIEW_OPEN/REVIEW_CLOSE) after the closing "|", added
+# by the engine *before* cleaner.optimize() runs review.extract() to strip
+# it (converter.py calls them in that order so a line's final position
+# matches the already-cleaned text). Without this tolerance a flagged table
+# row no longer matches "ends with |", loses its protection from the
+# generic duplicate-line cleanup below, and a legitimately repeated row
+# (two identical flagged cells) gets silently deleted.
+_TABLE_LINE_RE = re.compile(rf"^\s*\|.*\|\s*(?:{REVIEW_OPEN}\d{{1,3}}{REVIEW_CLOSE})?\s*$")
 
 # Unicode general categories with no advance width. Thai vowel/tone marks are
 # Mn (nonspacing mark); Cf covers ZWJ/ZWNJ and friends.

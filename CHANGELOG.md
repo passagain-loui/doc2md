@@ -1,5 +1,50 @@
 # Changelog
 
+## [1.5.7] (2026-11-09) - A FLAGGED TABLE ROW NO LONGER LOSES ITS DUPLICATE PROTECTION
+
+### Fixed
+
+- **A table row flagged for review (OCR uncertainty, or Thai-mark repair loss)
+  could be silently deleted by the output cleaner's own duplicate-row
+  protection.** `review.encode()` appends its confidence marker after the
+  row's closing `|`, so the line's literal last characters became the
+  marker, not `|` - `tables.is_table_line()`'s `^\s*\|.*\|\s*$` then failed
+  to match, since `cleaner.optimize()` runs before `review.extract()` strips
+  the marker (so a flagged line's reported position matches the
+  already-cleaned text). An unflagged table row is protected from the
+  prose cleanup's consecutive-duplicate-line removal specifically so a
+  legitimately repeated row (`| 0 | 0 |` twice) survives; a flagged one
+  lost that protection and a real, repeated row could vanish. `is_table_line()`
+  now tolerates a trailing marker.
+- **Learning a mojibake character-repair map across multiple rounds could
+  forget a character it had already learned.** Each round re-expands every
+  gap with the characters resolved so far, which is what lets it resolve a
+  gap it had to skip earlier - but a character resolved in round 1 is no
+  longer a "stray" once expanded, so it gets no vote at all from round 2
+  onward. Returning only the last round's votes meant that character's
+  evidence, and sometimes its whole mapping, silently disappeared even
+  though it had genuinely been learned; repair then wrongly counted it as
+  unmapped and could drop it from the page (or push the page past the
+  unmapped-share threshold into a slower full-OCR fallback it didn't need).
+  `mojibake_votes` now merges each round's votes into the running result
+  instead of replacing it, so a character missing from a later round (because
+  it was just resolved and expanded away) keeps the entry an earlier round
+  already settled for it - merged, not summed, so a single real occurrence
+  recomputed identically in a later round is not recounted as new evidence.
+- Found and fixed following a broad bug-hunt review across the OCR, table and
+  legacy-format code (`doc2md/core/ocr_text.py`, `doc2md/engine/pdf_engine.py`,
+  `doc2md/core/pdf_text.py`, `doc2md/core/review.py`, `doc2md/engine/doc_engine.py`,
+  `doc2md/engine/ppt_engine.py`, `doc2md/core/converter.py`); several more
+  plausible defects were found and reported but not yet fixed, see HISTORY.md.
+- Tests: `tests/test_tables.py` (2 new), `tests/test_pdf_mojibake_repair.py`
+  (1 new, reproduced against the un-fixed code first to confirm it actually
+  catches the defect).
+- Regression: 2 of 9 approved samples changed (Fortuner, camry), both an
+  empty table cell gaining one space character - a side effect of the vote
+  fix changing which mark wins a tie on an already-unmapped character (both
+  still report the same "4 character(s) could not be recovered" count); the
+  other 7 are unchanged. Awaiting the user's review before re-approving.
+
 ## [1.5.6] (2026-10-21) - SCANS KEEP THE TEXT THAT PLAIN TESSERACT READS
 
 ### Fixed
